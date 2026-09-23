@@ -1,10 +1,10 @@
 <#
-  clean-windows.ps1 - wipe every compiled Delphi artifact so the next build
+  clean.ps1 - wipe every compiled Delphi artifact so the next build
   can't silently reuse a stale .dcu/.exe and make a real source change look
   like it "didn't take".
 
   Usage:
-    powershell -ExecutionPolicy Bypass -File scripts\clean-windows.ps1
+    powershell -ExecutionPolicy Bypass -File scripts\clean.ps1
 
   Removes:
     - build\bin\*        (compiled .exe/.res/.map and copied runtime resources)

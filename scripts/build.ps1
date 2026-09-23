@@ -15,7 +15,7 @@ param(
     [string]$OutputDir = 'build\bin',
     # Wipes build\bin/build\dcu before compiling, so a stale .dcu can never
     # make a real source change look like it didn't take (see
-    # scripts\clean-windows.ps1). Off by default because it also throws away
+    # scripts\clean.ps1). Off by default because it also throws away
     # dcc64's incremental-compile cache, making every build a full rebuild.
     [switch]$Clean,
     # Prints full usage and exits without touching anything (no BDS lookup,
@@ -41,7 +41,7 @@ OPTIONS
         Default: build\bin (relative to the repo root).
 
     -Clean
-        Runs scripts\clean-windows.ps1 first, wiping build\bin and build\dcu
+        Runs scripts\clean.ps1 first, wiping build\bin and build\dcu
         before compiling. Off by default, because it also discards dcc64's
         incremental-compile cache, turning every build into a full rebuild.
         Use it when a stale .dcu might be masking a real source change.
@@ -61,7 +61,7 @@ WHAT THIS SCRIPT DOES, IN ORDER
        UDAWUpdater.exe (dcc64) for the requested -Config.
     4. Copies VCL style resources (resources\styles\*.vsf) and the app icon
        into -OutputDir.
-    5. Best-effort stamps the in-app help page's Version/Phase/Built banner
+    5. Best-effort stamps the in-app help page's Version/Built banner
        (F:\Projects\Web\EffectualDesigns\about-udaw.dat) if that separate web
        project happens to be checked out on this machine; never fails the
        build if it isn't, or if the edit fails.
@@ -99,7 +99,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 if ($Clean) {
-    & (Join-Path $PSScriptRoot 'clean-windows.ps1')
+    & (Join-Path $PSScriptRoot 'clean.ps1')
 }
 
 # Keep every runtime file (config, logs, cache, scratch) on this drive
@@ -197,7 +197,7 @@ Copy-Item 'udaw-icon-image.png' (Join-Path $OutputDir 'udaw-icon-image.png') -Fo
 # ---- Stamp the in-app help page's version banner ------------------------
 # F:\Projects\Web\EffectualDesigns\about-udaw.dat is the help page the
 # desktop client's Help menu fetches (see UDAW_HELP_URL, src\common\
-# UDAW.Types.pas) - it carries its own "Version / Phase / Built" line near
+# UDAW.Types.pas) - it carries its own "Version / Built" line near
 # the top, inside <!--UDAW_VERSION-->...<!--/UDAW_VERSION--> etc. comment
 # markers, so it always names the exact build it shipped with rather than
 # whatever a human last typed by hand. Best-effort only: a machine that
@@ -207,15 +207,11 @@ try {
     $helpPath = 'F:\Projects\Web\EffectualDesigns\about-udaw.dat'
     if (Test-Path $helpPath) {
         Write-Host "==> Stamping help page version banner"
-        $typesPath = 'src\common\UDAW.Types.pas'
-        $phaseMatch = [regex]::Match((Get-Content -Raw $typesPath), 'UDAW_PHASE\s*=\s*(\d+)')
-        $phase = if ($phaseMatch.Success) { $phaseMatch.Groups[1].Value } else { '?' }
         $versionStr = "1.0.$newBuild"
         $builtStr = Get-Date -Format 'dd/MM/yyyy'
 
         $helpHtml = Get-Content -Raw $helpPath
         $helpHtml = $helpHtml -replace '(?s)(<!--UDAW_VERSION-->).*?(<!--/UDAW_VERSION-->)', ('${1}' + $versionStr + '${2}')
-        $helpHtml = $helpHtml -replace '(?s)(<!--UDAW_PHASE-->).*?(<!--/UDAW_PHASE-->)', ('${1}' + $phase + '${2}')
         $helpHtml = $helpHtml -replace '(?s)(<!--UDAW_BUILDDATE-->).*?(<!--/UDAW_BUILDDATE-->)', ('${1}' + $builtStr + '${2}')
         Set-Content -Path $helpPath -Value $helpHtml -NoNewline
     }

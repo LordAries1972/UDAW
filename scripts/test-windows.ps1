@@ -4,7 +4,7 @@
 #>
 [CmdletBinding()]
 param(
-    # See scripts\clean-windows.ps1 / build.ps1's -Clean.
+    # See scripts\clean.ps1 / build.ps1's -Clean.
     [switch]$Clean
 )
 
@@ -13,7 +13,7 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
 if ($Clean) {
-    & (Join-Path $PSScriptRoot 'clean-windows.ps1')
+    & (Join-Path $PSScriptRoot 'clean.ps1')
 }
 
 # Keep every runtime file (config, logs, cache, test scratch) on this drive

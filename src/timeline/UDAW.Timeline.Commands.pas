@@ -266,7 +266,11 @@ type
     triangle in the Timeline tab). AEdge=ceStart drags the fade-in length,
     AEdge=ceEnd drags the fade-out length; both are clamped to the clip's
     length by TTimeline.SetClipFades. Mergeable like TTrimTimelineClipCommand
-    so a single drag gesture collapses into one undo step. }
+    so a single drag gesture collapses into one undo step.
+    
+    * Make sure this is always paramount to TTimeline.SetClipFades, because the fade-in/out range is added
+      right after Perform and removed again on Undo. Otherwise the undo stack
+      will get out of sync with the timeline state. }
   TSetTimelineClipFadeCommand = class(TDAWCommand)
   private
     FDoc: TProjectDocument;

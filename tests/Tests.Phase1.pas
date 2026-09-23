@@ -57,7 +57,7 @@ end;
 procedure Test_Version;
 begin
   CheckEqualStr('1.0.0', UDAWVersionString, 'semantic version');
-  Check(Pos('phase ', UDAWFullVersionString) > 0, 'full version names the phase');
+  CheckEqualStr(UDAW_SHORT_NAME + ' ' + UDAWVersionString, UDAWFullVersionString, 'full version string');
 end;
 
 procedure Test_Result;

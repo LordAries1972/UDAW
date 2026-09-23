@@ -1847,6 +1847,8 @@ type
     procedure ApplyBaselineTempoOnImport(AClipId: Integer);
     procedure TlTempoUnknownClick;
     function TlTrackTitleRect(ATop, AWidth: Integer): TRect;
+    function TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
+      out AStartSec, AEndSec: Double): Boolean;
     procedure TlNoteEffectAdded(AStripId: Integer; const AEffectName: string);
     function TlEffectColor(const AEffectName: string): TColor;
     function TlClipRegions(AClip: TTimelineClip): TArray<TClipEffectRegion>;
@@ -7437,6 +7439,55 @@ begin
   Result := Rect(FTlView.HeaderWidth, ATop - FTlView.TrackTitleHeight, AWidth, ATop);
 end;
 
+{ Hit-test for the effect names drawn in a track's title band (see
+  pbTimelinePaint): returns the timeline section that effect covers, clamped
+  to its clip exactly as it is painted. Where effects overlap the shortest
+  (most specific) one under the cursor wins. }
+function TfrmMain.TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
+  out AStartSec, AEndSec: Double): Boolean;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  clip: TTimelineClip;
+  ti, j: Integer;
+  sec, regStart, regEnd: Double;
+begin
+  Result := False;
+  ATrackId := -1;
+  AStartSec := 0;
+  AEndSec := 0;
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  sec := FTlView.XToSeconds(AX);
+  for ti := 0 to tl.TrackCount - 1 do
+  begin
+    if not PtInRect(TlTrackTitleRect(TlTrackTop(ti), pbTimeline.Width), Point(AX, AY)) then
+      Continue;
+    trk := tl.GetTrack(ti);
+    for j := 0 to trk.ClipCount - 1 do
+    begin
+      clip := trk.GetClip(j);
+      for var reg in TlClipRegions(clip) do
+      begin
+        regStart := clip.StartSeconds + Min(reg.OffsetSeconds, clip.LengthSeconds);
+        regEnd := clip.EndSeconds;
+        if reg.LengthSeconds > 0 then
+          regEnd := Min(clip.EndSeconds, clip.StartSeconds + reg.OffsetSeconds + reg.LengthSeconds);
+        if (regEnd - regStart <= TIMELINE_MIN_CLIP_SECONDS) or
+           (sec < regStart) or (sec > regEnd) then Continue;
+        if (not Result) or (regEnd - regStart < AEndSec - AStartSec) then
+        begin
+          ATrackId := trk.Id;
+          AStartSec := regStart;
+          AEndSec := regEnd;
+          Result := True;
+        end;
+      end;
+    end;
+    Exit;
+  end;
+end;
+
 function TfrmMain.TlExtraTrackIndex(AId: Integer): Integer;
 var i: Integer;
 begin
@@ -11109,35 +11160,94 @@ begin
   end;
 end;
 
-{ "Undo Effect" (Effects menu of the range right-click menu): for every
-  selected channel, every clip overlapping the marked range gets its pre-effect
-  audio (TTimelineClip.OrigSourceId/OrigDelta, recorded by the first rendered
-  effect) spliced back over exactly that range, so the waveform is restored from
-  the original file - the rest of the clip is untouched and nothing is cut.
-  The effect references for the covered part are then removed (regions are
-  trimmed/dropped; fades reset). The audio swap is one undoable command per
-  clip. Only channels selected for the range are touched, as for applying. }
+{ "Undo Effect" (Effects menu of the range right-click menu; the range can
+  also be picked by clicking an effect's name in the channel title band): for
+  every selected channel, every clip overlapping the marked range gets its
+  pre-effect audio (TTimelineClip.OrigSourceId/OrigDelta, recorded by the first
+  rendered effect) spliced back over exactly that range, so the waveform is
+  restored from the original file - the rest of the clip is untouched and
+  nothing is cut. The effect references for the covered part are then removed
+  (regions are trimmed/dropped; fades reset).
+  Two passes: every affected clip is checked first (original still in the
+  project and on disk, decodable, same format, covers the whole range, not a
+  timing effect such as Warp, clip not locked). If any clip fails the check
+  nothing is changed and a message says why the effect cannot be undone - a
+  half-restored selection is never left behind. The audio swap is one undoable
+  command per clip. }
 procedure TfrmMain.TlUndoEffectInRange;
+const
+  MAX_LISTED = 10;
 var
   tl: TTimeline;
   trk: TTimelineTrack;
-  ids: TArray<Integer>;
-  tid, j, id, count, done, i: Integer;
+  ids, planIds: TArray<Integer>;
+  planAudio: TArray<Boolean>;
+  problems: TArray<string>;
+  tid, j, id, count, done, i, p: Integer;
   c: TTimelineClip;
-  src, origSrc, newSrc: TMediaSource;
+  newSrc: TMediaSource;
   player: TTimelinePlayer;
   dec, odec: TDecodedSource;
   sr, ch, startFrame, frameCount, fxFrom, fxTo, origStart: Integer;
   overlapStartSec, overlapEndSec, a, b, relS, relE: Double;
   outPlanar: TAudioPlanar;
-  dir, fileName: string;
+  dir, fileName, why, msg: string;
   regs, kept: TArray<TClipEffectRegion>;
   r, piece: TClipEffectRegion;
-  touched: Boolean;
+  touched, hasFx, needAudio: Boolean;
+  dlgType: TMsgDlgType;
+
+  { '' when the clip's original audio can be spliced back over
+    [AFromSec, AToSec]; otherwise the reason it cannot. Fills the decoded
+    sources and frame positions the splice needs. }
+  function AudioSlice(AClip: TTimelineClip; AFromSec, AToSec: Double;
+    out ADec, AODec: TDecodedSource;
+    out AStart, ACount, AFrom, ATo, AOrig: Integer): string;
+  var
+    s, o: TMediaSource;
+  begin
+    Result := '';
+    ADec := nil; AODec := nil;
+    AStart := 0; ACount := 0; AFrom := 0; ATo := 0; AOrig := 0;
+    if not AClip.HasOrig then
+      Exit('no copy of the original audio was kept for it');
+    o := tl.SourceById(AClip.OrigSourceId);
+    if o = nil then
+      Exit('its original audio is no longer part of the project');
+    if (o.Path <> '') and not FileExists(o.Path) then
+      Exit('the original file is missing: ' + o.Path);
+    s := tl.SourceById(AClip.SourceId);
+    if s = nil then
+      Exit('its current audio source is missing');
+    if (s.Path <> '') and not FileExists(s.Path) then
+      Exit('the rendered effect file is missing: ' + s.Path);
+    if s.Id = o.Id then Exit;   // already playing the original - nothing to splice
+    ADec := player.GetDecodedSource(s.Id);
+    AODec := player.GetDecodedSource(o.Id);
+    if (ADec = nil) or ADec.Failed then
+      Exit('the rendered effect audio could not be read');
+    if (AODec = nil) or AODec.Failed then
+      Exit('the original audio could not be read');
+    if (ADec.SampleRate <> AODec.SampleRate) or (ADec.Channels <> AODec.Channels) then
+      Exit('the original audio has a different sample rate or channel count');
+    AStart := Max(0, Round(AClip.SourceOffsetSeconds * ADec.SampleRate));
+    ACount := Round(AClip.LengthSeconds * ADec.SampleRate);
+    if AStart + ACount > ADec.FrameCount then ACount := ADec.FrameCount - AStart;
+    AFrom := Max(0, Round((AFromSec - AClip.StartSeconds) * ADec.SampleRate));
+    ATo := Min(ACount, Round((AToSec - AClip.StartSeconds) * ADec.SampleRate));
+    AOrig := Round((AClip.SourceOffsetSeconds + AClip.OrigDelta) * ADec.SampleRate);
+    if (ACount <= 0) or (ATo <= AFrom) then
+      Exit('the selected range lies outside the clip''s audio');
+    if (AOrig + AFrom < 0) or (AOrig + ATo > AODec.FrameCount) then
+      Exit('the original audio does not cover the whole selected range');
+  end;
+
 begin
   if (FProject = nil) or not FTlRangeActive then Exit;
   count := 0;
   done := 0;
+  msg := '';
+  dlgType := mtInformation;
   try
     tl := FProject.Timeline;
     ids := nil;
@@ -11145,49 +11255,110 @@ begin
     begin
       trk := tl.TrackById(tid);
       if trk = nil then Continue;
-      for j := 0 to trk.ClipCount - 1 do ids := ids + [trk.GetClip(j).Id];
+      for j := 0 to trk.ClipCount - 1 do
+      begin
+        c := trk.GetClip(j);
+        if (c.EndSeconds > FTlRangeStartSec) and (c.StartSeconds < FTlRangeEndSec) then
+          ids := ids + [c.Id];
+      end;
     end;
-    if Length(ids) = 0 then Exit;
-    ShowStatusProgress('Undo Effect - starting...', Length(ids) * 100);
+    if Length(ids) = 0 then
+    begin
+      MessageDlg('Nothing to undo: there are no clips in the selected range on the selected channel(s).',
+        mtInformation, [mbOK], 0);
+      Exit;
+    end;
+    ShowStatusProgress('Undo Effect - checking...', Length(ids) * 200);
     player := TTimelinePlayer.Create(tl);
     try
       player.EnsureSourcesLoaded;
+
+      { 1. scan: decide what each clip needs and whether it can be done }
+      planIds := nil;
+      planAudio := nil;
+      problems := nil;
       for id in ids do
       begin
-        UpdateStatusProgress(done * 100, Format('Undo Effect - clip %d/%d', [done + 1, Length(ids)]));
+        UpdateStatusProgress(done * 100, Format('Undo Effect - checking clip %d/%d', [done + 1, Length(ids)]));
         Inc(done);
         c := tl.ClipById(id);
-        if (c = nil) or c.Locked then Continue;
+        if c = nil then Continue;
         overlapStartSec := Max(c.StartSeconds, FTlRangeStartSec);
         overlapEndSec := Min(c.EndSeconds, FTlRangeEndSec);
         if overlapEndSec - overlapStartSec <= TIMELINE_MIN_CLIP_SECONDS then Continue;
-        touched := False;
-
-        { 1. restore the original waveform over the range }
-        src := tl.SourceById(c.SourceId);
-        origSrc := nil;
-        if c.HasOrig then origSrc := tl.SourceById(c.OrigSourceId);
-        if (src <> nil) and (origSrc <> nil) and (origSrc.Id <> src.Id) then
+        relS := overlapStartSec - c.StartSeconds;
+        relE := overlapEndSec - c.StartSeconds;
+        hasFx := False;
+        needAudio := False;
+        why := '';
+        for r in TlClipRegions(c) do
         begin
-          dec := player.GetDecodedSource(src.Id);
-          odec := player.GetDecodedSource(origSrc.Id);
-          if (dec <> nil) and (odec <> nil) and not dec.Failed and not odec.Failed and
-             (dec.SampleRate = odec.SampleRate) and (dec.Channels = odec.Channels) then
+          a := r.OffsetSeconds;
+          if r.LengthSeconds <= 0 then b := c.LengthSeconds else b := a + r.LengthSeconds;
+          if (b <= relS) or (a >= relE) then Continue;
+          hasFx := True;
+          if SameText(r.Name, 'Warp') then
+            why := '"Warp" changes the clip''s timing, so the original cannot be lined up with part of it (use Edit > Undo instead)'
+          else if not (SameText(r.Name, 'Fade In') or SameText(r.Name, 'Fade Out')) then
+            needAudio := True;   // a rendered effect - the audio itself must be restored
+        end;
+        if not hasFx then Continue;
+        if (why = '') and c.Locked then
+          why := 'the clip is locked';
+        if (why = '') and needAudio then
+          why := AudioSlice(c, overlapStartSec, overlapEndSec, dec, odec,
+            startFrame, frameCount, fxFrom, fxTo, origStart);
+        if why <> '' then
+          problems := problems + [Format('Clip %d (%.2f s - %.2f s): %s.',
+            [c.Id, c.StartSeconds, c.EndSeconds, why])]
+        else
+        begin
+          planIds := planIds + [c.Id];
+          planAudio := planAudio + [needAudio];
+        end;
+      end;
+
+      if Length(problems) > 0 then
+      begin
+        msg := 'This effect cannot be undone - nothing has been changed.' + sLineBreak + sLineBreak;
+        for i := 0 to Min(High(problems), MAX_LISTED - 1) do
+          msg := msg + problems[i] + sLineBreak;
+        if Length(problems) > MAX_LISTED then
+          msg := msg + Format('...and %d more.', [Length(problems) - MAX_LISTED]) + sLineBreak;
+        dlgType := mtWarning;
+        for i := High(problems) downto 0 do
+          memTimeline.Lines.Insert(0, 'Undo Effect: ' + problems[i]);
+        memTimeline.Lines.Insert(0, 'Undo Effect: cannot be undone - nothing changed.');
+      end
+      else if Length(planIds) = 0 then
+      begin
+        msg := 'Nothing to undo: no effect was found in the selected range on the selected channel(s).';
+        memTimeline.Lines.Insert(0, 'Undo Effect: no effect found in the selected range.');
+      end
+      else
+      begin
+        { 2. every clip passed - restore them }
+        for p := 0 to High(planIds) do
+        begin
+          UpdateStatusProgress((Length(ids) + p * Length(ids) div Length(planIds)) * 100,
+            Format('Undo Effect - restoring clip %d/%d', [p + 1, Length(planIds)]));
+          c := tl.ClipById(planIds[p]);
+          if c = nil then Continue;
+          overlapStartSec := Max(c.StartSeconds, FTlRangeStartSec);
+          overlapEndSec := Min(c.EndSeconds, FTlRangeEndSec);
+          touched := False;
+
+          { 2a. restore the original waveform over the range }
+          if planAudio[p] then
           begin
-            sr := dec.SampleRate;
-            ch := dec.Channels;
-            startFrame := Max(0, Round(c.SourceOffsetSeconds * sr));
-            frameCount := Round(c.LengthSeconds * sr);
-            if startFrame + frameCount > dec.FrameCount then
-              frameCount := dec.FrameCount - startFrame;
-            fxFrom := Max(0, Round((overlapStartSec - c.StartSeconds) * sr));
-            fxTo := Min(frameCount, Round((overlapEndSec - c.StartSeconds) * sr));
-            origStart := Round((c.SourceOffsetSeconds + c.OrigDelta) * sr);
-            { clamp the spliced slice to what the original file really holds }
-            if origStart + fxFrom < 0 then fxFrom := -origStart;
-            if origStart + fxTo > odec.FrameCount then fxTo := odec.FrameCount - origStart;
-            if (frameCount > 0) and (fxTo > fxFrom) then
+            why := AudioSlice(c, overlapStartSec, overlapEndSec, dec, odec,
+              startFrame, frameCount, fxFrom, fxTo, origStart);
+            if why <> '' then
+              raise Exception.CreateFmt('clip %d: %s', [c.Id, why]);
+            if dec <> nil then   // nil = already on the original source
             begin
+              sr := dec.SampleRate;
+              ch := dec.Channels;
               EnsurePlanar(outPlanar, ch, frameCount);
               for i := 0 to ch - 1 do
               begin
@@ -11204,78 +11375,80 @@ begin
               FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, 0));
               touched := True;
             end;
-          end
-          else
-            memTimeline.Lines.Insert(0, Format('Undo Effect: clip %d - original audio unavailable or format differs.', [c.Id]));
-        end;
+          end;
 
-        { 2. remove the effect references for the covered part }
-        relS := overlapStartSec - c.StartSeconds;
-        relE := overlapEndSec - c.StartSeconds;
-        regs := TlClipRegions(c);
-        kept := nil;
-        for r in regs do
-        begin
-          a := r.OffsetSeconds;
-          if r.LengthSeconds <= 0 then b := c.LengthSeconds else b := a + r.LengthSeconds;
-          if (b <= relS) or (a >= relE) then
+          { 2b. remove the effect references for the covered part }
+          relS := overlapStartSec - c.StartSeconds;
+          relE := overlapEndSec - c.StartSeconds;
+          regs := TlClipRegions(c);
+          kept := nil;
+          for r in regs do
           begin
-            kept := kept + [r];   // not touched by the range
-            Continue;
+            a := r.OffsetSeconds;
+            if r.LengthSeconds <= 0 then b := c.LengthSeconds else b := a + r.LengthSeconds;
+            if (b <= relS) or (a >= relE) then
+            begin
+              kept := kept + [r];   // not touched by the range
+              Continue;
+            end;
+            touched := True;
+            if SameText(r.Name, 'Fade In') and (a >= relS - TIMELINE_MIN_CLIP_SECONDS) then
+              FCmds.Perform(TSetTimelineClipFadeCommand.Create(FProject, c.Id, ceStart, 0));
+            if SameText(r.Name, 'Fade Out') and (b <= relE + TIMELINE_MIN_CLIP_SECONDS) then
+              FCmds.Perform(TSetTimelineClipFadeCommand.Create(FProject, c.Id, ceEnd, 0));
+            if a < relS - TIMELINE_MIN_CLIP_SECONDS then     // part left of the range stays
+            begin
+              piece := r;
+              piece.LengthSeconds := relS - a;
+              kept := kept + [piece];
+            end;
+            if b > relE + TIMELINE_MIN_CLIP_SECONDS then     // part right of the range stays
+            begin
+              piece := r;
+              piece.OffsetSeconds := relE;
+              piece.LengthSeconds := b - relE;
+              kept := kept + [piece];
+            end;
           end;
-          touched := True;
-          if SameText(r.Name, 'Fade In') and (a >= relS - TIMELINE_MIN_CLIP_SECONDS) then
-            FCmds.Perform(TSetTimelineClipFadeCommand.Create(FProject, c.Id, ceStart, 0));
-          if SameText(r.Name, 'Fade Out') and (b <= relE + TIMELINE_MIN_CLIP_SECONDS) then
-            FCmds.Perform(TSetTimelineClipFadeCommand.Create(FProject, c.Id, ceEnd, 0));
-          if a < relS - TIMELINE_MIN_CLIP_SECONDS then     // part left of the range stays
+          if touched then
           begin
-            piece := r;
-            piece.LengthSeconds := relS - a;
-            kept := kept + [piece];
-          end;
-          if b > relE + TIMELINE_MIN_CLIP_SECONDS then     // part right of the range stays
-          begin
-            piece := r;
-            piece.OffsetSeconds := relE;
-            piece.LengthSeconds := b - relE;
-            kept := kept + [piece];
+            c.EffectRegions := kept;
+            if Length(kept) = 0 then
+            begin
+              c.EffectName := '';
+              c.EffectOffsetSeconds := 0;
+              c.EffectLengthSeconds := 0;
+              c.Color := -1;
+              c.HasOrig := False;   // fully back to the original sound
+            end
+            else
+            begin
+              c.EffectName := kept[High(kept)].Name;
+              c.EffectOffsetSeconds := kept[High(kept)].OffsetSeconds;
+              c.EffectLengthSeconds := kept[High(kept)].LengthSeconds;
+              c.Color := kept[High(kept)].Color;
+            end;
+            Inc(count);
           end;
         end;
-        if touched then
-        begin
-          c.EffectRegions := kept;
-          if Length(kept) = 0 then
-          begin
-            c.EffectName := '';
-            c.EffectOffsetSeconds := 0;
-            c.EffectLengthSeconds := 0;
-            c.Color := -1;
-            c.HasOrig := False;   // fully back to the original sound
-          end
-          else
-          begin
-            c.EffectName := kept[High(kept)].Name;
-            c.EffectOffsetSeconds := kept[High(kept)].OffsetSeconds;
-            c.EffectLengthSeconds := kept[High(kept)].LengthSeconds;
-            c.Color := kept[High(kept)].Color;
-          end;
-          Inc(count);
-        end;
+        memTimeline.Lines.Insert(0, Format('Undo Effect: original sound restored on %d clip(s).', [count]));
       end;
     finally
       player.Free;
     end;
-    if count = 0 then
-      memTimeline.Lines.Insert(0, 'Undo Effect: no effect found in the selected range.')
-    else
-      memTimeline.Lines.Insert(0, Format('Undo Effect: original sound restored on %d clip(s).', [count]));
     RefreshTimelineTab;
   except
     on E: Exception do
+    begin
+      msg := 'Undo Effect failed: ' + E.Message;
+      dlgType := mtError;
       memTimeline.Lines.Insert(0, 'Undo Effect FAILED: ' + E.Message);
+      RefreshTimelineTab;
+    end;
   end;
   HideStatusProgress;
+  if msg <> '' then
+    MessageDlg(msg, dlgType, [mbOK], 0);
 end;
 
 { A rendered effect lives in a WAV under the recordings/cache folder. When that
@@ -11953,7 +12126,7 @@ var
   tl: TTimeline;
   c: TTimelineClip;
   trkForIdx: TTimelineTrack;
-  sec: Double;
+  sec, rngStart, rngEnd: Double;
   ti, i: Integer;
   edge: TClipEdge;
   multi: Boolean;
@@ -12030,6 +12203,24 @@ begin
     FTlHeaderResizeStartX := X;
     FTlHeaderResizeStartWidth := FTlView.HeaderWidth;
     pbTimeline.Cursor := crSizeWE;
+    Exit;
+  end;
+
+  { clicking an effect's name in a channel's title band selects exactly the
+    section that effect covers, on that channel only, as the range - so the
+    range menu (Effects > Undo Effect etc.) acts on just that section. A
+    right-click opens that menu straight away (pbTimelineMouseUp). }
+  if ((Button = mbLeft) or (Button = mbRight)) and (X >= FTlView.HeaderWidth) and
+     TlEffectLabelAtPoint(X, Y, ti, rngStart, rngEnd) then
+  begin
+    FTlRulerCtxActive := False;
+    FTlExtraTrackIds := nil;
+    FTlSelectedTrackId := ti;
+    TlSetSingleSelection(-1);
+    FTlRangeActive := True;
+    FTlRangeStartSec := rngStart;
+    FTlRangeEndSec := rngEnd;
+    RefreshTimelineTab;
     Exit;
   end;
 
