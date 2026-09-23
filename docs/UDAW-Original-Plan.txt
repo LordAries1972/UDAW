@@ -1,0 +1,4563 @@
+A few architectural constraints are worth locking down before the plan. ChatGPT is accessed programmatically through OpenAI’s API, 
+so the UI can present “ChatGPT / OpenAI” as a provider while sharing the OpenAI credential infrastructure. 
+
+DeepSeek currently exposes OpenAI-compatible and Anthropic-compatible API interfaces, which makes a provider abstraction particularly useful.
+
+For Suno, the architecture should support it as a first-class provider but only activate cloud generation when an official/authorized API and credentials are available; 
+the DAW should never depend on browser automation or reverse-engineered private endpoints. 
+
+For MP4, remember that MP4 is fundamentally a container format, standardized separately from the codecs it carries, so your exporter should explicitly distinguish MP4 
+container writing from AAC/other audio encoding.
+
+===============================================================================
+PROJECT MASTER PLAN
+CROSS-PLATFORM PROFESSIONAL AI AUDIO DAW
+Delphi 12 / Lazarus / Free Pascal
+===============================================================================
+
+PROJECT OBJECTIVE
+
+PROJECT NAME: Ultimanium Audio Studio (UDAW for short)
+===============================================================================
+
+Develop a professional, cross-platform Digital Audio Workstation built primarily
+from ground-up modules rather than third-party audio frameworks.
+
+TARGET PLATFORMS:
+
+    Windows 64-bit
+        Development:
+            Delphi 12
+
+    macOS
+        Development:
+            Lazarus / Free Pascal
+        Architecture:
+            Native macOS integration
+            ARM64 / Apple Silicon first-class support
+            Intel support where practical
+
+    Linux
+        Development:
+            Lazarus / Free Pascal
+        Architectures:
+            x86-64
+            ARM64 where supported
+
+The product must combine:
+
+    * Professional multitrack audio editing
+    * Tracker/module sequencing
+    * MIDI sequencing
+    * Audio recording
+    * Sample editing
+    * Mixer
+    * Automation
+    * Effects processing
+    * Audio analysis
+    * Audio graph routing
+    * AI assistance
+    * AI music generation
+    * Voice recognition
+    * AI voice command control
+    * AI-assisted mixing/mastering
+    * Themeable professional interface
+    * Cross-platform audio engine
+    * Project recovery
+    * Non-destructive editing
+    * XM/MOD/MPTM import/export
+    * MP3 import/export
+    * MP4 audio import/export
+    * WAV/PCM support
+    * Audio visualization
+    * Professional metering
+
+STRICT DEVELOPMENT RULE
+===============================================================================
+
+NO FUNCTIONAL STUBS.
+
+Nothing may be declared "implemented" unless its actual production functionality
+exists.
+
+Every development phase must end with working, tested functionality.
+
+Forbidden:
+
+    TODO implementations
+    placeholder buttons
+    empty event handlers
+    fake progress displays
+    dummy audio processing
+    hardcoded demonstration responses
+    fake waveform rendering
+    fake AI responses
+    unimplemented menu commands
+    unfinished persistence
+    mocked project loading
+    silent error swallowing
+    runtime-created interface controls where design-time controls are appropriate
+
+Temporary experimental development code may exist ONLY on development branches
+and must never be considered completion of a development phase.
+
+===============================================================================
+1. CORE DEVELOPMENT PHILOSOPHY
+===============================================================================
+
+The system should use a modular architecture consisting of:
+
+    UI Layer
+
+    Application Services Layer
+
+    DAW Command Layer
+
+    Project/Document Layer
+
+    Audio Engine
+
+    Audio Graph Engine
+
+    Mixer Engine
+
+    Sequencer Engine
+
+    Tracker Engine
+
+    Recording Engine
+
+    MIDI Engine
+
+    DSP Engine
+
+    Analysis Engine
+
+    Codec/File Format Layer
+
+    AI Integration Layer
+
+    Voice Recognition Layer
+
+    Persistence Layer
+
+    Platform Abstraction Layer
+
+    Security Layer
+
+    Diagnostics Layer
+
+
+The audio engine must NOT depend directly upon GUI controls.
+
+The GUI must NOT perform audio processing.
+
+Disk operations must NOT execute on the real-time audio thread.
+
+Network/AI operations must NEVER execute on the audio thread.
+
+Audio rendering must continue normally if:
+
+    AI provider disconnects
+    Internet becomes unavailable
+    project autosave starts
+    waveform generation starts
+    file browser is scanning
+    UI temporarily stalls
+
+
+===============================================================================
+2. PROPOSED PROJECT NAME / INTERNAL ARCHITECTURE
+===============================================================================
+
+Example internal architecture name:
+
+    UDAW
+
+or:
+
+    Ultimanium Audio Studio
+
+Suggested project layout:
+
+/src
+    /application
+    /audio
+    /audio/backend
+    /audio/buffer
+    /audio/clock
+    /audio/device
+    /audio/dsp
+    /audio/graph
+    /audio/mixer
+    /audio/render
+    /audio/resampling
+
+    /ai
+    /ai/providers
+    /ai/tools
+    /ai/context
+    /ai/security
+    /ai/voice
+
+    /analysis
+
+    /automation
+
+    /codecs
+    /codecs/mp3
+    /codecs/mp4
+    /codecs/pcm
+    /codecs/module
+
+    /commands
+
+    /common
+
+    /documents
+
+    /formats
+    /formats/xm
+    /formats/mod
+    /formats/mptm
+
+    /midi
+
+    /platform
+    /platform/windows
+    /platform/macos
+    /platform/linux
+
+    /project
+
+    /recording
+
+    /sequencer
+
+    /tracker
+
+    /ui
+    /ui/common
+    /ui/editors
+    /ui/mixer
+    /ui/settings
+    /ui/themes
+    /ui/timeline
+    /ui/tracker
+
+    /visualization
+
+    /voice
+
+/resources
+    /themes
+    /icons
+    /presets
+    /templates
+
+/tests
+    /audio
+    /codecs
+    /formats
+    /integration
+    /project
+    /regression
+
+/scripts
+
+/docs
+
+
+===============================================================================
+3. CORE SHARED INTERFACES
+===============================================================================
+
+A common set of abstractions should isolate Delphi/Lazarus differences.
+
+Examples:
+
+    IAudioDeviceBackend
+    IAudioStream
+    IAudioNode
+    IAudioProcessor
+    IAudioSource
+    IAudioSink
+    IAudioDecoder
+    IAudioEncoder
+    IAudioAnalyzer
+    IProjectSerializer
+    IAIProvider
+    IVoiceRecognizer
+    IMidiBackend
+    IPlatformFileDialog
+    IPlatformClipboard
+    IPlatformSecureStorage
+    IPlatformThreadServices
+
+
+Never duplicate the DAW engine for separate platforms.
+
+Target approximately:
+
+    80-90% shared source
+
+with only platform integration layers being operating-system specific.
+
+
+===============================================================================
+4. AUDIO ENGINE
+===============================================================================
+
+The audio engine is the most important subsystem.
+
+It must be developed BEFORE advanced DAW functionality.
+
+
+CORE AUDIO REPRESENTATION
+-------------------------------------------------------------------------------
+
+Internal processing format:
+
+    IEEE Float32
+
+Optional high-precision processing:
+
+    Float64
+
+Supported sample rates:
+
+    22050
+    32000
+    44100
+    48000
+    88200
+    96000
+    176400
+    192000
+
+Custom sample rates should also be permitted when hardware supports them.
+
+Channel configurations:
+
+    Mono
+    Stereo
+    2.1
+    4.0
+    5.1
+    7.1
+    configurable multichannel routing
+
+
+AUDIO BUFFER OBJECT
+-------------------------------------------------------------------------------
+
+TAudioBuffer
+
+Fields:
+
+    Samples
+    ChannelCount
+    FrameCount
+    SampleRate
+    Timestamp
+    StreamPosition
+
+Methods:
+
+    Clear
+    Copy
+    Mix
+    Multiply
+    Add
+    Convert
+    Interleave
+    Deinterleave
+
+
+REAL-TIME REQUIREMENTS
+-------------------------------------------------------------------------------
+
+The real-time audio callback must avoid:
+
+    Memory allocation
+    Disk access
+    Network access
+    blocking locks
+    GUI interaction
+    JSON parsing
+    AI requests
+    file loading
+    logging to disk synchronously
+
+Prefer:
+
+    preallocated buffers
+    lock-free queues
+    ring buffers
+    atomic state changes
+    immutable graph snapshots
+    command queues
+
+
+===============================================================================
+5. CROSS-PLATFORM AUDIO BACKENDS
+===============================================================================
+
+WINDOWS
+-------------------------------------------------------------------------------
+
+Native backend:
+
+    WASAPI
+
+Modes:
+
+    Shared
+    Exclusive
+
+Capabilities:
+
+    Device enumeration
+    Input devices
+    Output devices
+    Sample-rate negotiation
+    Buffer-size negotiation
+    Low-latency rendering
+    Device-change detection
+    Device-loss recovery
+
+
+Optional legacy compatibility backend:
+
+    Windows Wave APIs
+
+
+MACOS
+-------------------------------------------------------------------------------
+
+Use native Apple audio technologies through Pascal bindings.
+
+Architecture:
+
+    Core Audio
+    Audio Units where appropriate
+    Audio Hardware APIs
+
+Support:
+
+    Apple Silicon ARM64
+    low-latency device IO
+    aggregate devices where supported
+    device change notification
+    native sample format conversion
+
+
+LINUX
+-------------------------------------------------------------------------------
+
+Implement native bindings for available system audio interfaces.
+
+Priority architecture:
+
+    PipeWire
+        modern preferred backend
+
+Fallback:
+
+    ALSA
+
+
+A platform AudioBackendFactory selects the appropriate implementation.
+
+
+===============================================================================
+6. MASTER AUDIO GRAPH SYSTEM
+===============================================================================
+
+The DAW should use a node-based audio processing graph.
+
+Core class:
+
+    TAudioGraph
+
+
+NODE TYPES
+-------------------------------------------------------------------------------
+
+AudioInputNode
+
+AudioOutputNode
+
+TrackNode
+
+ClipNode
+
+SampleNode
+
+GeneratorNode
+
+SynthNode
+
+TrackerNode
+
+MidiNode
+
+GainNode
+
+PanNode
+
+EQNode
+
+CompressorNode
+
+LimiterNode
+
+GateNode
+
+DelayNode
+
+ReverbNode
+
+FilterNode
+
+DistortionNode
+
+AnalyzerNode
+
+MeterNode
+
+BusNode
+
+SendNode
+
+ReturnNode
+
+MasterNode
+
+RecorderNode
+
+ResamplerNode
+
+ChannelMapperNode
+
+AutomationNode
+
+
+NODE OPERATIONS
+-------------------------------------------------------------------------------
+
+Connect
+
+Disconnect
+
+Insert
+
+Remove
+
+Bypass
+
+Mute
+
+Solo
+
+Reorder
+
+Clone
+
+Serialize
+
+Restore
+
+
+GRAPH VALIDATION
+-------------------------------------------------------------------------------
+
+The graph engine must detect:
+
+    illegal feedback
+
+    circular dependency
+
+    channel mismatch
+
+    missing source
+
+    unavailable hardware
+
+    invalid bus routing
+
+and reject invalid graph mutations safely.
+
+
+GRAPH VISUALIZER
+-------------------------------------------------------------------------------
+
+Provide a professional node editor:
+
+    drag nodes
+
+    connect ports
+
+    audio routing visualization
+
+    MIDI routing visualization
+
+    AI routing visualization
+
+    activity animation
+
+    channel labels
+
+    signal meters
+
+    zoom
+
+    pan
+
+    search
+
+    minimap
+
+    automatic layout
+
+    selection groups
+
+    route highlighting
+
+
+===============================================================================
+7. MAIN DAW TIMELINE
+===============================================================================
+
+The central editor should contain:
+
+    Track headers
+
+    Timeline ruler
+
+    Tempo grid
+
+    Musical bars/beats
+
+    Timecode
+
+    Markers
+
+    Regions
+
+    Audio clips
+
+    MIDI clips
+
+    Tracker clips
+
+    Automation lanes
+
+
+Track types:
+
+    Audio Track
+    MIDI Track
+    Instrument Track
+    Tracker Track
+    Bus Track
+    Auxiliary Track
+    Folder Track
+    Master Track
+
+
+CLIP OPERATIONS
+-------------------------------------------------------------------------------
+
+Move
+
+Copy
+
+Paste
+
+Duplicate
+
+Split
+
+Join
+
+Trim
+
+Crop
+
+Slip edit
+
+Ripple edit
+
+Stretch
+
+Reverse
+
+Fade
+
+Crossfade
+
+Normalize
+
+Transpose
+
+Loop
+
+Mute
+
+Lock
+
+Group
+
+Quantize
+
+
+All editing should be NON-DESTRUCTIVE by default.
+
+
+===============================================================================
+8. WAVEFORM SYSTEM
+===============================================================================
+
+Waveforms must never be fake image representations.
+
+On import:
+
+    Decode audio
+
+    Calculate sample peaks
+
+    Calculate RMS data
+
+    Calculate min/max envelopes
+
+    Calculate multiple display resolutions
+
+Store waveform cache separately from source media.
+
+
+Waveform display modes:
+
+    Standard waveform
+
+    Filled waveform
+
+    Stereo separated
+
+    Stereo combined
+
+    RMS overlay
+
+    Peak overlay
+
+    Spectral waveform
+
+
+Large files require multiresolution waveform caching.
+
+Example:
+
+    Level 0 = raw
+    Level 1 = 64 samples/block
+    Level 2 = 256
+    Level 3 = 1024
+    Level 4 = 4096
+    etc.
+
+
+===============================================================================
+9. PROFESSIONAL AUDIO VISUALIZATION
+===============================================================================
+
+Provide:
+
+    Waveform
+
+    Spectrum analyzer
+
+    Spectrogram
+
+    FFT display
+
+    Oscilloscope
+
+    Phase scope
+
+    Stereo vectorscope
+
+    Correlation meter
+
+    Peak meter
+
+    RMS meter
+
+    LUFS meter
+
+    True peak meter
+
+    Frequency response graph
+
+    EQ curve graph
+
+    Dynamics graph
+
+    Loudness history
+
+    Pitch graph
+
+    Chromagram
+
+    Stereo width graph
+
+
+FFT engine should be implemented internally.
+
+Implement:
+
+    radix-2 FFT
+    inverse FFT
+    Hann window
+    Hamming window
+    Blackman window
+    Blackman-Harris window
+
+
+===============================================================================
+10. MIXER
+===============================================================================
+
+Professional channel strip:
+
+    Input selector
+
+    Gain
+
+    Polarity inversion
+
+    Inserts
+
+    EQ
+
+    Dynamics
+
+    Sends
+
+    Pan
+
+    Stereo width
+
+    Mute
+
+    Solo
+
+    Record arm
+
+    Automation state
+
+    Fader
+
+    Peak meter
+
+    RMS meter
+
+    LUFS display
+
+    Output selector
+
+
+Mixer views:
+
+    Compact
+
+    Standard
+
+    Expanded
+
+    Mastering
+
+
+Support:
+
+    groups
+
+    buses
+
+    sends
+
+    returns
+
+    sidechains
+
+    pre-fader sends
+
+    post-fader sends
+
+    VCA-style control groups
+
+
+===============================================================================
+11. BUILT-IN DSP SYSTEM
+===============================================================================
+
+Since third-party DSP libraries are prohibited, implement DSP internally.
+
+
+CORE EFFECTS
+-------------------------------------------------------------------------------
+
+Gain
+
+Pan
+
+Balance
+
+Phase inversion
+
+DC removal
+
+High-pass filter
+
+Low-pass filter
+
+Band-pass
+
+Notch
+
+Parametric EQ
+
+Graphic EQ
+
+Shelving EQ
+
+Compressor
+
+Limiter
+
+Expander
+
+Noise gate
+
+Delay
+
+Echo
+
+Chorus
+
+Flanger
+
+Phaser
+
+Tremolo
+
+Auto-pan
+
+Saturation
+
+Distortion
+
+Bit crusher
+
+Stereo widener
+
+De-esser
+
+
+REVERB
+-------------------------------------------------------------------------------
+
+Implement an internal algorithmic reverb.
+
+Components:
+
+    early reflections
+    comb filters
+    all-pass filters
+    damping
+    diffusion
+    stereo decorrelation
+    room-size modelling
+
+
+MASTERING PROCESSORS
+-------------------------------------------------------------------------------
+
+Multiband compressor
+
+Multiband limiter
+
+Dynamic EQ
+
+Stereo imager
+
+Loudness maximizer
+
+True-peak limiter
+
+Mid-side processor
+
+
+===============================================================================
+12. INTERNAL SYNTHESIS SYSTEM
+===============================================================================
+
+Create built-in synthesizers.
+
+Oscillators:
+
+    sine
+
+    triangle
+
+    saw
+
+    square
+
+    pulse
+
+    noise
+
+    wavetable
+
+
+Features:
+
+    ADSR
+
+    LFO
+
+    filter
+
+    resonance
+
+    detuning
+
+    oscillator sync
+
+    unison
+
+    glide
+
+    velocity
+
+    modulation matrix
+
+    pitch envelope
+
+    filter envelope
+
+
+Instrument presets must use a documented internal format.
+
+
+SAMPLE-BASED INSTRUMENTS
+-------------------------------------------------------------------------------
+
+The instrument system must be able to import .wav files as playable
+instruments:
+
+    load one or more WAV files as multisample layers
+
+    per-sample root note, key range and velocity range mapping
+
+    loop points (off / forward / ping-pong) with zero-crossing snapping
+
+    per-sample gain, pan, tuning (semitones + cents)
+
+    round-robin and velocity-layer selection
+
+    streaming from disk for large samples; small samples held in RAM
+
+    reuse the internal PCM/WAV engine (section 17) - no third-party loaders
+
+    imported samples are registered in the Media Pool (section 51)
+
+WAV import into an instrument uses the same universal import validation as
+audio-clip import (section 20): detect by header, validate sizes, never trust
+file-declared lengths.
+
+
+===============================================================================
+13. TRACKER SYSTEM
+===============================================================================
+
+The tracker subsystem must be a FIRST-CLASS DAW component rather than simply
+an import converter.
+
+
+TRACKER EDITOR
+-------------------------------------------------------------------------------
+
+Fields:
+
+    Note
+
+    Instrument
+
+    Volume
+
+    Effect
+
+    Effect parameter
+
+
+Example:
+
+    C-4 01 40 A06
+
+
+Features:
+
+    Pattern editor
+
+    Sequence/order list
+
+    Sample editor
+
+    Instrument editor
+
+    Volume envelopes
+
+    Panning envelopes
+
+    Pattern looping
+
+    Note delay
+
+    Note cut
+
+    Retrigger
+
+    Arpeggio
+
+    Portamento
+
+    Vibrato
+
+    Tremolo
+
+    Sample offset
+
+    Speed
+
+    BPM
+
+
+===============================================================================
+14. XM SUPPORT
+===============================================================================
+
+Implement XM internally.
+
+Required parser:
+
+    XM header
+
+    song name
+
+    tracker name
+
+    version
+
+    header size
+
+    song length
+
+    restart position
+
+    channels
+
+    patterns
+
+    instruments
+
+    tempo
+
+    BPM
+
+    pattern packing
+
+    samples
+
+    sample loops
+
+    delta sample encoding
+
+    envelopes
+
+
+Playback must implement XM-compatible tracker semantics.
+
+Exporter must support:
+
+    instruments
+
+    samples
+
+    loops
+
+    patterns
+
+    effect commands
+
+    order table
+
+    envelope data
+
+
+Before export, validate whether project features can be represented by XM.
+
+Example warning:
+
+    "This project contains functionality unavailable in XM."
+
+Then provide:
+
+    Flatten
+    Render unsupported track
+    Cancel
+
+
+===============================================================================
+15. MOD SUPPORT
+===============================================================================
+
+Implement:
+
+    standard ProTracker-style MOD parsing
+
+    pattern data
+
+    sample headers
+
+    period tables
+
+    loops
+
+    effects
+
+    order table
+
+
+Provide correct tracker playback behavior rather than converting notes into
+ordinary audio clips alone.
+
+
+===============================================================================
+16. MPTM SUPPORT
+===============================================================================
+
+MPTM is substantially more complicated than classic XM/MOD.
+
+Implement it as its own dedicated format subsystem.
+
+Architecture:
+
+    TMPTMReader
+    TMPTMWriter
+    TMPTMModule
+    TMPTMPattern
+    TMPTMInstrument
+    TMPTMSample
+
+
+IMPORTANT:
+
+Do NOT assume that every feature from another application's MPTM
+implementation can automatically be reproduced without full specification
+compatibility.
+
+Create extensive regression tests using legally available reference files.
+
+Unsupported or unknown chunks must NEVER cause memory corruption.
+
+Parser design must use strict:
+
+    bounds validation
+
+    chunk-size validation
+
+    integer overflow protection
+
+    allocation limits
+
+
+===============================================================================
+17. PCM / WAV ENGINE
+===============================================================================
+
+Fully implement WAV internally.
+
+Support:
+
+    RIFF
+
+    RF64 for very large files
+
+    PCM 8-bit
+
+    PCM 16-bit
+
+    PCM 24-bit
+
+    PCM 32-bit
+
+    IEEE float 32-bit
+
+    IEEE float 64-bit
+
+    Mono
+
+    Stereo
+
+    Multichannel
+
+
+===============================================================================
+18. MP3 SUPPORT
+===============================================================================
+
+Required:
+
+    Import MP3
+
+    Decode to DAW buffers
+
+    Seek accurately
+
+    Generate waveforms
+
+    Play directly
+
+    Render/export MP3
+
+    Metadata reading
+
+    Metadata writing
+
+
+Separate:
+
+    TMP3Parser
+
+    TMP3Decoder
+
+    TMP3Encoder
+
+    TMP3Metadata
+
+    TMP3StreamReader
+
+
+The MP3 implementation should have independent unit and conformance testing.
+
+Provide encoding options:
+
+    bitrate
+
+    CBR
+
+    VBR where implemented
+
+    mono/stereo
+
+    sample rate
+
+    quality
+
+
+===============================================================================
+19. MP4 AUDIO SUPPORT
+===============================================================================
+
+Treat MP4 correctly as a CONTAINER.
+
+Required components:
+
+    TMP4Reader
+
+    TMP4Writer
+
+    TMP4Atom
+
+    TMP4Track
+
+    TMP4SampleTable
+
+
+Implement MP4 box/atom parsing.
+
+Examples:
+
+    ftyp
+
+    moov
+
+    mdat
+
+    trak
+
+    mdia
+
+    minf
+
+    stbl
+
+    stsd
+
+    stts
+
+    stsc
+
+    stsz
+
+    stco/co64
+
+
+The audio codec carried inside MP4 must be handled separately.
+
+The application must explicitly report:
+
+    Container:
+        MP4
+
+    Audio codec:
+        [detected codec]
+
+
+Never label MP4 itself as an audio codec.
+
+
+===============================================================================
+20. IMPORT SYSTEM
+===============================================================================
+
+Universal import service:
+
+    TAudioImportManager
+
+
+Detect formats using actual headers/signatures.
+
+DO NOT trust file extension alone.
+
+
+Supported target formats:
+
+    WAV
+
+    MP3
+
+    MP4 audio
+
+    XM
+
+    MOD
+
+    MPTM
+
+
+Import workflow:
+
+    Identify
+
+    Validate
+
+    Parse
+
+    Decode
+
+    Analyze
+
+    Generate waveform
+
+    Create media item
+
+    Create timeline clip
+
+    Store metadata
+
+    Update project
+
+
+Tracker imports should offer:
+
+    Import as native tracker project
+
+    Import tracker patterns onto tracker track
+
+    Render to audio
+
+    Extract samples
+
+
+===============================================================================
+21. EXPORT SYSTEM
+===============================================================================
+
+Export dialog should support:
+
+AUDIO:
+
+    WAV
+
+    MP3
+
+    MP4 audio
+
+
+TRACKER:
+
+    XM
+
+    MOD
+
+    MPTM
+
+
+Render options:
+
+    Entire project
+
+    Selection
+
+    Loop
+
+    Track
+
+    Stems
+
+    Buses
+
+    Master
+
+
+Audio controls:
+
+    Sample rate
+
+    Bit depth
+
+    Channels
+
+    Dither
+
+    Normalize
+
+    Loudness target
+
+    True peak limit
+
+    Metadata
+
+
+===============================================================================
+22. RECORDING SYSTEM
+===============================================================================
+
+Provide:
+
+    Mono recording
+
+    Stereo recording
+
+    Multichannel recording
+
+    Punch-in
+
+    Punch-out
+
+    Loop recording
+
+    Takes
+
+    Comping
+
+    Input monitoring
+
+    Pre-roll
+
+    Count-in
+
+    Latency compensation
+
+
+Recording must use disk streaming.
+
+Never accumulate an unlimited recording entirely in RAM.
+
+
+RECOVERY
+-------------------------------------------------------------------------------
+
+Record to recoverable temporary chunks.
+
+If application crashes:
+
+    detect unfinished recording
+
+    rebuild header/index
+
+    offer recovery
+
+
+===============================================================================
+23. SAMPLE EDITOR
+===============================================================================
+
+Dedicated editor:
+
+    Waveform view
+
+    Selection
+
+    Crop
+
+    Silence
+
+    Reverse
+
+    Normalize
+
+    Fade
+
+    DC removal
+
+    Resample
+
+    Pitch change
+
+    Time stretch
+
+    Loop points
+
+    Zero crossing detection
+
+
+Tracker loop modes:
+
+    Off
+
+    Forward
+
+    Ping-pong
+
+
+===============================================================================
+24. TIME-STRETCH / PITCH ENGINE
+===============================================================================
+
+Implement internally.
+
+Start with:
+
+    resampling
+
+then:
+
+    time-domain overlap/add
+
+then:
+
+    phase-vocoder processing
+
+
+Controls:
+
+    preserve duration
+
+    preserve pitch
+
+    transpose semitones
+
+    cents
+
+    playback rate
+
+    formant-aware mode as later advanced implementation
+
+
+===============================================================================
+25. MIDI
+===============================================================================
+
+Implement Standard MIDI File parsing/writing internally.
+
+Support:
+
+    SMF Type 0
+
+    SMF Type 1
+
+    tempo
+
+    time signature
+
+    program changes
+
+    controllers
+
+    pitch bend
+
+    aftertouch
+
+    SysEx preservation where possible
+
+
+MIDI piano roll:
+
+    draw notes
+
+    resize
+
+    move
+
+    velocity
+
+    controller lanes
+
+    quantization
+
+    humanization
+
+    scale highlighting
+
+    chord highlighting
+
+
+===============================================================================
+26. AUTOMATION ENGINE
+===============================================================================
+
+Automatable parameters include:
+
+    Volume
+
+    Pan
+
+    Sends
+
+    EQ
+
+    Compressor
+
+    Effect parameters
+
+    Instrument parameters
+
+    Tempo
+
+    Pitch
+
+    AI-generated control curves where explicitly approved
+
+
+Automation modes:
+
+    Read
+
+    Touch
+
+    Latch
+
+    Write
+
+
+Curves:
+
+    Linear
+
+    Step
+
+    Bezier
+
+    Smooth
+
+
+===============================================================================
+27. PROJECT FILE FORMAT
+===============================================================================
+
+Do NOT save the entire project in one fragile binary structure.
+
+Recommended project package:
+
+    project metadata
+
+    tracks
+
+    routing
+
+    clips
+
+    automation
+
+    mixer
+
+    effects
+
+    MIDI
+
+    tracker patterns
+
+    AI history
+
+    media references
+
+    theme/project settings
+
+
+Use versioned serialization.
+
+Example:
+
+    FileVersion
+    MinimumReaderVersion
+    ProjectUUID
+
+
+Never deserialize arbitrary class memory directly from disk.
+
+
+===============================================================================
+28. UNDO / REDO ARCHITECTURE
+===============================================================================
+
+Use Command Pattern.
+
+Example:
+
+    TDAWCommand
+
+        Execute
+        Undo
+        Redo
+
+
+Commands:
+
+    AddTrackCommand
+
+    DeleteTrackCommand
+
+    MoveClipCommand
+
+    SplitClipCommand
+
+    ChangeGainCommand
+
+    EditPatternCommand
+
+
+Commands can optionally merge:
+
+    100 tiny fader movements
+
+becomes:
+
+    one undo operation
+
+
+===============================================================================
+29. AI ARCHITECTURE
+===============================================================================
+
+AI must be deeply integrated but NEVER tightly coupled to a particular vendor.
+
+Base interface:
+
+    IAIProvider
+
+
+Methods conceptually include:
+
+    Configure
+
+    Authenticate
+
+    ListModels
+
+    SendRequest
+
+    StreamRequest
+
+    CancelRequest
+
+    SupportsTools
+
+    SupportsAudio
+
+    SupportsGeneration
+
+    SupportsSpeech
+
+    EstimateUsage
+
+
+Providers:
+
+    TOpenAIProvider
+
+    TClaudeProvider
+
+    TDeepSeekProvider
+
+    TSunoProvider
+
+
+User-facing Settings may display:
+
+    ChatGPT / OpenAI
+
+    Claude
+
+    DeepSeek
+
+    Suno
+
+
+===============================================================================
+30. AI SETTINGS PANEL
+===============================================================================
+
+Settings
+    |
+    +-- Artificial Intelligence
+            |
+            +-- General
+            +-- ChatGPT / OpenAI
+            +-- Claude
+            +-- DeepSeek
+            +-- Suno
+            +-- Voice Recognition
+            +-- Privacy
+            +-- Usage
+
+
+Each provider:
+
+    Enable provider
+
+    API key
+
+    Endpoint
+
+    Model
+
+    Timeout
+
+    Streaming
+
+    Maximum output
+
+    Usage limit
+
+    Connection test
+
+    Clear credentials
+
+
+NEVER STORE API KEYS IN PLAINTEXT.
+
+
+Windows:
+
+    DPAPI / Credential Manager style native secure storage
+
+
+macOS:
+
+    Keychain
+
+
+Linux:
+
+    native secure secret storage when available
+
+or application-controlled strongly encrypted credential storage.
+
+
+AI credentials must NEVER be stored inside project files.
+
+
+===============================================================================
+31. CHATGPT / OPENAI INTEGRATION
+===============================================================================
+
+Capabilities:
+
+    DAW assistant
+
+    Audio engineering advice
+
+    Arrangement analysis
+
+    Mixing recommendations
+
+    Mastering recommendations
+
+    Project explanation
+
+    Track naming
+
+    Metadata generation
+
+    Chord suggestions
+
+    Lyric assistance
+
+    Composition advice
+
+    Command interpretation
+
+
+Potential multimodal workflows where provider capabilities permit:
+
+    analyze waveform statistics
+
+    receive selected project metadata
+
+    receive user-approved audio representation
+
+    reason about arrangement
+
+
+Do NOT upload project audio automatically.
+
+Explicit user permission should be required.
+
+
+===============================================================================
+32. CLAUDE INTEGRATION
+===============================================================================
+
+Provide equivalent assistant capabilities through its provider adapter.
+
+Claude must remain independent from application internals.
+
+The AI receives a controlled project-context representation.
+
+Example:
+
+    Project
+        Tempo: 128
+        Key: D minor
+
+    Tracks
+        1 Drums
+        2 Bass
+        3 Synth
+
+    Master
+        Peak: -1.7 dBFS
+        Integrated LUFS: -11.8
+
+
+The AI must not need to understand internal Pascal objects.
+
+
+===============================================================================
+33. DEEPSEEK INTEGRATION
+===============================================================================
+
+DeepSeek receives its own provider implementation.
+
+Because provider APIs can change, endpoints and models must NOT be permanently
+hardcoded throughout the application.
+
+Centralize provider definitions.
+
+Capabilities:
+
+    chat
+
+    analysis
+
+    composition assistance
+
+    DAW commands
+
+    project analysis
+
+    optional tool calls
+
+
+===============================================================================
+34. SUNO INTEGRATION
+===============================================================================
+
+Make Suno the recommended dedicated music-generation provider when an
+authorized API interface is available.
+
+Settings:
+
+    Enable Suno
+
+    API credential
+
+    Model/service selection
+
+    Generation quality
+
+    Default output directory
+
+
+Generation panel:
+
+    Prompt
+
+    Style
+
+    Genre
+
+    Mood
+
+    Instrumentation
+
+    Duration
+
+    Vocal preference
+
+    Lyrics
+
+    Variation controls
+
+
+Workflow:
+
+    User requests generation
+
+    DAW sends authorized request
+
+    Job progress displayed
+
+    Generated audio retrieved
+
+    Imported into Media Pool
+
+    Waveform analyzed
+
+    User previews result
+
+    User chooses:
+        Add To Timeline
+        Add As New Track
+        Save To Library
+        Reject
+
+
+The application must NEVER:
+
+    scrape private Suno endpoints
+
+    automate a web browser to evade API restrictions
+
+    extract user cookies
+
+    imitate unsupported private APIs
+
+
+===============================================================================
+35. AI COMMAND SYSTEM
+===============================================================================
+
+AI should be capable of operating the DAW through a SAFE COMMAND API.
+
+Example user:
+
+    "Lower the drums by 2 dB."
+
+
+AI produces structured intent:
+
+    command:
+        set_track_gain
+
+    track:
+        drums
+
+    delta_db:
+        -2
+
+
+The application validates it.
+
+THEN executes the normal DAW command.
+
+
+AI MUST NEVER directly manipulate internal memory.
+
+
+Available AI tools:
+
+    GetProjectInfo
+
+    GetTracks
+
+    GetTrackInfo
+
+    GetMixerState
+
+    GetSelection
+
+    AnalyzeAudio
+
+    AddTrack
+
+    MoveClip
+
+    SetGain
+
+    SetPan
+
+    SetMute
+
+    SetSolo
+
+    SetTempo
+
+    AddMarker
+
+    CreateAutomation
+
+    GenerateMusic
+
+    SuggestMix
+
+    ExportProject
+
+
+Destructive commands must require appropriate confirmation.
+
+
+===============================================================================
+36. AI ASSISTANT PANEL
+===============================================================================
+
+Dockable professional interface.
+
+Elements:
+
+    Provider
+
+    Model
+
+    Conversation
+
+    Prompt
+
+    Microphone
+
+    Stop generation
+
+    Attach current selection
+
+    Attach project context
+
+    Include audio analysis
+
+    Command preview
+
+
+Quick commands:
+
+    Analyze Mix
+
+    Suggest Mastering
+
+    Analyze Selected Track
+
+    Generate Arrangement
+
+    Create Drum Pattern
+
+    Generate Chord Progression
+
+    Diagnose Clipping
+
+    Improve Stereo Image
+
+    Explain Project
+
+
+===============================================================================
+37. AI MUSIC COMPOSITION SYSTEM
+===============================================================================
+
+AI should be capable of generating STRUCTURED musical data, not only audio.
+
+Internal composition interchange:
+
+    tempo
+
+    key
+
+    scale
+
+    meter
+
+    measures
+
+    chord progression
+
+    melody notes
+
+    bass notes
+
+    drums
+
+    arrangement
+
+
+AI may generate:
+
+    MIDI clips
+
+    tracker patterns
+
+    automation
+
+    markers
+
+    song sections
+
+
+Example:
+
+    Intro
+    Verse
+    Chorus
+    Verse
+    Chorus
+    Bridge
+    Chorus
+    Outro
+
+
+===============================================================================
+38. VOICE RECOGNITION
+===============================================================================
+
+Provide native voice-command architecture.
+
+IVoiceRecognizer
+
+
+Operating modes:
+
+    Push to talk
+
+    Toggle listening
+
+    Command mode
+
+    Dictation mode
+
+
+Commands:
+
+    "Play"
+
+    "Stop"
+
+    "Record"
+
+    "Go to bar 32"
+
+    "Mute bass"
+
+    "Solo drums"
+
+    "Set tempo to 120"
+
+    "Add marker chorus"
+
+    "Zoom in"
+
+    "Export mix"
+
+    "Ask AI to analyze the master"
+
+
+===============================================================================
+39. VOICE PROCESSING PIPELINE
+===============================================================================
+
+Microphone
+
+    -> Capture
+
+    -> Resample
+
+    -> Noise reduction
+
+    -> Voice activity detection
+
+    -> Speech recognition
+
+    -> Intent interpreter
+
+    -> Safety validator
+
+    -> DAW command
+
+
+Distinguish:
+
+    speech-to-text
+
+from:
+
+    AI reasoning
+
+from:
+
+    DAW command execution.
+
+
+Voice recognition should continue to support local/native recognition paths
+where feasible rather than requiring an online AI provider.
+
+
+===============================================================================
+40. LOCAL AUDIO ANALYSIS FOR AI
+===============================================================================
+
+Never send huge PCM buffers to an LLM unnecessarily.
+
+Build local analysis engine:
+
+    peaks
+
+    RMS
+
+    LUFS
+
+    spectral centroid
+
+    spectral rolloff
+
+    band energy
+
+    crest factor
+
+    dynamic range
+
+    clipping
+
+    silence
+
+    stereo correlation
+
+    phase
+
+    detected pitch
+
+    BPM
+
+    transient density
+
+
+Then pass structured results to AI.
+
+Example:
+
+    {
+        "integrated_lufs": -15.4,
+        "true_peak": -0.6,
+        "low_band_energy": 0.42,
+        "stereo_correlation": 0.78,
+        "clipping_samples": 0
+    }
+
+
+This drastically reduces bandwidth, latency and AI usage.
+
+
+===============================================================================
+41. AI MIXING ASSISTANT
+===============================================================================
+
+Analyze:
+
+    loudness
+
+    frequency distribution
+
+    dynamics
+
+    clipping
+
+    masking
+
+    stereo width
+
+    headroom
+
+
+AI produces suggestions first.
+
+Example:
+
+    Bass masks kick between 70-95 Hz.
+
+    Suggested adjustment:
+
+        Bass EQ:
+            -2.5 dB
+            82 Hz
+            Q 1.3
+
+
+Controls:
+
+    Preview
+
+    Apply
+
+    Reject
+
+    Compare
+
+
+Never make irreversible changes automatically.
+
+
+===============================================================================
+42. AI MASTERING ASSISTANT
+===============================================================================
+
+Stages:
+
+    Analyze mix
+
+    Identify target
+
+    Determine headroom
+
+    Analyze spectrum
+
+    Analyze dynamics
+
+    Suggest chain
+
+    Preview chain
+
+    Render comparison
+
+
+Possible chain:
+
+    Corrective EQ
+
+    Dynamic EQ
+
+    Compressor
+
+    Stereo processor
+
+    Limiter
+
+
+Always offer:
+
+    Original
+
+    AI Recommendation
+
+
+===============================================================================
+43. AI PRIVACY SYSTEM
+===============================================================================
+
+Global modes:
+
+    AI Disabled
+
+    Text Only
+
+    Metadata Only
+
+    Selected Audio Allowed
+
+    Cloud Audio Allowed
+
+
+Each request should clearly show what is being transmitted.
+
+
+Never silently send:
+
+    audio
+
+    filenames
+
+    lyrics
+
+    project names
+
+    artist information
+
+    filesystem paths
+
+    private metadata
+
+
+===============================================================================
+44. NETWORK SECURITY
+===============================================================================
+
+AI provider communications require:
+
+    TLS
+
+    certificate validation
+
+    timeout handling
+
+    request cancellation
+
+    retry policies
+
+    rate-limit handling
+
+    secure credential handling
+
+
+Never log:
+
+    Authorization headers
+
+    API keys
+
+    complete credentials
+
+
+Diagnostic logs should redact secrets.
+
+
+===============================================================================
+45. USER INTERFACE DESIGN
+===============================================================================
+
+Professional layout:
+
++-----------------------------------------------------------------------+
+| Menu | Toolbar | Transport | CPU | Disk | Audio Device | AI Status    |
++------------------+----------------------------------------------------+
+|                  |                                                    |
+| Browser          |                Timeline                            |
+|                  |                                                    |
+| Media            |                                                    |
+| Instruments      |                                                    |
+| Effects          |                                                    |
+| AI               |                                                    |
+|                  |                                                    |
++------------------+----------------------------------------------------+
+| Inspector        | Mixer / Editor / Tracker / Graph / Piano Roll      |
++------------------+----------------------------------------------------+
+| Status | Sample Rate | Buffer | CPU | Project | Autosave | Progress   |
++-----------------------------------------------------------------------+
+
+
+Dockable panels:
+
+    Browser
+
+    Inspector
+
+    Mixer
+
+    Timeline
+
+    Tracker
+
+    Piano Roll
+
+    Sample Editor
+
+    Audio Graph
+
+    AI Assistant
+
+    Media Pool
+
+    Mastering
+
+    Analyzer
+
+    Automation
+
+
+===============================================================================
+46. PROFESSIONAL TRANSPORT
+===============================================================================
+
+Controls:
+
+    Return
+
+    Rewind
+
+    Forward
+
+    Stop
+
+    Play
+
+    Record
+
+    Loop
+
+    Punch
+
+    Metronome
+
+
+Displays:
+
+    Bars/Beats
+
+    Time
+
+    Samples
+
+    SMPTE
+
+    Tempo
+
+    Signature
+
+    Sample Rate
+
+    CPU
+
+    Audio Dropouts
+
+
+===============================================================================
+47. THEMING SYSTEM
+===============================================================================
+
+Theme engine must be independent of platform UI implementation.
+
+Theme definition:
+
+    name
+
+    background
+
+    panels
+
+    text
+
+    secondary text
+
+    borders
+
+    accent
+
+    selection
+
+    waveform
+
+    grid
+
+    meters
+
+    clipping
+
+    automation
+
+    MIDI notes
+
+
+Built-in themes:
+
+    Studio Dark
+
+    Studio Light
+
+    Midnight
+
+    Graphite
+
+    High Contrast
+
+
+Allow:
+
+    Theme Editor
+
+    Save Theme
+
+    Export Theme
+
+    Import Theme
+
+    Reset Theme
+
+
+Never scatter hardcoded colours throughout UI code.
+
+
+===============================================================================
+48. DPI / RETINA SUPPORT
+===============================================================================
+
+Windows:
+
+    Per-monitor high DPI
+
+
+macOS:
+
+    Retina
+
+
+Linux:
+
+    scalable UI
+
+
+Icons should ideally use:
+
+    vector representation
+
+or:
+
+    multiple raster resolutions
+
+
+===============================================================================
+49. SETTINGS SYSTEM
+===============================================================================
+
+Settings categories:
+
+    General
+
+    Appearance
+
+    Audio
+
+    Recording
+
+    MIDI
+
+    Playback
+
+    Editing
+
+    Timeline
+
+    Tracker
+
+    Files
+
+    Projects
+
+    AI
+
+    Voice
+
+    Network
+
+    Performance
+
+    Shortcuts
+
+    Advanced
+
+
+===============================================================================
+50. KEYBOARD SHORTCUT SYSTEM
+===============================================================================
+
+Every meaningful command should have an internal command ID.
+
+Example:
+
+    DAW.Transport.Play
+
+    DAW.Transport.Stop
+
+    DAW.Edit.Split
+
+    DAW.Track.Mute
+
+    DAW.AI.Analyze
+
+
+Allow shortcuts to be:
+
+    assigned
+
+    removed
+
+    searched
+
+    exported
+
+    imported
+
+    reset
+
+
+===============================================================================
+51. MEDIA POOL
+===============================================================================
+
+Project media database:
+
+    Audio files
+
+    Samples
+
+    Generated AI files
+
+    Takes
+
+    Tracker modules
+
+    MIDI files
+
+
+Properties:
+
+    format
+
+    duration
+
+    sample rate
+
+    channels
+
+    size
+
+    tempo
+
+    key
+
+    source
+
+    usage count
+
+
+Functions:
+
+    locate
+
+    replace
+
+    reveal
+
+    rename
+
+    preview
+
+    remove unused
+
+    consolidate
+
+
+===============================================================================
+52. BACKGROUND JOB SYSTEM
+===============================================================================
+
+Create TJobManager.
+
+Jobs:
+
+    Import
+
+    Decode
+
+    Encode
+
+    Analyze waveform
+
+    FFT analysis
+
+    AI request
+
+    Download generated music
+
+    Save
+
+    Autosave
+
+    Export
+
+    Freeze
+
+    Render
+
+
+Each job supports:
+
+    progress
+
+    cancellation
+
+    status
+
+    errors
+
+    completion callback
+
+
+DO NOT overload the real-time audio thread.
+
+
+===============================================================================
+53. THREAD ARCHITECTURE
+===============================================================================
+
+Recommended logical threads:
+
+    UI Thread
+
+    Real-Time Audio Thread
+
+    Audio Disk IO Thread
+
+    Recording Writer Thread
+
+    File Import Workers
+
+    Waveform Workers
+
+    Analysis Workers
+
+    AI Network Workers
+
+    Project Save Worker
+
+
+Use queues instead of broad global locks wherever practical.
+
+
+===============================================================================
+54. MEMORY MANAGEMENT
+===============================================================================
+
+Provide:
+
+    reusable audio buffer pool
+
+    fixed real-time allocations
+
+    media cache
+
+    waveform cache
+
+    sample cache
+
+    memory limits
+
+
+Large audio files should use:
+
+    streaming
+
+    memory mapping where appropriate
+
+rather than full-file allocation.
+
+
+===============================================================================
+55. AUDIO LATENCY MANAGEMENT
+===============================================================================
+
+Measure:
+
+    input latency
+
+    output latency
+
+    engine latency
+
+    plugin/DSP latency
+
+    recording offset
+
+
+Implement automatic delay compensation.
+
+
+===============================================================================
+56. CRASH RECOVERY
+===============================================================================
+
+Recovery architecture:
+
+    autosave journal
+
+    transaction history
+
+    recording recovery
+
+    project snapshots
+
+
+After abnormal termination:
+
+    Detect recovery data
+
+    Validate
+
+    Show recovery dialog
+
+    Restore project
+
+
+===============================================================================
+57. AUTOSAVE
+===============================================================================
+
+Options:
+
+    Off
+
+    Every 1 minute
+
+    2 minutes
+
+    5 minutes
+
+    10 minutes
+
+    Custom
+
+
+Use rotating backups:
+
+    project.autosave.1
+
+    project.autosave.2
+
+    project.autosave.3
+
+
+Never overwrite the primary project during autosave.
+
+
+===============================================================================
+58. ERROR HANDLING
+===============================================================================
+
+Central diagnostic service.
+
+Severity:
+
+    Debug
+
+    Information
+
+    Warning
+
+    Error
+
+    Critical
+
+
+Log:
+
+    timestamp
+
+    thread
+
+    subsystem
+
+    error code
+
+    context
+
+
+Audio callback logging uses a lock-free diagnostic queue.
+
+
+===============================================================================
+59. TESTING SYSTEM
+===============================================================================
+
+Audio software requires much more than UI testing.
+
+
+UNIT TESTS
+-------------------------------------------------------------------------------
+
+DSP
+
+FFT
+
+resampling
+
+file parsers
+
+encoders
+
+decoders
+
+tracker effects
+
+project serialization
+
+automation
+
+AI command validation
+
+
+AUDIO TESTS
+-------------------------------------------------------------------------------
+
+Generate:
+
+    sine waves
+
+    impulses
+
+    white noise
+
+    sweeps
+
+
+Verify:
+
+    amplitude
+
+    phase
+
+    frequency
+
+    latency
+
+    distortion
+
+
+===============================================================================
+60. CODEC/FUZZ TESTING
+===============================================================================
+
+Every importer must handle malformed files safely.
+
+Test:
+
+    truncated file
+
+    corrupt header
+
+    enormous declared length
+
+    invalid channels
+
+    integer overflow
+
+    bad pattern length
+
+    malformed MP4 atoms
+
+    recursive structures
+
+    invalid metadata
+
+
+Never trust file-provided sizes.
+
+
+===============================================================================
+61. GOLDEN AUDIO TESTS
+===============================================================================
+
+Render deterministic projects.
+
+Compare:
+
+    expected waveform
+
+    hash where deterministic
+
+    RMS
+
+    peak
+
+    spectral characteristics
+
+
+Use regression thresholds for floating-point variations.
+
+
+===============================================================================
+62. PERFORMANCE MONITOR
+===============================================================================
+
+Display:
+
+    Audio CPU
+
+    UI CPU
+
+    Disk IO
+
+    Memory
+
+    Buffer usage
+
+    XRuns/dropouts
+
+    Render latency
+
+    AI network latency
+
+
+Provide detailed diagnostics window.
+
+
+===============================================================================
+63. WINDOWS DELPHI 12 PROJECT
+===============================================================================
+
+Delphi solution should provide design-time forms.
+
+Example:
+
+    UDAW.dproj
+
+    UDAW.dpr
+
+
+Forms:
+
+    frmMain
+
+    frmSettings
+
+    frmAudioSettings
+
+    frmAISettings
+
+    frmExport
+
+    frmProjectSettings
+
+    frmThemeEditor
+
+    frmAudioGraph
+
+    frmSampleEditor
+
+    frmTracker
+
+    frmMixer
+
+    frmDiagnostics
+
+
+NO normal interface controls should be unnecessarily created at runtime.
+
+Use frames/custom controls for reusable professional components.
+
+
+===============================================================================
+64. LAZARUS PROJECT
+===============================================================================
+
+Provide:
+
+    UDAW.lpi
+
+    UDAW.lpr
+
+
+Shared Pascal units should compile through conditional platform sections.
+
+Example principle:
+
+    {$IFDEF WINDOWS}
+
+    {$ENDIF}
+
+    {$IFDEF DARWIN}
+
+    {$ENDIF}
+
+    {$IFDEF LINUX}
+
+    {$ENDIF}
+
+
+Do not contaminate core DSP code with UI-platform conditionals.
+
+
+===============================================================================
+65. BUILD SYSTEM
+===============================================================================
+
+/scripts
+
+    build-windows.ps1
+
+    build-windows-release.ps1
+
+    build-linux.sh
+
+    build-macos.sh
+
+    test-windows.ps1
+
+    test-linux.sh
+
+    test-macos.sh
+
+    package-windows.ps1
+
+    package-linux.sh
+
+    package-macos.sh
+
+
+Every build script should:
+
+    clean
+
+    compile
+
+    test
+
+    package
+
+    generate build information
+
+
+===============================================================================
+66. BUILD VERSIONING
+===============================================================================
+
+Embed:
+
+    ProductVersion
+
+    BuildNumber
+
+    GitCommit where available
+
+    BuildDate
+
+    Platform
+
+    Architecture
+
+
+===============================================================================
+67. PHASED DEVELOPMENT PLAN
+===============================================================================
+
+
+PHASE 0 - SPECIFICATION FREEZE
+-------------------------------------------------------------------------------
+
+Complete documentation for:
+
+    architecture
+
+    threading
+
+    project format
+
+    audio buffers
+
+    codec interfaces
+
+    tracker models
+
+    AI abstraction
+
+    GUI design
+
+    coding rules
+
+
+Completion Requirement:
+
+    No unresolved core architecture questions.
+
+
+PHASE 1 - CORE PLATFORM FRAMEWORK
+-------------------------------------------------------------------------------
+
+Implement:
+
+    application startup
+
+    configuration
+
+    logging
+
+    errors
+
+    platform detection
+
+    file paths
+
+    threading primitives
+
+    jobs
+
+    secure storage
+
+    unit tests
+
+
+Must be FULLY functional.
+
+
+PHASE 2 - AUDIO DEVICE ENGINE
+-------------------------------------------------------------------------------
+
+Implement:
+
+    device enumeration
+
+    input
+
+    output
+
+    audio callback
+
+    buffer handling
+
+    underrun detection
+
+    format negotiation
+
+
+Windows first:
+
+    WASAPI
+
+
+Then:
+
+    macOS native backend
+
+    Linux PipeWire/ALSA
+
+
+Completion:
+
+    Reliable sine wave playback
+    microphone capture
+    hour-long stability tests
+    device-loss recovery
+
+
+PHASE 3 - INTERNAL DSP FOUNDATION
+-------------------------------------------------------------------------------
+
+Implement:
+
+    sample conversion
+
+    resampling
+
+    mixer mathematics
+
+    FFT
+
+    filters
+
+    envelopes
+
+    interpolation
+
+    meters
+
+
+PHASE 4 - AUDIO GRAPH
+-------------------------------------------------------------------------------
+
+Implement complete node graph and routing.
+
+
+PHASE 5 - PROJECT SYSTEM
+-------------------------------------------------------------------------------
+
+Implement:
+
+    project creation
+
+    save
+
+    open
+
+    autosave
+
+    recovery
+
+    undo
+
+    redo
+
+
+PHASE 6 - PCM/WAV
+-------------------------------------------------------------------------------
+
+Complete WAV engine.
+
+
+PHASE 7 - TIMELINE
+-------------------------------------------------------------------------------
+
+Complete:
+
+    tracks
+
+    clips
+
+    editing
+
+    zoom
+
+    scrolling
+
+    snapping
+
+    waveform rendering
+
+
+PHASE 8 - RECORDING
+-------------------------------------------------------------------------------
+
+Complete recording architecture.
+
+
+PHASE 9 - MIXER
+-------------------------------------------------------------------------------
+
+Complete mixer, sends, buses and master.
+
+
+PHASE 10 - DSP EFFECTS
+-------------------------------------------------------------------------------
+
+Complete core effect suite.
+
+
+PHASE 11 - TRACKER ENGINE
+-------------------------------------------------------------------------------
+
+Complete native tracker player/editor.
+
+
+PHASE 12 - MOD
+-------------------------------------------------------------------------------
+
+Complete import/play/edit/export.
+
+
+PHASE 13 - XM
+-------------------------------------------------------------------------------
+
+Complete import/play/edit/export.
+
+
+PHASE 14 - MPTM
+-------------------------------------------------------------------------------
+
+Complete supported MPTM compatibility layer with exhaustive validation/testing.
+
+
+PHASE 15 - MP3
+-------------------------------------------------------------------------------
+
+Complete import/playback/export/metadata.
+
+
+PHASE 16 - MP4
+-------------------------------------------------------------------------------
+
+Complete MP4 container subsystem and supported audio workflows.
+
+
+PHASE 17 - MIDI
+-------------------------------------------------------------------------------
+
+Complete MIDI engine and piano roll.
+
+
+PHASE 18 - ADVANCED VISUALIZATION
+-------------------------------------------------------------------------------
+
+Complete:
+
+    spectrum
+
+    spectrogram
+
+    phase
+
+    loudness
+
+    oscilloscope
+
+    advanced meters
+
+
+PHASE 19 - ADVANCED DSP
+-------------------------------------------------------------------------------
+
+Complete:
+
+    advanced compressor
+
+    multiband processing
+
+    mastering tools
+
+    time stretch
+
+    pitch shift
+
+
+PHASE 20 - AI FOUNDATION
+-------------------------------------------------------------------------------
+
+Complete:
+
+    provider abstraction
+
+    credentials
+
+    networking
+
+    JSON
+
+    streaming
+
+    cancellation
+
+    rate handling
+
+    secure logging
+
+
+PHASE 21 - OPENAI / CHATGPT
+-------------------------------------------------------------------------------
+
+Fully integrate provider and DAW assistant.
+
+
+PHASE 22 - CLAUDE
+-------------------------------------------------------------------------------
+
+Fully integrate provider.
+
+
+PHASE 23 - DEEPSEEK
+-------------------------------------------------------------------------------
+
+Fully integrate provider.
+
+
+PHASE 24 - SUNO
+-------------------------------------------------------------------------------
+
+Fully integrate authorized generation API when available.
+
+Implement proper generation workflow and timeline ingestion.
+
+
+PHASE 25 - VOICE COMMANDS
+-------------------------------------------------------------------------------
+
+Complete voice pipeline.
+
+
+PHASE 26 - AI TOOL COMMANDS
+-------------------------------------------------------------------------------
+
+Complete structured command interface.
+
+
+PHASE 27 - AI MIXING
+-------------------------------------------------------------------------------
+
+Complete AI/local-analysis workflow.
+
+
+PHASE 28 - AI MASTERING
+-------------------------------------------------------------------------------
+
+Complete preview/apply comparison workflow.
+
+
+PHASE 29 - THEMING
+-------------------------------------------------------------------------------
+
+Complete professional theme engine.
+
+
+PHASE 30 - CROSS-PLATFORM POLISH
+-------------------------------------------------------------------------------
+
+Complete:
+
+    macOS integration
+
+    Linux integration
+
+    Retina/HiDPI
+
+    native shortcuts
+
+    clipboard
+
+    file dialogs
+
+    device behavior
+
+
+PHASE 31 - OPTIMIZATION
+-------------------------------------------------------------------------------
+
+Profile:
+
+    audio thread
+
+    DSP
+
+    UI
+
+    graph
+
+    waveform
+
+    disk
+
+    codecs
+
+    memory
+
+
+Eliminate:
+
+    avoidable allocations
+
+    unnecessary locks
+
+    buffer copies
+
+    UI overdraw
+
+    excessive analysis work
+
+
+PHASE 32 - RELEASE QA
+-------------------------------------------------------------------------------
+
+Perform:
+
+    unit tests
+
+    codec tests
+
+    tracker tests
+
+    audio tests
+
+    long-duration playback
+
+    recording tests
+
+    corrupted-file tests
+
+    crash recovery
+
+    AI failure handling
+
+    disconnected network testing
+
+    device removal testing
+
+    platform QA
+
+
+===============================================================================
+68. DEFINITION OF "PHASE COMPLETE"
+===============================================================================
+
+A phase is NOT complete merely because its classes compile.
+
+A phase is complete only when:
+
+    implementation exists
+
+    UI exists where required
+
+    persistence exists where required
+
+    error handling exists
+
+    cancellation exists where relevant
+
+    testing exists
+
+    documentation exists
+
+    edge cases are tested
+
+    memory ownership is verified
+
+    thread behavior is verified
+
+    release build passes
+
+
+ZERO PLACEHOLDER POLICY:
+
+    No TODO
+
+    No "not implemented"
+
+    No dummy menu item
+
+    No empty button
+
+    No fake meter
+
+    No synthetic result presented as actual analysis
+
+
+===============================================================================
+69. IMPORTANT ARCHITECTURAL PRINCIPLE FOR THIRD-PARTY-FREE DEVELOPMENT
+===============================================================================
+
+"No third-party libraries" should mean:
+
+    Do not integrate commercial/third-party DAW frameworks.
+
+    Do not use third-party DSP libraries.
+
+    Do not use third-party codec wrappers.
+
+    Do not use third-party GUI frameworks beyond Delphi/Lazarus platform
+    frameworks.
+
+    Do not use FFmpeg.
+
+    Do not use BASS.
+
+    Do not use JUCE.
+
+    Do not use PortAudio.
+
+    Do not use SDL for the audio engine.
+
+    Do not use libsndfile.
+
+    Do not use OpenMPT as the tracker engine.
+
+    Do not use LAME as the MP3 implementation.
+
+
+However, native operating-system APIs ARE allowed and necessary:
+
+    Windows APIs
+
+    WASAPI
+
+    Core Audio
+
+    Apple platform APIs
+
+    PipeWire system interfaces
+
+    ALSA system interfaces
+
+    OS networking
+
+    OS TLS/security
+
+    OS secure credential storage
+
+
+External CLOUD SERVICES requested by the user are also obviously external:
+
+    OpenAI
+
+    Claude
+
+    DeepSeek
+
+    Suno
+
+
+These should be accessed only through their documented/authorized API interfaces.
+
+
+===============================================================================
+70. FORMAT AND LEGAL COMPLIANCE REQUIREMENT
+===============================================================================
+
+Before distributing internally implemented encoders/decoders:
+
+    verify current codec licensing
+
+    verify applicable patents
+
+    verify trademark restrictions
+
+    verify format specifications
+
+    verify distribution territories
+
+
+Container format and codec format must be treated separately.
+
+For example:
+
+    MP4 = container
+
+while the encoded audio stream inside it is a separate codec.
+
+
+===============================================================================
+71. OPTIMAL AI ARCHITECTURE
+===============================================================================
+
+AI should not be treated as a chatbot bolted onto the DAW.
+
+Architecture:
+
+                       +-----------------------+
+                       |      User / Voice     |
+                       +-----------+-----------+
+                                   |
+                                   v
+                       +-----------------------+
+                       |   AI Orchestrator     |
+                       +-----------+-----------+
+                                   |
+             +---------------------+---------------------+
+             |                     |                     |
+             v                     v                     v
+        OpenAI/ChatGPT          Claude               DeepSeek
+             |
+             +---------------------+
+                                   |
+                                Suno
+                                   |
+                                   v
+                       +-----------------------+
+                       | Structured DAW Tools  |
+                       +-----------+-----------+
+                                   |
+                                   v
+                       +-----------------------+
+                       | Command Validation    |
+                       +-----------+-----------+
+                                   |
+                                   v
+                       +-----------------------+
+                       | DAW Command Manager   |
+                       +-----------+-----------+
+                                   |
+                                   v
+                       +-----------------------+
+                       | Audio/Project Engine  |
+                       +-----------------------+
+
+
+This provides:
+
+    vendor independence
+
+    security
+
+    undo support
+
+    validation
+
+    provider switching
+
+    voice integration
+
+    future local AI support
+
+
+===============================================================================
+72. FUTURE LOCAL AI SUPPORT
+===============================================================================
+
+Design the provider layer so another implementation can later be added:
+
+    TLocalAIProvider
+
+
+This could communicate with:
+
+    localhost model server
+
+    LAN AI server
+
+    local inference engine
+
+    MCP-enabled service
+
+
+No major DAW redesign should be necessary.
+
+
+===============================================================================
+73. USER-FRIENDLINESS REQUIREMENTS
+===============================================================================
+
+The program should always prefer understandable workflows.
+
+Every complex operation should provide:
+
+    sane defaults
+
+    immediate feedback
+
+    undo where possible
+
+    visible progress
+
+    clear error messages
+
+    keyboard shortcuts
+
+    context help
+
+
+Avoid:
+
+    modal dialogs everywhere
+
+    cryptic technical terminology without context
+
+    hidden operations
+
+    blocking operations
+
+    excessive confirmation dialogs
+
+
+Provide beginner and professional workflows without creating separate
+applications.
+
+
+===============================================================================
+74. PERFORMANCE TARGETS
+===============================================================================
+
+Design objectives:
+
+    fast startup
+
+    smooth 60+ FPS timeline UI where display permits
+
+    glitch-free real-time playback
+
+    low recording latency
+
+    large project support
+
+    multithreaded background analysis
+
+    high-core-count CPU scaling
+
+    low memory copying
+
+    scalable waveform cache
+
+    efficient DSP chains
+
+
+The audio callback receives absolute priority over:
+
+    waveform
+
+    AI
+
+    file indexing
+
+    autosave
+
+    visualization
+
+
+===============================================================================
+75. CRITICAL IMPLEMENTATION ORDER
+===============================================================================
+
+DO NOT begin by implementing AI.
+
+Correct order:
+
+    Platform
+        ↓
+    Audio IO
+        ↓
+    Buffers
+        ↓
+    DSP
+        ↓
+    Audio Graph
+        ↓
+    Project
+        ↓
+    Timeline
+        ↓
+    Waveforms
+        ↓
+    Recording
+        ↓
+    Mixer
+        ↓
+    Tracker
+        ↓
+    Codecs
+        ↓
+    MIDI
+        ↓
+    Advanced DSP
+        ↓
+    Analysis
+        ↓
+    AI Provider Framework
+        ↓
+    AI Commands
+        ↓
+    Voice
+        ↓
+    AI Composition
+        ↓
+    AI Mixing/Mastering
+
+
+Otherwise AI becomes coupled to an incomplete DAW engine.
+
+
+===============================================================================
+76. PROPOSED CORE PASCAL UNITS
+===============================================================================
+
+Core.pas
+Audio.Types.pas
+Audio.Buffer.pas
+Audio.Engine.pas
+Audio.Clock.pas
+Audio.Device.pas
+Audio.Graph.pas
+Audio.Node.pas
+Audio.Mixer.pas
+Audio.Resampler.pas
+
+DSP.Math.pas
+DSP.FFT.pas
+DSP.Filters.pas
+DSP.EQ.pas
+DSP.Compressor.pas
+DSP.Limiter.pas
+DSP.Delay.pas
+DSP.Reverb.pas
+DSP.Dynamics.pas
+DSP.Spectrum.pas
+
+Project.Document.pas
+Project.Serialization.pas
+Project.Recovery.pas
+
+Timeline.Model.pas
+Timeline.Commands.pas
+
+Tracker.Engine.pas
+Tracker.Pattern.pas
+Tracker.Instrument.pas
+Tracker.Player.pas
+
+Formats.XM.Reader.pas
+Formats.XM.Writer.pas
+
+Formats.MOD.Reader.pas
+Formats.MOD.Writer.pas
+
+Formats.MPTM.Reader.pas
+Formats.MPTM.Writer.pas
+
+Codec.WAV.pas
+Codec.MP3.Decoder.pas
+Codec.MP3.Encoder.pas
+Codec.MP4.Reader.pas
+Codec.MP4.Writer.pas
+
+MIDI.Reader.pas
+MIDI.Writer.pas
+MIDI.Engine.pas
+
+Analysis.Audio.pas
+Analysis.Loudness.pas
+Analysis.Pitch.pas
+Analysis.Spectrum.pas
+
+AI.Types.pas
+AI.Provider.pas
+AI.Manager.pas
+AI.Commands.pas
+AI.Context.pas
+AI.Security.pas
+
+AI.Provider.OpenAI.pas
+AI.Provider.Claude.pas
+AI.Provider.DeepSeek.pas
+AI.Provider.Suno.pas
+
+Voice.Capture.pas
+Voice.Recognition.pas
+Voice.Commands.pas
+
+Platform.Windows.Audio.pas
+Platform.Windows.Security.pas
+
+Platform.macOS.Audio.pas
+Platform.macOS.Security.pas
+
+Platform.Linux.Audio.pas
+Platform.Linux.Security.pas
+
+UI.Theme.pas
+UI.Commands.pas
+UI.Waveform.pas
+UI.Graph.pas
+UI.Meters.pas
+
+
+===============================================================================
+77. FINAL TARGET
+===============================================================================
+
+The completed software should ultimately behave as a combination of:
+
+    Professional DAW
+
+    Tracker
+
+    Sample editor
+
+    Audio recorder
+
+    MIDI sequencer
+
+    Mixer
+
+    Mastering workstation
+
+    Audio analysis workstation
+
+    AI composition assistant
+
+    AI production assistant
+
+    AI mixing assistant
+
+    AI mastering assistant
+
+    Voice-controlled DAW
+
+    AI music-generation environment
+
+
+while retaining:
+
+    native performance
+
+    deterministic audio processing
+
+    cross-platform architecture
+
+    project portability
+
+    secure AI credentials
+
+    provider independence
+
+    complete undo/redo
+
+    professional UI
+
+    no dependency on major third-party DAW/audio frameworks.
+
+
+===============================================================================
+78. NON-NEGOTIABLE DEVELOPMENT RULES
+===============================================================================
+
+1. Audio processing is never performed by UI code.
+
+2. AI/network activity never runs on the real-time audio thread.
+
+3. File IO never runs on the real-time audio thread.
+
+4. No unbounded allocation occurs in the real-time callback.
+
+5. All project changes go through controlled command interfaces.
+
+6. AI commands are validated before execution.
+
+7. AI changes participate in Undo/Redo.
+
+8. Project files are versioned.
+
+9. Imported files are validated before allocation.
+
+10. External file dimensions/sizes are never trusted.
+
+11. API credentials are encrypted/securely stored.
+
+12. Secrets never appear in diagnostics.
+
+13. Cloud uploads require user authorization.
+
+14. Audio graph changes must be thread safe.
+
+15. Background jobs are cancellable.
+
+16. Every visible operation reports genuine progress when measurable.
+
+17. Every format implementation receives regression tests.
+
+18. No third-party audio framework is silently introduced.
+
+19. Platform-specific code stays behind abstraction layers.
+
+20. Windows remains Delphi 12 native.
+
+21. macOS/Linux remain Lazarus/FPC compatible.
+
+22. Apple Silicon is treated as a first-class architecture.
+
+23. UI controls are defined at design time wherever appropriate.
+
+24. No production feature is represented by a stub.
+
+25. No phase advances until its acceptance tests pass.
+
+26. AI remains optional; the complete DAW must function without Internet.
+
+27. Suno is optional at runtime and cannot prevent normal DAW operation.
+
+28. Every AI provider can be individually enabled/disabled.
+
+29. Provider APIs are encapsulated so API changes do not affect the DAW engine.
+
+30. The system must remain usable as a serious professional audio workstation
+    even if every AI provider is disabled.
+
+
+===============================================================================
+79. MODEL CONTEXT PROTOCOL (MCP) SUPPORT
+===============================================================================
+
+(Addendum to the AI architecture, sections 29-37 and 71-72.)
+
+MCP is a first-class part of the AI assistance layer, NOT a new engine
+dependency. It is added entirely inside the AI/tool layer behind the existing
+abstractions; no audio, graph, DSP, codec, tracker or project code changes.
+
+PURPOSE
+-------------------------------------------------------------------------------
+
+    * Let UDAW's AI assistant CONSUME external MCP servers the user configures
+      (extra tools, resources and prompts) during a conversation - e.g. a
+      sample librarian, a documentation server, a project-management server.
+
+    * Let UDAW optionally EXPOSE its own safe DAW command API (section 35) as
+      an MCP server, so an external MCP-aware client / local model can drive
+      the DAW through the SAME validated command path a provider tool call
+      uses.
+
+    * Give the future TLocalAIProvider / local Master AI (section 72) a
+      standard transport instead of a bespoke one.
+
+
+ARCHITECTURE
+-------------------------------------------------------------------------------
+
+    IMCPTransport          stdio (child process) and HTTP/SSE; TLS + cert
+                           validation for network transports (section 44)
+
+    IMCPClient             connect / initialize / list_tools / list_resources
+                           / list_prompts / call_tool / read_resource /
+                           cancel; capability negotiation; timeouts; retries
+
+    TMCPServerRegistry     user-configured servers; per-server enable, command
+                           / URL, environment, allowed-tool allow-list
+
+    TMCPToolBridge         maps discovered MCP tools into the AI Orchestrator's
+                           tool list; every MCP tool result still passes
+                           through Command Validation before any DAW mutation
+
+    TUDAWMcpServer         optional: serves GetProjectInfo / GetTracks /
+                           AnalyzeAudio / SetGain / ... (section 35) over MCP;
+                           destructive tools require confirmation; off by
+                           default; bind to loopback unless the user opts in
+
+
+SETTINGS  (extends section 30 tree)
+-------------------------------------------------------------------------------
+
+    Settings
+      +-- Artificial Intelligence
+            +-- MCP
+                  +-- Enable MCP client
+                  +-- Servers            (add / edit / remove / test)
+                        name, transport, command|URL, args, env,
+                        enabled, tool allow-list, timeout
+                  +-- Expose UDAW as an MCP server
+                        enabled, bind address (default 127.0.0.1),
+                        port, allow destructive tools (default off)
+                  +-- Privacy            (which context MCP calls may carry)
+
+
+RULES
+-------------------------------------------------------------------------------
+
+    * MCP tool calls obey the AI Privacy System (section 43): no audio,
+      filenames, lyrics, project names or paths are sent unless the active
+      privacy mode allows it.
+
+    * Credentials / tokens for network MCP servers live in OS secure storage
+      (section 30), never in project files, never in logs.
+
+    * MCP is OPTIONAL. With the MCP client disabled and no MCP server bound,
+      the DAW and all AI providers behave exactly as before. The DAW remains
+      fully usable offline.
+
+    * An MCP server that disconnects, errors or times out never blocks audio,
+      never blocks the UI, and degrades to "that tool is unavailable".
+
+    * MCP tools are encapsulated so protocol/version changes do not reach the
+      DAW engine (mirrors rule 29).
+
+
+PHASE PLACEMENT
+-------------------------------------------------------------------------------
+
+    Phase 20 (AI Foundation) adds IMCPTransport / IMCPClient and the server
+    registry alongside the provider abstraction, credentials and networking.
+
+    Phase 26 (AI Tool Commands) wires TMCPToolBridge into the structured
+    command interface and adds the optional TUDAWMcpServer, with the same
+    validation and confirmation the built-in tools use.
+
+
+===============================================================================
+END OF MASTER DEVELOPMENT PLAN
+===============================================================================
+
+One particularly important design choice here is making AI optional rather than foundational. 
+The DAW, audio graph, tracker engine, codecs, recording and DSP should remain fully operational offline; OpenAI/ChatGPT, 
+Claude, DeepSeek and Suno then become provider modules connected through the controlled AI/tool layer. That architecture will 
+also make adding your own local Master AI or localhost/LAN models later considerably cleaner.

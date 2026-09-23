@@ -1,0 +1,11 @@
+version=1
+name=Take 20260916-192508-729-{87B55A88-41D0-4AA1-AE9F-1629B7E124F0}
+sample_rate=48000
+channels=1
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=48000
+timeline_start=0.000000000
+source_offset=0.000000000
+started_utc=2026-09-16T19:25:08

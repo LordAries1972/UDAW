@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-115228-292-{42D85988-C78A-4196-9A24-81C0709F46C5}
+sample_rate=48000
+channels=4
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=2000
+timeline_start=0.000000000
+source_offset=0.000000000
+started_utc=2026-09-21T11:52:28

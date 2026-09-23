@@ -1,0 +1,326 @@
+[
+  {
+    "id": "5312f3e6-9e24-4aaf-9fb4-10e3e69d5922",
+    "timestamp": "2026-09-11T02:28:32.234Z",
+    "updatedAt": "2026-09-11T02:28:32.260Z",
+    "taskId": "0b922e37-1ede-470c-a5fa-75050f6c71e5",
+    "category": "memory",
+    "title": "Retrieve local engineering memory",
+    "summary": "Selected 0 of 0 local memory record(s) within 0 tokens.",
+    "status": "completed",
+    "evidence": [
+      "0 stale record(s) excluded",
+      "0 conflict(s) withheld",
+      "Selected memory contents remained local and were not transmitted to the configured provider"
+    ],
+    "reasoningEvidence": {
+      "confirmedFacts": [],
+      "unknowns": [],
+      "validationPerformed": [
+        "Related file hashes checked against the current project index",
+        "Token budget enforced after reliability ranking"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 26
+  },
+  {
+    "id": "ab3c64a1-5f37-4755-9ddd-1b1946c72574",
+    "timestamp": "2026-09-11T02:28:32.424Z",
+    "updatedAt": "2026-09-11T02:28:32.433Z",
+    "taskId": "0b922e37-1ede-470c-a5fa-75050f6c71e5",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared generate_tests with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 9
+  },
+  {
+    "id": "5054f059-c2fc-4cfe-a888-11fbb47335de",
+    "timestamp": "2026-09-11T02:29:53.857Z",
+    "updatedAt": "2026-09-11T02:29:53.874Z",
+    "taskId": "107fc9f1-3112-4681-90ac-e4dc9a1de857",
+    "category": "memory",
+    "title": "Retrieve local engineering memory",
+    "summary": "Selected 0 of 0 local memory record(s) within 0 tokens.",
+    "status": "completed",
+    "evidence": [
+      "0 stale record(s) excluded",
+      "0 conflict(s) withheld",
+      "Selected memory contents remained local and were not transmitted to the configured provider"
+    ],
+    "reasoningEvidence": {
+      "confirmedFacts": [],
+      "unknowns": [],
+      "validationPerformed": [
+        "Related file hashes checked against the current project index",
+        "Token budget enforced after reliability ranking"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 17
+  },
+  {
+    "id": "b61620b8-126a-4e42-8860-98c52f26da4b",
+    "timestamp": "2026-09-11T02:29:53.953Z",
+    "updatedAt": "2026-09-11T02:29:53.961Z",
+    "taskId": "107fc9f1-3112-4681-90ac-e4dc9a1de857",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared generate_tests with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 8
+  },
+  {
+    "id": "5a81eb49-70b5-48dc-bd63-f7e345d75bbb",
+    "timestamp": "2026-09-11T02:32:39.885Z",
+    "updatedAt": "2026-09-11T02:32:39.893Z",
+    "taskId": "2c751bc4-3454-4e42-89d7-c3352087c630",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared review_patch with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 8
+  },
+  {
+    "id": "6c68d9e9-4474-492d-a057-fdc5e92baa37",
+    "timestamp": "2026-09-11T02:34:49.425Z",
+    "updatedAt": "2026-09-11T02:34:49.564Z",
+    "taskId": "450aef2e-26e0-423e-8b84-b2bb6effb898",
+    "category": "memory",
+    "title": "Retrieve local engineering memory",
+    "summary": "Selected 0 of 0 local memory record(s) within 0 tokens.",
+    "status": "completed",
+    "evidence": [
+      "0 stale record(s) excluded",
+      "0 conflict(s) withheld",
+      "Selected memory contents remained local and were not transmitted to the configured provider"
+    ],
+    "reasoningEvidence": {
+      "confirmedFacts": [],
+      "unknowns": [],
+      "validationPerformed": [
+        "Related file hashes checked against the current project index",
+        "Token budget enforced after reliability ranking"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 139
+  },
+  {
+    "id": "bc15b34f-45da-41dc-b076-7cb8dee73573",
+    "timestamp": "2026-09-11T02:34:49.614Z",
+    "updatedAt": "2026-09-11T02:34:49.627Z",
+    "taskId": "450aef2e-26e0-423e-8b84-b2bb6effb898",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared diagnose_failure with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 13
+  },
+  {
+    "id": "f7a1057d-3887-4a2d-8718-bdf23bafe729",
+    "timestamp": "2026-09-11T02:36:19.361Z",
+    "updatedAt": "2026-09-11T02:36:19.370Z",
+    "taskId": "8a015e92-c24d-424b-bb0f-cfb5cee7f9d1",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared review_patch with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 9
+  },
+  {
+    "id": "11877d46-2dff-4f41-9c41-09edef40fa19",
+    "timestamp": "2026-09-11T02:40:25.500Z",
+    "updatedAt": "2026-09-11T02:40:25.509Z",
+    "taskId": "fb0956dd-c8ac-4796-a9ab-af372ba80f2c",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared clarify_architecture with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 9
+  },
+  {
+    "id": "55e46ab4-74a5-49f3-9f8b-1dd8df01d308",
+    "timestamp": "2026-09-11T02:45:54.800Z",
+    "updatedAt": "2026-09-11T02:45:54.814Z",
+    "taskId": "b2fbdaf0-70d6-426c-b8ac-d6127d926cb9",
+    "category": "memory",
+    "title": "Retrieve local engineering memory",
+    "summary": "Selected 0 of 0 local memory record(s) within 0 tokens.",
+    "status": "completed",
+    "evidence": [
+      "0 stale record(s) excluded",
+      "0 conflict(s) withheld",
+      "Selected memory contents remained local and were not transmitted to the configured provider"
+    ],
+    "reasoningEvidence": {
+      "confirmedFacts": [],
+      "unknowns": [],
+      "validationPerformed": [
+        "Related file hashes checked against the current project index",
+        "Token budget enforced after reliability ranking"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 14
+  },
+  {
+    "id": "8643a3da-613a-4248-b714-979bf7109e6c",
+    "timestamp": "2026-09-11T02:45:54.907Z",
+    "updatedAt": "2026-09-11T02:45:54.916Z",
+    "taskId": "b2fbdaf0-70d6-426c-b8ac-d6127d926cb9",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared generate_tests with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 9
+  },
+  {
+    "id": "82d184d9-63ce-4f80-b88a-4aa825775885",
+    "timestamp": "2026-09-11T02:47:59.117Z",
+    "updatedAt": "2026-09-11T02:47:59.124Z",
+    "taskId": "b8083e31-76dc-4261-9237-3fb40c447030",
+    "category": "provider",
+    "title": "Construct intelligent provider question",
+    "summary": "Prepared review_patch with strategy \"Verified Engineering Default\".",
+    "status": "completed",
+    "evidence": [
+      "7 source-labelled prompt component(s)",
+      "0 approved scoped intuition rule(s) applied",
+      "0 intuition conflict(s) resolved by precedence"
+    ],
+    "reasoningEvidence": {
+      "unknowns": [
+        "Project facts not present in the supplied evidence remain unknown."
+      ],
+      "policyDecision": "No higher-precedence directive conflicted with an applied intuition rule.",
+      "validationPerformed": [
+        "Acceptance criteria included",
+        "Validation requirements included",
+        "Stop conditions included"
+      ]
+    },
+    "hiddenSensitiveData": false,
+    "durationMs": 7
+  }
+]

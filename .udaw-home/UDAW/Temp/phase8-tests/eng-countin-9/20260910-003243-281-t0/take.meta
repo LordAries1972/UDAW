@@ -1,0 +1,11 @@
+version=1
+name=Take 20260910-003243-281
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=48000
+timeline_start=1.000000000
+source_offset=0.000000000
+started_utc=2026-09-10T00:32:43

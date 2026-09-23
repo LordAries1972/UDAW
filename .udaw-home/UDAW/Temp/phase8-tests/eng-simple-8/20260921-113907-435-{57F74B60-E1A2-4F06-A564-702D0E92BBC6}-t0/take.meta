@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-113907-435-{57F74B60-E1A2-4F06-A564-702D0E92BBC6}
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=48000
+timeline_start=0.000000000
+source_offset=0.000000000
+started_utc=2026-09-21T11:39:07

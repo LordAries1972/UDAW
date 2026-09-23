@@ -1,0 +1,96 @@
+            <h3 id="ai-mcp">Model Context Protocol (MCP)</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Let UDAW's AI assistant use tools from external MCP servers (a sample librarian, a documentation server, a project-management server, ...) in the same conversation as the built-in DAW tools - and, in the other direction, let an external MCP-aware client drive UDAW itself through its own safe command API.</p>
+                <p><b>Why</b> MCP (Model Context Protocol) is the emerging standard for connecting an AI assistant to external tools without hand-writing a new integration for each one. UDAW treats every MCP tool call as informational context for the model rather than a direct DAW mutation, so connecting an unfamiliar third-party MCP server can never bypass UDAW's own edit-validation and confirmation rules.</p>
+            </div>
+
+            <h4>Consuming external MCP servers (the common case)</h4>
+            <ol>
+                <li>On the AI tab, fill in <strong>MCP name</strong> (a short label you choose) and
+                    <strong>MCP command line</strong>. UDAW picks the transport from what you type:
+                    anything starting with <code>http://</code> or <code>https://</code> is treated as an
+                    MCP-over-HTTP server (a plain JSON-RPC request/response POST to that URL - there is no
+                    streaming/SSE support yet, so a server that only pushes notifications over SSE will not
+                    work); anything else is launched as a local child process that speaks MCP over stdio,
+                    newline-delimited JSON-RPC on its stdin/stdout (e.g.
+                    <code>mcp-fs-server --root C:\Samples</code>).</li>
+                <li>Press <strong>Test</strong>. UDAW starts the transport, performs the MCP
+                    <code>initialize</code> handshake (protocol version <code>2024-11-05</code>,
+                    identifying itself as client "UDAW"), then calls <code>tools/list</code> and logs the
+                    server's name/version and every tool's name and description to the AI log. This is a
+                    one-shot connect-list-disconnect check, not a live connection - use it to confirm a
+                    server is reachable and see what it offers before relying on it in a real conversation.
+                    A server that never answers within its timeout (10 seconds by default) fails the test
+                    rather than hanging the UI.</li>
+                <li>Press <strong>Add</strong> to save it to your configured server list, written to a
+                    UDAW-wide config file (<code>mcp_servers.cfg</code> in your UDAW config directory,
+                    independent of any open project) so it persists across restarts and across every
+                    project you open. Remove it the same way when you no longer need it.</li>
+                <li>Once added, every chat conversation automatically connects to every configured server
+                    and tells the assistant what tools each one offers - the assistant can then call one of
+                    those tools mid-conversation (e.g. "search the sample library for a snare") and the
+                    result is fed back as context. <strong>MCP tool results never directly change your
+                    project</strong> - if you want the AI to act on what it found, ask it to do so via an
+                    ordinary DAW tool command (see <a href="#ai-chat">Chat &amp; Tool Commands</a>), which
+                    still goes through the normal validated, undo-safe path.</li>
+            </ol>
+            <div class="udaw-note">
+                A misbehaving or unreachable MCP server never blocks the DAW or the UI - it just
+                contributes no tools for that conversation ("that tool is unavailable"), exactly like a
+                built-in AI provider with no key configured.
+            </div>
+            <p><strong>Authentication and environment:</strong> the HTTP transport sends plain JSON-RPC
+                with no built-in header/token field, so an HTTP MCP server that needs authentication must
+                accept its credential embedded in the URL itself (e.g. a token query parameter) unless you
+                are willing to hand-edit <code>mcp_servers.cfg</code>. A stdio server, by contrast, can be
+                given extra environment variables (an <code>env=NAME1=VAL1;NAME2=VAL2</code> line in that
+                same config file, layered on top of UDAW's own process environment) - useful for passing a
+                credential to a local MCP server without putting it on the command line where it would show
+                up in a process list. There is no in-UI editor for these yet; set them by editing the
+                config file with UDAW closed.</p>
+            <p><strong>Resources and prompts:</strong> UDAW's MCP client can already fetch a server's
+                <code>resources/list</code>/<code>resources/read</code> and
+                <code>prompts/list</code>/<code>prompts/get</code> at the protocol level, but the AI chat
+                only surfaces a connected server's <strong>tools</strong> today - resources and prompts are
+                not yet pulled into the conversation automatically.</p>
+
+            <h4>Exposing UDAW as an MCP server (advanced)</h4>
+            <p>
+                UDAW can optionally expose its own safe DAW command API (the same tool table listed in
+                <a href="#ai-chat">Chat &amp; Tool Commands</a>) as an MCP server of its own, so an
+                external MCP-aware client - Claude Desktop, a local model, another application - can drive
+                UDAW directly over plain HTTP/JSON-RPC (one request per connection; no SSE/streaming, no
+                TLS - treat it as a trusted-local-network tool, not something to expose past your own
+                machine). This is <strong>off by default</strong> and binds to <code>127.0.0.1</code>
+                (loopback only, not reachable from the network) unless you change the bind address
+                yourself.
+            </p>
+            <ol>
+                <li>On the AI tab, check <strong>Expose UDAW as an MCP server</strong> and set the port
+                    (default <code>8765</code>) and bind address (default <code>127.0.0.1</code>; leave
+                    it unless you specifically understand the exposure you're creating by changing it).</li>
+                <li>Leave <strong>Allow destructive tools</strong> unchecked to only permit the read-only
+                    tools from the table below from external clients - a safe default for letting something
+                    look at your project without being able to change it.</li>
+                <li>Check it if you want an external client to also be able to run structural/destructive
+                    tools; even then, each destructive call additionally requires the external client to
+                    pass an explicit <code>confirm: true</code> argument, so a client can't destructively
+                    mutate the project through one blind call.</li>
+                <li>Every call an external client makes - destructive or not - runs through the exact same
+                    dispatch/undo-stack path as a chat-driven or mouse-driven edit, so it always lands on
+                    the undo stack and is subject to the same validation.</li>
+            </ol>
+            <p>The full set of DAW tools UDAW exposes, whether called by its own chat assistant or by an
+                external MCP client connected to <strong>Expose UDAW as an MCP server</strong>:</p>
+            <table class="udaw-table udaw-col-30">
+                <tr><th>Read-only</th><th>Reversible edit</th><th>Destructive (requires <code>confirm: true</code> from external MCP clients)</th></tr>
+                <tr><td><code>GetProjectInfo</code>, <code>GetTracks</code>, <code>GetTrackInfo</code>, <code>GetMixerState</code>, <code>GetSelection</code>, <code>AnalyzeAudio</code>, <code>SuggestMix</code>, <code>FindSample</code></td>
+                    <td><code>SetGain</code>, <code>SetPan</code>, <code>SetMute</code>, <code>SetSolo</code>, <code>AddMarker</code>, <code>CreateAutomation</code></td>
+                    <td><code>AddTrack</code>, <code>MoveClip</code>, <code>SetTempo</code>, <code>ExportProject</code>, <code>GenerateMusic</code>, <code>AddSampleToTimeline</code></td></tr>
+            </table>
+            <div class="udaw-warn">
+                Only enable exposure with a bind address you understand, and only leave "Allow destructive
+                tools" on while you trust whatever client will be connecting - it can mutate the open
+                project (add tracks, change tempo, export, trigger a paid Suno generation) subject only to
+                the confirm-flag requirement described above.
+            </div>

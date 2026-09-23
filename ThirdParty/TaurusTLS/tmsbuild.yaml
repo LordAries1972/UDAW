@@ -1,0 +1,36 @@
+minimum required tmsbuild version: 2.0
+
+application:
+  id: taurustls_developers.taurustls
+  name: TaurusTLS
+  description: TaurusTLS provides OpenSSL 3.x and 4.x support for Indy - Internet Direct
+  url: https://taurustls.org/
+
+  version file: version.txt
+
+supported frameworks:
+  rtl:
+    ide since: delphiseattle
+    platforms: 
+      - all
+
+  lcl:
+    ide since: lazarus
+    ide until: lazarus
+    platforms:
+      - all
+
+        
+packages:
+  - TaurusTLS_RT: [runtime, rtl]
+  - TaurusTLS_DT: [design, rtl]
+#lazarus
+  - taurustlsrt: [runtime, lcl]
+  - taurustlsldsgn: [design, lcl]
+
+package options:
+  root package folder: packages
+  
+help:
+  file: Help/chm/TaurusForIndy290All.chm
+

@@ -1,0 +1,98 @@
+{
+  "src/audio/dsp/UDAW.DSP.PitchShift.pas": {
+    "includedCount": 1,
+    "usedCount": 1
+  },
+  "UDAW.dpr": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "scripts/build-windows.ps1": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "scripts/test-windows.ps1": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/audio/graph/UDAW.Audio.Graph.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/codecs/aac/UDAW.Codec.AAC.Types.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/common/UDAW.Types.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/audio/dsp/UDAW.DSP.Filters.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/audio/dsp/UDAW.DSP.GraphicEQ.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/audio/dsp/UDAW.DSP.Resampler.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/audio/dsp/UDAW.DSP.Reverb.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/audio/backend/UDAW.Audio.Backend.WASAPI.pas": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "src/application/UDAW.App.pas": {
+    "includedCount": 1,
+    "usedCount": 1
+  },
+  "src/common/UDAW.Errors.pas": {
+    "includedCount": 2,
+    "usedCount": 0
+  },
+  ".agent-coder.json": {
+    "includedCount": 2,
+    "usedCount": 0
+  },
+  "src/ai/UDAW.AI.JSON.pas": {
+    "includedCount": 2,
+    "usedCount": 0
+  },
+  "src/ai/UDAW.AI.SecureLog.pas": {
+    "includedCount": 1,
+    "usedCount": 1
+  },
+  "docs/CodingRules.md": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "docs/Phase15-MP3.md": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "docs/Phase17-MIDI.md": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "docs/Phase18-Visualization.md": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "docs/Phase19-AdvancedDSP.md": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "docs/Phase20-AIFoundation.md": {
+    "includedCount": 1,
+    "usedCount": 0
+  },
+  "docs/Phase10-DSPEffects.md": {
+    "includedCount": 1,
+    "usedCount": 0
+  }
+}

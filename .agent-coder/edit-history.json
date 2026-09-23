@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "batches": [
+    {
+      "id": "0b89a690-fa8b-4566-981b-1be246e50f7b",
+      "createdAtMs": 1789093994806,
+      "entries": [
+        {
+          "relativePath": "src/audio/dsp/UDAW.DSP.PitchShift.pas",
+          "backupId": "1789093993588-f0a796d9",
+          "appliedContentHash": "3f529996fb2871478aa65205baaf18517cf04894a7a1d0f3014bcf30fc445308"
+        }
+      ]
+    },
+    {
+      "id": "12858bad-c9b4-4f3c-acf0-7a34745f9b73",
+      "createdAtMs": 1789094198967,
+      "entries": [
+        {
+          "relativePath": "src/application/UDAW.App.pas",
+          "backupId": "1789094197824-f01f135a",
+          "appliedContentHash": "31966deb4a8366261c0a0151ad1faf5ca6d17cf21e57679217823e3daad81979"
+        }
+      ]
+    },
+    {
+      "id": "587141a2-912f-4c9c-a1ad-b2958f880550",
+      "createdAtMs": 1789094911273,
+      "entries": [
+        {
+          "relativePath": "src/ai/UDAW.AI.SecureLog.pas",
+          "backupId": "1789094910828-ea719a90",
+          "appliedContentHash": "4b73cd8c0b4f1cf164ad557556d5ea75c8bf8dd5c6f1f211e35978eff9a4b642"
+        }
+      ]
+    }
+  ]
+}

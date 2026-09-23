@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-113908-125-{9C2C1DF8-BAAF-4041-BDE2-01542E9385B6}
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=48000
+timeline_start=1.000000000
+source_offset=0.000000000
+started_utc=2026-09-21T11:39:08

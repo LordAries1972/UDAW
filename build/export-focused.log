@@ -1,0 +1,21 @@
+Embarcadero Delphi for Win64 compiler version 36.0
+Copyright (c) 1983,2022 Embarcadero Technologies, Inc.
+src\common\UDAW.Media.Transcode.pas(172) Hint: H2443 Inline function 'TStorageFile.GetFileFromPathAsync' has not been expanded because unit 'Winapi.CommonTypes' is not specified in USES list
+src\common\UDAW.Media.Transcode.pas(193) Hint: H2443 Inline function 'TMediaEncodingProfile.CreateMp3' has not been expanded because unit 'Winapi.CommonTypes' is not specified in USES list
+src\common\UDAW.Media.Transcode.pas(194) Hint: H2443 Inline function 'TMediaEncodingProfile.CreateM4a' has not been expanded because unit 'Winapi.CommonTypes' is not specified in USES list
+src\timeline\UDAW.Timeline.Export.pas(164) Hint: H2443 Inline function 'RenameFile' has not been expanded because unit 'Winapi.Windows' is not specified in USES list
+src\timeline\UDAW.Timeline.Export.pas(170) Hint: H2443 Inline function 'RenameFile' has not been expanded because unit 'Winapi.Windows' is not specified in USES list
+src\timeline\UDAW.Timeline.Export.pas(174) Hint: H2443 Inline function 'RenameFile' has not been expanded because unit 'Winapi.Windows' is not specified in USES list
+src\timeline\UDAW.Timeline.Export.pas(177) Hint: H2443 Inline function 'RenameFile' has not been expanded because unit 'Winapi.Windows' is not specified in USES list
+src\timeline\UDAW.Timeline.Export.pas(190) Hint: H2443 Inline function 'RenameFile' has not been expanded because unit 'Winapi.Windows' is not specified in USES list
+src\timeline\UDAW.Timeline.Export.pas(192) Hint: H2443 Inline function 'RenameFile' has not been expanded because unit 'Winapi.Windows' is not specified in USES list
+38187 lines, 3.11 seconds, 2479216 bytes code, 294524 bytes data.
+UDAW test run - 2 tests
+----------------------------------------
+
+[timeline.export]
+  .... five formats, mixer, snapshot and attribution  PASS  five formats, mixer, snapshot and attribution
+  .... failure, cancellation and destination preservation  PASS  failure, cancellation and destination preservation
+
+----------------------------------------
+2 passed, 0 failed, 2 total

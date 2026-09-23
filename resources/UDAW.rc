@@ -1,0 +1,33 @@
+/* Windows application resources. The icon is embedded in the executable,
+   not merely shown by the splash image at development time. Constants are
+   inlined so brcc32 needs no SDK headers. */
+
+MAINICON ICON "udaw.ico"
+
+#define VOS__WINDOWS32 0x00000004L
+#define VFT_APP        0x00000001L
+
+1 VERSIONINFO
+ FILEVERSION 1,0,0,300
+ PRODUCTVERSION 1,0,0,300
+ FILEOS VOS__WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "Ultimanium\0"
+      VALUE "FileDescription",  "Ultimanium Audio Studio (UDAW)\0"
+      VALUE "FileVersion",      "1.0.300\0"
+      VALUE "InternalName",     "UDAW\0"
+      VALUE "OriginalFilename", "UDAW.exe\0"
+      VALUE "ProductName",      "Ultimanium Audio Studio\0"
+      VALUE "ProductVersion",   "1.0.300\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

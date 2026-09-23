@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-105402-995-{768F3651-3CDF-4824-B7B2-A5DBADA0DB32} (pass 2)
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=1
+frames=48000
+timeline_start=0.000000000
+source_offset=0.000000000
+started_utc=2026-09-21T10:54:03

@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{7F1B4B90-1C7E-4E2A-9E3B-9E1D0C2A4F10}</ProjectGuid>
+        <ProjectVersion>20.2</ProjectVersion>
+        <FrameworkType>VCL</FrameworkType>
+        <MainSource>UDAW.dpr</MainSource>
+        <Base>True</Base>
+        <Config Condition="'$(Config)'==''">Debug</Config>
+        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <TargetedPlatforms>2</TargetedPlatforms>
+        <AppType>Application</AppType>
+        <Icon_MainIcon>udaw.ico</Icon_MainIcon>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Base' or '$(Base)'!=''">
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Debug' or '$(Cfg_1)'!=''">
+        <Cfg_1>true</Cfg_1>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Config)'=='Release' or '$(Cfg_2)'!=''">
+        <Cfg_2>true</Cfg_2>
+        <CfgParent>Base</CfgParent>
+        <Base>true</Base>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base)'!=''">
+        <DCC_UnitSearchPath>src\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\project;src\recording;src\mixer;src\tracker;src\application;src\ui;src\web;src\input;src\video;src\ai;src\browser;src\composer;src\voice;ThirdParty\TaurusTLS\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_IncludePath>src\common;$(DCC_IncludePath)</DCC_IncludePath>
+        <DCC_Define>$(DCC_Define)</DCC_Define>
+        <DCC_ExeOutput>build\bin</DCC_ExeOutput>
+        <DCC_DcuOutput>build\dcu\$(Platform)\$(Config)</DCC_DcuOutput>
+        <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Vcl;Vcl.Imaging;Vcl.Touch;Vcl.Samples;Vcl.Shell;Winapi;$(DCC_Namespace)</DCC_Namespace>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <SanitizedProjectName>UDAW</SanitizedProjectName>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Base_Win64)'!=''">
+        <DCC_UsePackage>IndySystem;IndyProtocols;IndyCore;$(DCC_UsePackage)</DCC_UsePackage>
+        <BT_BuildType>Debug</BT_BuildType>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_1)'!=''">
+        <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
+        <DCC_Optimize>false</DCC_Optimize>
+        <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
+        <DCC_DebugDCUs>true</DCC_DebugDCUs>
+        <DCC_RangeChecking>true</DCC_RangeChecking>
+        <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
+    </PropertyGroup>
+    <PropertyGroup Condition="'$(Cfg_2)'!=''">
+        <DCC_Define>RELEASE;$(DCC_Define)</DCC_Define>
+        <DCC_Optimize>true</DCC_Optimize>
+        <DCC_DebugInformation>0</DCC_DebugInformation>
+    </PropertyGroup>
+    <ItemGroup>
+        <DelphiCompile Include="$(MainSource)">
+            <MainSource>MainSource</MainSource>
+        </DelphiCompile>
+        <DCCReference Include="src\common\UDAW.Types.pas" />
+        <DCCReference Include="src\common\UDAW.Version.pas" />
+        <DCCReference Include="src\common\UDAW.Errors.pas" />
+        <DCCReference Include="src\common\UDAW.Platform.pas" />
+        <DCCReference Include="src\common\UDAW.Paths.pas" />
+        <DCCReference Include="src\common\UDAW.Threading.pas" />
+        <DCCReference Include="src\common\UDAW.Logging.pas" />
+        <DCCReference Include="src\common\UDAW.Config.pas" />
+        <DCCReference Include="src\common\UDAW.Jobs.pas" />
+        <DCCReference Include="src\common\UDAW.SecureStorage.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Types.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Buffer.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Ring.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Source.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Offline.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Device.pas" />
+        <DCCReference Include="src\audio\backend\UDAW.Audio.Backend.Software.pas" />
+        <DCCReference Include="src\audio\backend\UDAW.Audio.Backend.WASAPI.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Backend.Factory.pas" />
+        <DCCReference Include="src\audio\UDAW.Audio.Engine.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Math.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Interpolation.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Filters.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.FFT.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Resampler.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Envelope.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Meter.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Dynamics.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Modulation.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Distortion.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Reverb.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.GraphicEQ.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Visualization.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.MultibandComp.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Mastering.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.TimeStretch.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.TempoDetect.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.PitchShift.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.ParametricEQ.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.StereoWidth.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.TransientShaper.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Delay.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Dither.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Spectral.pas" />
+        <DCCReference Include="src\sequencer\UDAW.Sequencer.Patterns.pas" />
+        <DCCReference Include="src\synth\UDAW.Synth.Instruments.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.Modulation.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.CLAP.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.VST3.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.AudioToMidi.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.SpectralFx.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Warp.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Exciter.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.LookaheadLimiter.pas" />
+        <DCCReference Include="src\audio\graph\UDAW.Audio.Graph.Nodes.pas" />
+        <DCCReference Include="src\audio\graph\UDAW.Audio.Graph.pas" />
+        <DCCReference Include="src\audio\graph\UDAW.Audio.Graph.Serializer.pas" />
+        <DCCReference Include="src\codecs\pcm\UDAW.Codec.WAV.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.Frame.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.Tables.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.Decoder.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.Encoder.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.Metadata.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.Source.pas" />
+        <DCCReference Include="src\codecs\mp3\UDAW.Codec.MP3.Timeline.pas" />
+        <DCCReference Include="src\codecs\flac\UDAW.Codec.FLAC.Frame.pas" />
+        <DCCReference Include="src\codecs\flac\UDAW.Codec.FLAC.Decoder.pas" />
+        <DCCReference Include="src\codecs\flac\UDAW.Codec.FLAC.Encoder.pas" />
+        <DCCReference Include="src\codecs\flac\UDAW.Codec.FLAC.pas" />
+        <DCCReference Include="src\codecs\flac\UDAW.Codec.FLAC.Source.pas" />
+        <DCCReference Include="src\codecs\flac\UDAW.Codec.FLAC.Timeline.pas" />
+        <DCCReference Include="src\codecs\ableton\UDAW.Codec.Ableton.pas" />
+        <DCCReference Include="src\codecs\ableton\UDAW.Codec.Ableton.Timeline.pas" />
+        <DCCReference Include="src\codecs\aac\UDAW.Codec.AAC.Types.pas" />
+        <DCCReference Include="src\codecs\aac\UDAW.Codec.AAC.Tables.pas" />
+        <DCCReference Include="src\codecs\aac\UDAW.Codec.AAC.Decoder.pas" />
+        <DCCReference Include="src\codecs\aac\UDAW.Codec.AAC.pas" />
+        <DCCReference Include="src\codecs\mp4\UDAW.Codec.MP4.Atoms.pas" />
+        <DCCReference Include="src\codecs\mp4\UDAW.Codec.MP4.Container.pas" />
+        <DCCReference Include="src\codecs\mp4\UDAW.Codec.MP4.pas" />
+        <DCCReference Include="src\codecs\mp4\UDAW.Codec.MP4.Source.pas" />
+        <DCCReference Include="src\codecs\mp4\UDAW.Codec.MP4.Timeline.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.Types.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.SMF.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.Sequence.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.PianoRoll.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.Engine.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.Serialization.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.Hardware.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.Capture.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.SongSpec.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.Lyrics.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.Validation.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.Serialization.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.Arrangement.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.VocalGuide.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.Commands.pas" />
+        <DCCReference Include="src\composer\UDAW.Composer.RevisionHistory.pas" />
+        <DCCReference Include="src\browser\UDAW.Browser.Catalogue.pas" />
+        <DCCReference Include="src\codecs\tracker\UDAW.Codec.ProTracker.pas" />
+        <DCCReference Include="src\codecs\tracker\UDAW.Codec.XM.pas" />
+        <DCCReference Include="src\codecs\tracker\UDAW.Codec.MPTM.pas" />
+        <DCCReference Include="src\codecs\flstudio\UDAW.Codec.FLStudio.pas" />
+        <DCCReference Include="src\codecs\flstudio\UDAW.Codec.FLStudio.Timeline.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Time.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Waveform.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Model.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Serialization.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.View.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.Model.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.Automation.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.Serialization.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.Engine.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.VST2.pas" />
+        <DCCReference Include="src\tracker\UDAW.Tracker.Types.pas" />
+        <DCCReference Include="src\tracker\UDAW.Tracker.Instrument.pas" />
+        <DCCReference Include="src\tracker\UDAW.Tracker.Pattern.pas" />
+        <DCCReference Include="src\tracker\UDAW.Tracker.Player.pas" />
+        <DCCReference Include="src\tracker\UDAW.Tracker.Serialization.pas" />
+        <DCCReference Include="src\project\UDAW.Project.Document.pas" />
+        <DCCReference Include="src\project\UDAW.Project.Serialization.pas" />
+        <DCCReference Include="src\project\UDAW.Project.Commands.pas" />
+        <DCCReference Include="src\project\UDAW.Project.Recovery.pas" />
+        <DCCReference Include="src\project\UDAW.Project.WindowLayout.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Commands.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Playback.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.Export.pas" />
+        <DCCReference Include="src\common\UDAW.Media.Attribution.pas" />
+        <DCCReference Include="src\common\UDAW.Media.Progress.pas" />
+        <DCCReference Include="src\common\UDAW.Media.Transcode.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.Commands.pas" />
+        <DCCReference Include="src\tracker\UDAW.Tracker.Commands.pas" />
+        <DCCReference Include="src\midi\UDAW.MIDI.Commands.pas" />
+        <DCCReference Include="src\recording\UDAW.Recording.Types.pas" />
+        <DCCReference Include="src\recording\UDAW.Recording.ChunkFile.pas" />
+        <DCCReference Include="src\recording\UDAW.Recording.Engine.pas" />
+        <DCCReference Include="src\recording\UDAW.Recording.Writer.pas" />
+        <DCCReference Include="src\recording\UDAW.Recording.Takes.pas" />
+        <DCCReference Include="src\recording\UDAW.Recording.Recovery.pas" />
+        <DCCReference Include="src\recording\UDAW.Recording.Commands.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.JSON.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Credentials.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.RateLimiter.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.SecureLog.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.HTTP.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Types.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.MCP.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.MCPBridge.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.MCPServer.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.OpenAI.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Claude.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.DeepSeek.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Providers.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Composer.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Suno.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Luma.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.MusicTab.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.ToolCommands.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.Analysis.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Mixing.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Mastering.pas" />
+        <DCCReference Include="src\ai\UDAW.AI.Revision.pas" />
+        <DCCReference Include="src\voice\UDAW.Voice.Command.pas" />
+        <DCCReference Include="src\voice\UDAW.Voice.Capture.pas" />
+        <DCCReference Include="src\voice\UDAW.Voice.Recognition.pas" />
+        <DCCReference Include="src\application\UDAW.App.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.Theme.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.ThemeColors.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.Hints.pas" />
+        <DCCReference Include="src\web\UDAW.Web.HelpClient.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.HelpForm.pas">
+            <Form>frmHelp</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.AboutForm.pas">
+            <Form>frmAbout</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.VST2Editor.pas">
+            <Form>frmVST2Editor</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.SplashForm.pas">
+            <Form>frmSplash</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.LogForm.pas">
+            <Form>frmLogViewer</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.MixInsertParams.pas">
+            <Form>frmMixInsertParams</Form>
+        </DCCReference>
+        <DCCReference Include="src\input\UDAW.Input.KeyHooks.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.MainForm.pas">
+            <Form>frmMain</Form>
+        </DCCReference>
+        <BuildConfiguration Include="Base">
+            <Key>Base</Key>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Debug">
+            <Key>Cfg_1</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+        <BuildConfiguration Include="Release">
+            <Key>Cfg_2</Key>
+            <CfgParent>Base</CfgParent>
+        </BuildConfiguration>
+    </ItemGroup>
+    <Import Project="$(BDS)\Bin\CodeGear.Delphi.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Delphi.Targets')" />
+    <Target Name="AfterBuild">
+        <!-- TaurusTLS lazy-loads OpenSSL from the exe's own directory (or PATH) on
+             first use (see UDAW.Web.HelpClient) - copy the two runtime DLLs there
+             on every build so they never need a separate manual step or a system
+             PATH change. -->
+        <ItemGroup>
+            <OpenSSLDlls Include="ThirdParty\OpenSSL\Win64\*.dll" />
+            <SplashLogo Include="udaw-icon-image.png" />
+        </ItemGroup>
+        <Copy SourceFiles="@(OpenSSLDlls)" DestinationFolder="$(DCC_ExeOutput)" SkipUnchangedFiles="true" Condition="'$(Platform)'=='Win64'" />
+        <Copy SourceFiles="@(SplashLogo)" DestinationFolder="$(DCC_ExeOutput)" SkipUnchangedFiles="true" Condition="'$(Platform)'=='Win64'" />
+    </Target>
+    <ProjectExtensions>
+        <Borland.Personality>Delphi.Personality.12</Borland.Personality>
+        <Borland.ProjectType>Application</Borland.ProjectType>
+    </ProjectExtensions>
+</Project>

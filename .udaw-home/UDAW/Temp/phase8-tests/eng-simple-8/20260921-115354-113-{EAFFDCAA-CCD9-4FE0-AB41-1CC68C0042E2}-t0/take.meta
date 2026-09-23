@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-115354-113-{EAFFDCAA-CCD9-4FE0-AB41-1CC68C0042E2}
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=48000
+timeline_start=0.000000000
+source_offset=0.000000000
+started_utc=2026-09-21T11:53:54

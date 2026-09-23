@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-105259-772-{3FF28799-1C92-43EC-9DC2-8199A7519464}
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=48000
+timeline_start=1.000000000
+source_offset=0.000000000
+started_utc=2026-09-21T10:52:59

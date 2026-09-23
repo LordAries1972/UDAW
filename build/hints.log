@@ -1,0 +1,20 @@
+==> Bumping build number: 288 -> 289
+==> Compiling version resource
+Borland Resource Compiler  Version 5.40
+Copyright (c) 1990, 1999 Inprise Corporation.  All rights reserved.
+==> Building UDAW.exe (Debug)
+Embarcadero Delphi for Win64 compiler version 36.0
+Copyright (c) 1983,2022 Embarcadero Technologies, Inc.
+361866 lines, 10.89 seconds, 11076724 bytes code, 1061656 bytes data.
+==> Building UDAWUpdater.exe (Debug)
+Embarcadero Delphi for Win64 compiler version 36.0
+Copyright (c) 1983,2022 Embarcadero Technologies, Inc.
+213 lines, 0.27 seconds, 1358628 bytes code, 189960 bytes data.
+==> Copying VCL style resources
+==> Stamping help page version banner
+==> OK: build\bin\UDAW.exe
+==> Packaging release (package-release.ps1)
+==> Packaged UDAW 1.0.0.289
+    exe sha256 : 82001337b0f2a43b09e98f5730b2b45abb662b5bc136c955d5451d3903ec48f3
+    zip sha256 : dbdd3881e639113338a8babdccf08916f0873c9bab232969230f21b711b27dfc
+    upload     : cgi-bin\udaw-update-win64.zip  and  udaw-version-win64.json

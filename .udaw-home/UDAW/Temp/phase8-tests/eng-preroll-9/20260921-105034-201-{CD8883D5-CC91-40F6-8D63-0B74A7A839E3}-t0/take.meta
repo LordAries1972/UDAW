@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-105034-201-{CD8883D5-CC91-40F6-8D63-0B74A7A839E3}
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=24000
+timeline_start=0.500000000
+source_offset=0.000000000
+started_utc=2026-09-21T10:50:34

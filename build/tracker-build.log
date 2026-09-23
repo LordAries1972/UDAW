@@ -1,0 +1,7 @@
+Borland Resource Compiler  Version 5.40
+Copyright (c) 1990, 1999 Inprise Corporation.  All rights reserved.
+Embarcadero Delphi for Win64 compiler version 36.0
+Copyright (c) 1983,2022 Embarcadero Technologies, Inc.
+src\codecs\ableton\UDAW.Codec.Ableton.pas(812) Hint: H2077 Value assigned to 'sampleNode' never used
+src\codecs\ableton\UDAW.Codec.Ableton.pas(905) Hint: H2077 Value assigned to 'AlsParseFile' never used
+334757 lines, 13.42 seconds, 9699156 bytes code, 971048 bytes data.

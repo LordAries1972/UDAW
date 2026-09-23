@@ -1,0 +1,31 @@
+2026-09-16 17:48:14.534  INFO   [App] (22588) === UDAW 1.0.177.16/09/2026 starting ===
+2026-09-16 17:48:14.534  INFO   [App] (22588) Platform: Windows 10.0.22631 (x86-64), 8 logical CPUs, host=WORK user=hobso
+2026-09-16 17:48:14.534  INFO   [App] (22588) Paths:
+config = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Config\
+data   = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Data\
+cache  = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Cache\
+logs   = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Logs\
+temp   = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Temp\
+exe    = F:\Projects\Delphi12\UDAW\build\verified\UDAW.exe
+2026-09-16 17:48:14.534  INFO   [App] (22588) Config: F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Config\udaw.ini
+2026-09-16 17:48:14.534  INFO   [App] (22588) First run detected - configuration created with defaults
+2026-09-16 17:48:14.719  INFO   [App] (22588) Secure storage: Windows DPAPI (per-user) (available)
+2026-09-16 17:48:14.722  INFO   [App] (22588) Job manager: 7 worker threads
+2026-09-16 17:48:14.776  INFO   [App] (22588) Audio: autostart disabled
+2026-09-16 17:48:14.779  INFO   [App] (22588) Startup complete.
+2026-09-16 17:48:18.874  INFO   [App] (22588) === UDAW shutting down ===
+2026-09-16 17:48:20.009  INFO   [App] (18084) === UDAW 1.0.177.16/09/2026 starting ===
+2026-09-16 17:48:20.009  INFO   [App] (18084) Platform: Windows 10.0.22631 (x86-64), 8 logical CPUs, host=WORK user=hobso
+2026-09-16 17:48:20.009  INFO   [App] (18084) Paths:
+config = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Config\
+data   = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Data\
+cache  = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Cache\
+logs   = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Logs\
+temp   = F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Temp\
+exe    = F:\Projects\Delphi12\UDAW\build\verified\UDAW.exe
+2026-09-16 17:48:20.009  INFO   [App] (18084) Config: F:\Projects\Delphi12\UDAW\build\startup-smoke\UDAW\Config\udaw.ini
+2026-09-16 17:48:20.017  INFO   [App] (18084) Secure storage: Windows DPAPI (per-user) (available)
+2026-09-16 17:48:20.021  INFO   [App] (18084) Job manager: 7 worker threads
+2026-09-16 17:48:20.026  INFO   [App] (18084) Audio: autostart disabled
+2026-09-16 17:48:20.029  INFO   [App] (18084) Startup complete.
+2026-09-16 17:48:22.732  INFO   [App] (18084) === UDAW shutting down ===

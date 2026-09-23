@@ -1,0 +1,2 @@
+﻿UDAW (C) DJ Hobson, Australia, 2026-2027
+Signed 16-bit little-endian PCM; stereo interleaved; 48000 Hz; 4800 frames

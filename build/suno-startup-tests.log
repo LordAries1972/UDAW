@@ -1,0 +1,1157 @@
+Embarcadero Delphi for Win64 compiler version 36.0
+Copyright (c) 1983,2022 Embarcadero Technologies, Inc.
+src\codecs\ableton\UDAW.Codec.Ableton.pas(812) Hint: H2077 Value assigned to 'sampleNode' never used
+src\codecs\ableton\UDAW.Codec.Ableton.pas(905) Hint: H2077 Value assigned to 'AlsParseFile' never used
+tests\Tests.Phase19.pas(126) Hint: H2164 Variable 'i' is declared but never used in 'Test_Multiband_TransparentSumsFlat'
+87879 lines, 5.92 seconds, 5261116 bytes code, 531368 bytes data.
+UDAW test run - 462 tests
+----------------------------------------
+
+[types]
+  .... version string
+  FAIL  version string  --  ETestFailure: expected "0.1.0" but got "1.0.0". semantic version
+  .... result record
+  PASS  result record
+
+[platform]
+  .... detection
+  PASS  detection
+
+[paths]
+  .... standard directories
+  PASS  standard directories
+
+[threading]
+  .... atomics (single thread)
+  PASS  atomics (single thread)
+  .... atomics (contended)
+  PASS  atomics (contended)
+  .... recursive lock
+  PASS  recursive lock
+  .... ring buffer basic
+  PASS  ring buffer basic
+  .... ring buffer overfill
+  PASS  ring buffer overfill
+  .... ring buffer SPSC threaded
+  PASS  ring buffer SPSC threaded
+
+[errors]
+  .... EUDAWError carries code
+  PASS  EUDAWError carries code
+
+[config]
+  .... value roundtrip
+  PASS  value roundtrip
+  .... atomic save keeps backup
+  PASS  atomic save keeps backup
+
+[logging]
+  .... dispatch + level filter
+  PASS  dispatch + level filter
+  .... memory ring sink
+  PASS  memory ring sink
+  .... rolling file sink
+  PASS  rolling file sink
+
+[jobs]
+  .... success + progress
+  PASS  success + progress
+  .... failure captured
+  PASS  failure captured
+  .... cooperative cancel
+  PASS  cooperative cancel
+  .... manager owns and frees
+  PASS  manager owns and frees
+
+[secure]
+  .... secret roundtrip
+  PASS  secret roundtrip
+
+[audio.types]
+  .... device format sizes
+  PASS  device format sizes
+  .... interleave int16 roundtrip
+  PASS  interleave int16 roundtrip
+  .... interleave float32 roundtrip
+  PASS  interleave float32 roundtrip
+  .... interleave int24 roundtrip
+  PASS  interleave int24 roundtrip
+  .... encode clamps out-of-range
+  PASS  encode clamps out-of-range
+
+[audio.buffer]
+  .... mix + gain
+  PASS  mix + gain
+  .... no realloc on reuse
+  PASS  no realloc on reuse
+  .... sine RMS
+  PASS  sine RMS
+
+[audio.ring]
+  .... basic write/read
+  PASS  basic write/read
+  .... underrun zero-pad
+  PASS  underrun zero-pad
+  .... threaded SPSC order
+  PASS  threaded SPSC order
+
+[audio.gen]
+  .... offline sine amp+freq
+  PASS  offline sine amp+freq
+  .... offline sine @44100
+  PASS  offline sine @44100
+  .... offline sweep rises
+  PASS  offline sweep rises
+  .... square over-range clips
+  PASS  square over-range clips
+  .... mixer sums sources
+  PASS  mixer sums sources
+
+[audio.backend]
+  .... software enumerate
+  PASS  software enumerate
+  .... paced blocks + timing
+  PASS  paced blocks + timing
+  .... duplex loopback capture
+  PASS  duplex loopback capture
+  .... virtual microphone
+  PASS  virtual microphone
+  .... device loss + reopen
+  PASS  device loss + reopen
+
+[audio.factory]
+  .... forced software
+  PASS  forced software
+  .... auto selection
+  PASS  auto selection
+
+[audio.engine]
+  .... open/start/stop/close
+  PASS  open/start/stop/close
+  .... recovers after loss
+  PASS  recovers after loss
+  .... sustained render (soak)
+  PASS  sustained render (soak)
+
+[audio.wasapi]
+  .... hardware tone (opt-in)       (set UDAW_WASAPI_TEST=1 to run the WASAPI hardware smoke)
+
+  PASS  hardware tone (opt-in)
+
+[dsp.math]
+  .... denormal + finite guards
+  PASS  denormal + finite guards
+  .... block operations
+  PASS  block operations
+  .... energy helpers
+  PASS  energy helpers
+  .... pan / crossfade laws
+  PASS  pan / crossfade laws
+  .... analysis windows
+  PASS  analysis windows
+  .... power-of-two helpers
+  PASS  power-of-two helpers
+  .... parameter smoother
+  PASS  parameter smoother
+
+[dsp.interp]
+  .... interpolation kernels
+  PASS  interpolation kernels
+  .... ReadFractional clamps
+  PASS  ReadFractional clamps
+
+[dsp.filter]
+  .... biquad lowpass response
+  PASS  biquad lowpass response
+  .... biquad highpass + peaking
+  PASS  biquad highpass + peaking
+  .... biquad processes a sine
+  PASS  biquad processes a sine
+  .... one-pole + DC blocker
+  PASS  one-pole + DC blocker
+  .... SVF response + stability
+  PASS  SVF response + stability
+  .... Butterworth biquad chain
+  PASS  Butterworth biquad chain
+
+[dsp.fft]
+  .... forward/inverse identity
+  PASS  forward/inverse identity
+  .... single-bin sine
+  PASS  single-bin sine
+  .... windowed dBFS calibration
+  PASS  windowed dBFS calibration
+
+[dsp.resampler]
+  .... upsample 24k->48k
+  PASS  upsample 24k->48k
+  .... downsample 48k->24k
+  PASS  downsample 48k->24k
+  .... one-shot identity
+  PASS  one-shot identity
+  .... linear-mode ratio
+  PASS  linear-mode ratio
+
+[dsp.envelope]
+  .... ADSR full cycle
+  PASS  ADSR full cycle
+  .... envelope follower
+  PASS  envelope follower
+
+[dsp.meter]
+  .... peak meter ballistics
+  PASS  peak meter ballistics
+  .... sliding RMS calibration
+  PASS  sliding RMS calibration
+  .... true-peak meter
+  PASS  true-peak meter
+  .... BS.1770 loudness tracking
+  PASS  BS.1770 loudness tracking
+  .... loudness gate on silence
+  PASS  loudness gate on silence
+  .... stereo correlation
+  PASS  stereo correlation
+
+[graph.build]
+  .... build + compile
+  PASS  build + compile
+  .... introspection
+  PASS  introspection
+
+[graph.validate]
+  .... no Output node
+  PASS  no Output node
+  .... two Output nodes
+  PASS  two Output nodes
+  .... illegal feedback cycle
+  PASS  illegal feedback cycle
+  .... connect into generator
+  PASS  connect into generator
+  .... missing source
+  PASS  missing source
+  .... channel mismatch
+  PASS  channel mismatch
+
+[graph.render]
+  .... gain node
+  PASS  gain node
+  .... summed fan-in
+  PASS  summed fan-in
+  .... bypass + mute
+  PASS  bypass + mute
+  .... biquad lowpass
+  PASS  biquad lowpass
+  .... delay line
+  PASS  delay line
+  .... meter tap
+  PASS  meter tap
+
+[graph.serialize]
+  .... round-trip
+  PASS  round-trip
+  .... reject file version
+  PASS  reject file version
+  .... reject unknown kind
+  PASS  reject unknown kind
+
+[graph.engine]
+  .... IAudioSource adapter
+  PASS  IAudioSource adapter
+  .... recompile + node retire
+  PASS  recompile + node retire
+
+[project.recent]
+  .... last ten, deduplication and restart persistence
+  PASS  last ten, deduplication and restart persistence
+
+[project.document]
+  .... defaults + dirty tracking
+  PASS  defaults + dirty tracking
+  .... validated setters
+  PASS  validated setters
+  .... clone is independent
+  PASS  clone is independent
+
+[project.serialize]
+  .... round-trip (text)
+  PASS  round-trip (text)
+  .... round-trip (file, atomic save)
+  PASS  round-trip (file, atomic save)
+  .... reject future version
+  PASS  reject future version
+  .... reject malformed document
+  PASS  reject malformed document
+
+[project.commands]
+  .... tempo undo/redo
+  PASS  tempo undo/redo
+  .... merge rapid tempo edits
+  PASS  merge rapid tempo edits
+  .... name + time signature
+  PASS  name + time signature
+  .... graph add/remove node
+  PASS  graph add/remove node
+  .... remove node restores connections
+  PASS  remove node restores connections
+  .... merge rapid node param edits
+  PASS  merge rapid node param edits
+  .... clear frees history
+  PASS  clear frees history
+
+[project.recovery]
+  .... autosave rotation
+  PASS  autosave rotation
+  .... unclean shutdown detection
+  PASS  unclean shutdown detection
+  .... recover newest candidate
+  PASS  recover newest candidate
+  .... tick respects interval + dirty
+  PASS  tick respects interval + dirty
+
+[codec.wav.roundtrip]
+  .... PCM 8-bit mono
+  PASS  PCM 8-bit mono
+  .... PCM 16-bit stereo
+  PASS  PCM 16-bit stereo
+  .... PCM 24-bit stereo
+  PASS  PCM 24-bit stereo
+  .... PCM 32-bit stereo
+  PASS  PCM 32-bit stereo
+  .... IEEE float 32 stereo
+  PASS  IEEE float 32 stereo
+  .... IEEE float 64 stereo
+  PASS  IEEE float 64 stereo
+  .... float32 6-channel
+  PASS  float32 6-channel
+  .... PCM 24-bit 8-channel
+  PASS  PCM 24-bit 8-channel
+
+[codec.wav.header]
+  .... ReadWavInfo fields
+  PASS  ReadWavInfo fields
+  .... EXTENSIBLE multichannel
+  PASS  EXTENSIBLE multichannel
+  .... RF64 round-trip
+  PASS  RF64 round-trip
+
+[codec.wav.io]
+  .... seek + partial read
+  PASS  seek + partial read
+  .... 8-bit PCM is unsigned
+  PASS  8-bit PCM is unsigned
+  .... memory-stream round-trip
+  PASS  memory-stream round-trip
+
+[codec.wav.reject]
+  .... not-a-WAV detection
+  PASS  not-a-WAV detection
+  .... malformed blob rejected
+  PASS  malformed blob rejected
+  .... unsupported bit depth
+  PASS  unsupported bit depth
+
+[codec.wav.play]
+  .... player - matching rate
+  PASS  player - matching rate
+  .... player - rate adaptation
+  PASS  player - rate adaptation
+
+[timeline.time]
+  .... seconds <-> samples
+  PASS  seconds <-> samples
+  .... beats and bars
+  PASS  beats and bars
+  .... grid spacing and snap
+  PASS  grid spacing and snap
+  .... bar/beat + timecode format
+  PASS  bar/beat + timecode format
+
+[timeline.waveform]
+  .... exact bounds + pyramid
+  PASS  exact bounds + pyramid
+  .... ramp + display columns
+  PASS  ramp + display columns
+  .... binary cache round-trip
+  PASS  binary cache round-trip
+  .... streaming build from WAV
+  PASS  streaming build from WAV
+
+[timeline.model]
+  .... add + query
+  PASS  add + query
+  .... split is non-destructive
+  PASS  split is non-destructive
+  .... trim + slip
+  PASS  trim + slip
+  .... move + duplicate + remove
+  PASS  move + duplicate + remove
+  .... lock guard
+  PASS  lock guard
+  .... markers, regions, clone
+  PASS  markers, regions, clone
+
+[timeline.serial]
+  .... standalone round-trip
+  PASS  standalone round-trip
+  .... embedded in project
+  PASS  embedded in project
+  .... v1 project still loads
+  PASS  v1 project still loads
+  .... version / line rejection
+  PASS  version / line rejection
+
+[timeline.view]
+  .... zoom, scroll, snap
+  PASS  zoom, scroll, snap
+
+[timeline.cmd]
+  .... add / remove track undo
+  PASS  add / remove track undo
+  .... clip move merge + remove
+  PASS  clip move merge + remove
+  .... split undo / redo
+  PASS  split undo / redo
+  .... clip gain merge
+  PASS  clip gain merge
+
+[timeline.playback]
+  .... clip audible at gain/pan
+  PASS  clip audible at gain/pan
+  .... track mute + solo
+  PASS  track mute + solo
+  .... clip + track dB gain combine
+  PASS  clip + track dB gain combine
+  .... silent outside clip range
+  PASS  silent outside clip range
+  .... playhead advances
+  PASS  playhead advances
+
+[recording.settings]
+  .... defaults + validate
+  PASS  defaults + validate
+  .... lead-in sample math
+  PASS  lead-in sample math
+
+[recording.chunk]
+  .... planar round-trip
+  PASS  planar round-trip
+  .... bounded memory / many flushes
+  PASS  bounded memory / many flushes
+  .... recover torn audio tail
+  PASS  recover torn audio tail
+  .... recover torn journal record
+  PASS  recover torn journal record
+  .... finalize to WAV
+  PASS  finalize to WAV
+
+[recording.engine]
+  .... simple pass
+  PASS  simple pass
+  .... pre-roll not recorded
+  PASS  pre-roll not recorded
+  .... count-in not recorded
+  PASS  count-in not recorded
+  .... punch in/out window
+  PASS  punch in/out window
+  .... punch edges mid-block
+  PASS  punch edges mid-block
+  .... latency compensation
+  PASS  latency compensation
+  .... loop recording stacks takes
+  PASS  loop recording stacks takes
+  .... mono + multichannel
+  PASS  mono + multichannel
+  .... input monitoring mix
+  PASS  input monitoring mix
+
+[recording.writer]
+  .... writer thread drains ring
+  PASS  writer thread drains ring
+
+[recording.takes]
+  .... comp default + split
+  PASS  comp default + split
+
+[recording.recovery]
+  .... scan + finalize crashed takes
+  PASS  scan + finalize crashed takes
+
+[recording.commit]
+  .... commit take -> timeline undo/redo
+  PASS  commit take -> timeline undo/redo
+
+[mixer.model]
+  .... defaults
+  PASS  defaults
+  .... add + route
+  PASS  add + route
+  .... rejects output cycle
+  PASS  rejects output cycle
+  .... rejects non-bus target
+  PASS  rejects non-bus target
+  .... remove strip cleans refs
+  PASS  remove strip cleans refs
+  .... solo / mute gate
+  PASS  solo / mute gate
+  .... VCA-group trim (nested)
+  PASS  VCA-group trim (nested)
+  .... clone is independent
+  PASS  clone is independent
+
+[mixer.serialize]
+  .... round-trip
+  PASS  round-trip
+  .... automation selectors
+  PASS  automation selectors
+  .... rejects bad version
+  PASS  rejects bad version
+  .... rejects unknown kind
+  PASS  rejects unknown kind
+  .... embedded in project v3
+  PASS  embedded in project v3
+  .... pre-v3 gains a master
+  PASS  pre-v3 gains a master
+
+[mixer.engine]
+  .... silence with only master
+  PASS  silence with only master
+  .... track -> master pan law
+  PASS  track -> master pan law
+  .... fader attenuation
+  PASS  fader attenuation
+  .... automated mute
+  PASS  automated mute
+  .... mute + solo
+  PASS  mute + solo
+  .... bus sum + bus fader
+  PASS  bus sum + bus fader
+  .... pre- vs post-fader send
+  PASS  pre- vs post-fader send
+  .... insert chain + bypass
+  PASS  insert chain + bypass
+  .... polarity cancellation
+  PASS  polarity cancellation
+  .... VCA scales member
+  PASS  VCA scales member
+
+[mixer.commands]
+  .... add/remove strip undo/redo
+  PASS  add/remove strip undo/redo
+  .... fader moves merge
+  PASS  fader moves merge
+  .... route rejects cycle
+  PASS  route rejects cycle
+  .... remove strip undo restores refs
+  PASS  remove strip undo restores refs
+
+[dsp.dynamics]
+  .... compressor: loud vs quiet
+  PASS  compressor: loud vs quiet
+  .... limiter ceiling
+  PASS  limiter ceiling
+  .... gate closes quiet tail
+  PASS  gate closes quiet tail
+  .... expander pulls down low level
+  PASS  expander pulls down low level
+  .... de-esser targets highs
+  PASS  de-esser targets highs
+  .... makeup gain
+  PASS  makeup gain
+
+[dsp.modulation]
+  .... tremolo modulates amplitude
+  PASS  tremolo modulates amplitude
+  .... auto-pan anti-phase
+  PASS  auto-pan anti-phase
+  .... chorus colours, keeps level
+  PASS  chorus colours, keeps level
+  .... phaser stays stable
+  PASS  phaser stays stable
+
+[dsp.distortion]
+  .... saturation bounded + nonlinear
+  PASS  saturation bounded + nonlinear
+  .... hard clip
+  PASS  hard clip
+  .... bit-crush quantises
+  PASS  bit-crush quantises
+  .... bit-crush downsample holds
+  PASS  bit-crush downsample holds
+  .... mix=0 bypass
+  PASS  mix=0 bypass
+
+[dsp.reverb]
+  .... tail + decay
+  PASS  tail + decay
+  .... stereo decorrelation
+  PASS  stereo decorrelation
+  .... dry mix + stability
+  PASS  dry mix + stability
+
+[dsp.graphiceq]
+  .... band boost
+  PASS  band boost
+  .... flat is transparent
+  PASS  flat is transparent
+
+[dsp.nodes]
+  .... effect param round-trips
+  PASS  effect param round-trips
+  .... compressor node in a graph
+  PASS  compressor node in a graph
+  .... graph serializer keeps new kinds
+  PASS  graph serializer keeps new kinds
+
+[dsp.mixer]
+  .... distortion insert changes output
+  PASS  distortion insert changes output
+  .... external sidechain ducks
+  PASS  external sidechain ducks
+
+[tracker.types]
+  .... note names + frequencies
+  PASS  note names + frequencies
+  .... effect letters round-trip
+  PASS  effect letters round-trip
+
+[tracker.model]
+  .... pattern resize keeps rows
+  PASS  pattern resize keeps rows
+  .... order table + patterns
+  PASS  order table + patterns
+  .... instrument slots
+  PASS  instrument slots
+  .... clone is independent
+  PASS  clone is independent
+
+[tracker.instr]
+  .... envelope interpolation
+  PASS  envelope interpolation
+  .... MakeSine
+  PASS  MakeSine
+
+[tracker.player]
+  .... silence when empty
+  PASS  silence when empty
+  .... note plays a tone
+  PASS  note plays a tone
+  .... octave up doubles pitch
+  PASS  octave up doubles pitch
+  .... arpeggio
+  PASS  arpeggio
+  .... portamento up
+  PASS  portamento up
+  .... tone portamento
+  PASS  tone portamento
+  .... volume slide down
+  PASS  volume slide down
+  .... set speed + BPM
+  PASS  set speed + BPM
+  .... position jump
+  PASS  position jump
+  .... note delay
+  PASS  note delay
+  .... song loop + end
+  PASS  song loop + end
+  .... ping-pong loop stable
+  PASS  ping-pong loop stable
+
+[tracker.serialize]
+  .... round-trip incl. PCM
+  PASS  round-trip incl. PCM
+  .... rejects bad docs
+  PASS  rejects bad docs
+  .... cell text
+  PASS  cell text
+  .... embedded in project v4
+  PASS  embedded in project v4
+  .... pre-v4 gains a module
+  PASS  pre-v4 gains a module
+
+[tracker.commands]
+  .... set cell undo/redo
+  PASS  set cell undo/redo
+  .... add/remove pattern
+  PASS  add/remove pattern
+  .... transport merges
+  PASS  transport merges
+  .... add instrument + sine
+  PASS  add instrument + sine
+
+[mod.sniff]
+  .... kind detection
+  PASS  kind detection
+
+[mod.import]
+  .... 31-sample structure
+  PASS  31-sample structure
+  .... 15-sample Soundtracker
+  PASS  15-sample Soundtracker
+  .... effect column mapping
+  PASS  effect column mapping
+  .... rejects garbage
+  PASS  rejects garbage
+  .... tolerates truncation
+  PASS  tolerates truncation
+
+[mod.period]
+  .... period / note maths
+  PASS  period / note maths
+
+[mod.play]
+  .... note plays a tone
+  PASS  note plays a tone
+  .... octave down halves pitch
+  PASS  octave down halves pitch
+
+[mod.export]
+  .... byte-level round trip
+  PASS  byte-level round trip
+  .... PCM within quantisation
+  PASS  PCM within quantisation
+  .... representability report
+  PASS  representability report
+
+[mod.cmd]
+  .... import command undo/redo
+  PASS  import command undo/redo
+  .... imported module embeds
+  PASS  imported module embeds
+
+[xm.sniff]
+  .... kind detection
+  PASS  kind detection
+
+[xm.import]
+  .... structure
+  PASS  structure
+  .... effect + volume column
+  PASS  effect + volume column
+  .... volume column set-volume
+  PASS  volume column set-volume
+  .... rejects garbage
+  PASS  rejects garbage
+  .... tolerates truncation
+  PASS  tolerates truncation
+
+[xm.rate]
+  .... relnote / finetune maths
+  PASS  relnote / finetune maths
+
+[xm.play]
+  .... note plays a tone
+  PASS  note plays a tone
+  .... octave down halves pitch
+  PASS  octave down halves pitch
+
+[xm.export]
+  .... byte-level round trip
+  PASS  byte-level round trip
+  .... representability report
+  PASS  representability report
+
+[xm.cmd]
+  .... import command undo/redo
+  PASS  import command undo/redo
+  .... imported module embeds
+  PASS  imported module embeds
+
+[mptm.sniff]
+  .... kind detection
+  PASS  kind detection
+
+[mptm.import]
+  .... structure
+  PASS  structure
+  .... effect + volume column
+  PASS  effect + volume column
+  .... rejects garbage
+  PASS  rejects garbage
+  .... malformed files stay safe
+  PASS  malformed files stay safe
+  .... IT2.14 compressed sample decodes
+  PASS  IT2.14 compressed sample decodes
+  .... IT2.15 compressed sample decodes
+  PASS  IT2.15 compressed sample decodes
+  .... truncated compressed sample stays safe
+  PASS  truncated compressed sample stays safe
+
+[mptm.play]
+  .... note plays a tone
+  PASS  note plays a tone
+  .... octave down halves pitch
+  PASS  octave down halves pitch
+
+[mptm.export]
+  .... byte-level round trip
+  PASS  byte-level round trip
+  .... representability report
+  PASS  representability report
+
+[mptm.cmd]
+  .... import command undo/redo
+  PASS  import command undo/redo
+  .... imported module embeds
+  PASS  imported module embeds
+
+[phase15.mp3]
+  .... Huffman tables self-check + decode
+  PASS  Huffman tables self-check + decode
+  .... decode conformance - tone CBR 128k vs ffmpeg    [snr] bestLag=1105 corr=1.000
+    [tone CBR128] decoder vs ffmpeg golden: SNR = 95.54 dB (frames 24192 vs 22050)
+
+  PASS  decode conformance - tone CBR 128k vs ffmpeg
+  .... decode - tone VBR spectral check
+  PASS  decode - tone VBR spectral check
+  .... decode conformance - real 48k excerpt vs ffmpeg    [snr] bestLag=1105 corr=0.999
+    [real excerpt 48k] decoder vs ffmpeg golden: SNR = 28.43 dB (frames 29952 vs 28800)
+
+  PASS  decode conformance - real 48k excerpt vs ffmpeg
+  .... ID3 metadata build + read round-trip
+  PASS  ID3 metadata build + read round-trip
+  .... encoder - CBR produces a valid scannable stream
+  PASS  encoder - CBR produces a valid scannable stream
+  .... encoder - VBR mode encodes
+  PASS  encoder - VBR mode encodes
+  .... encoder - encode->decode tone round-trip    [enc-rt] domL=447.6 (want 440)  domR=1443.8 (want 1500)
+
+  PASS  encoder - encode->decode tone round-trip
+  .... header MPEG-1 Layer III
+  PASS  header MPEG-1 Layer III
+  .... header padding adds one slot
+  PASS  header padding adds one slot
+  .... header MPEG-2 Layer III
+  PASS  header MPEG-2 Layer III
+  .... header MPEG-2.5
+  PASS  header MPEG-2.5
+  .... header free format
+  PASS  header free format
+  .... header rejection paths
+  PASS  header rejection paths
+  .... header Layer I / II length
+  PASS  header Layer I / II length
+  .... bit reader MSB-first + overrun
+  PASS  bit reader MSB-first + overrun
+  .... bit reader seek / bits-left
+  PASS  bit reader seek / bits-left
+  .... ID3v2 syncsafe size
+  PASS  ID3v2 syncsafe size
+  .... Xing / Info / LAME header
+  PASS  Xing / Info / LAME header
+  .... VBRI header
+  PASS  VBRI header
+  .... stream scan - CBR + ID3 envelope
+  PASS  stream scan - CBR + ID3 envelope
+  .... stream scan - VBR classification
+  PASS  stream scan - VBR classification
+  .... stream scan - resync over garbage
+  PASS  stream scan - resync over garbage
+  .... signature sniffing
+  FAIL  signature sniffing  --  ETestFailure: expected TRUE: stream starting with a valid frame sniffs as MP3
+  .... scalefactor-band width tables vs ISO 11172-3 B.8
+  PASS  scalefactor-band width tables vs ISO 11172-3 B.8
+  .... stream decoder - incremental output equals whole-file
+  PASS  stream decoder - incremental output equals whole-file
+  .... stream decoder - SeekToSample pre-roll reconverges    [snr] bestLag=0 corr=1.000
+    [stream-seek] reconvergence SNR = 200.0 dB
+
+  PASS  stream decoder - SeekToSample pre-roll reconverges
+  .... MP3 IAudioSource - render + seek
+  PASS  MP3 IAudioSource - render + seek
+  .... TImportMp3Command - execute / undo / redo
+  PASS  TImportMp3Command - execute / undo / redo
+
+[phaseflac.flac]
+  .... sniff rejects garbage / too-short / nil
+  PASS  sniff rejects garbage / too-short / nil
+  .... sniff accepts fLaC magic
+  PASS  sniff accepts fLaC magic
+  .... sniff never trusts the .flac extension
+  PASS  sniff never trusts the .flac extension
+  .... probe reads STREAMINFO fields
+  PASS  probe reads STREAMINFO fields
+  .... decode - mono CONSTANT subframe
+  PASS  decode - mono CONSTANT subframe
+  .... decode - mono FIXED order-1 subframe
+  PASS  decode - mono FIXED order-1 subframe
+  .... decode - independent stereo (two FIXED order-0)
+  PASS  decode - independent stereo (two FIXED order-0)
+  .... decode - left/side stereo decorrelation
+  PASS  decode - left/side stereo decorrelation
+  .... decode - right/side stereo decorrelation
+  PASS  decode - right/side stereo decorrelation
+  .... decode - mid/side stereo decorrelation
+  PASS  decode - mid/side stereo decorrelation
+  .... decode - VERBATIM subframe
+  PASS  decode - VERBATIM subframe
+  .... frame footer CRC-16 mismatch is logged, not fatal
+  PASS  frame footer CRC-16 mismatch is logged, not fatal
+  .... frame header CRC-8 mismatch is logged, not fatal
+  PASS  frame header CRC-8 mismatch is logged, not fatal
+  .... trailing garbage after the last frame stops cleanly
+  PASS  trailing garbage after the last frame stops cleanly
+  .... frame header rejects a bad sync code
+  PASS  frame header rejects a bad sync code
+  .... frame header parses a well-formed frame
+  PASS  frame header parses a well-formed frame
+
+[phase16.mp4]
+  .... box writer <-> atom tree round-trip
+  PASS  box writer <-> atom tree round-trip
+  .... big-endian scalar reads + bounds check
+  PASS  big-endian scalar reads + bounds check
+  .... AudioSpecificConfig build <-> parse
+  PASS  AudioSpecificConfig build <-> parse
+  .... PCM16-in-MP4 encode -> decode round-trip
+  PASS  PCM16-in-MP4 encode -> decode round-trip
+  .... PCM24-in-MP4 encode -> decode round-trip
+  PASS  PCM24-in-MP4 encode -> decode round-trip
+  .... Float32-in-MP4 encode -> decode round-trip
+  PASS  Float32-in-MP4 encode -> decode round-trip
+  .... BuildAAC -> reader identifies AAC LC + ASC
+  PASS  BuildAAC -> reader identifies AAC LC + ASC
+  .... hostile / truncated input is handled
+  PASS  hostile / truncated input is handled
+
+[phase16b.aac]
+  .... AAC bit reader MSB-first / peek / align / overrun
+  PASS  AAC bit reader MSB-first / peek / align / overrun
+  .... AudioSpecificConfig build <-> parse
+  PASS  AudioSpecificConfig build <-> parse
+  .... AudioSpecificConfig explicit SBR signalling
+  PASS  AudioSpecificConfig explicit SBR signalling
+  .... SWB offset tables monotonic + terminate
+  PASS  SWB offset tables monotonic + terminate
+  .... KBD / sine windows + Princen-Bradley identity
+  PASS  KBD / sine windows + Princen-Bradley identity
+  .... Huffman table gate + decode refusal while stubbed
+  PASS  Huffman table gate + decode refusal while stubbed
+  .... ADTS sniff / probe / frame walk
+  PASS  ADTS sniff / probe / frame walk
+
+[phase17.midi]
+  .... variable-length quantity round-trip
+  PASS  variable-length quantity round-trip
+  .... channel-voice message + note tables
+  PASS  channel-voice message + note tables
+  .... SMF write -> read round-trip (meta + sysex)
+  PASS  SMF write -> read round-trip (meta + sysex)
+  .... sequence tempo map: seconds <-> ticks
+  PASS  sequence tempo map: seconds <-> ticks
+  .... note-on/off pairing from an SMF
+  PASS  note-on/off pairing from an SMF
+  .... sequence -> SMF -> sequence round-trip
+  PASS  sequence -> SMF -> sequence round-trip
+  .... embedded MIDI section text round-trip
+  PASS  embedded MIDI section text round-trip
+  .... project file v5 carries MIDI clips
+  PASS  project file v5 carries MIDI clips
+  .... older v4 project with no MIDI block loads
+  PASS  older v4 project with no MIDI block loads
+  .... piano roll edits (add/move/resize/quantize/velocity)
+  PASS  piano roll edits (add/move/resize/quantize/velocity)
+  .... scale membership + chord namer
+  PASS  scale membership + chord namer
+  .... undo commands (add + merged move)
+  PASS  undo commands (add + merged move)
+  .... engine renders an audible tone for a note
+  PASS  engine renders an audible tone for a note
+
+[phase18.visualization]
+  .... spectrum analyzer locates a 1 kHz tone near 0 dBFS
+  PASS  spectrum analyzer locates a 1 kHz tone near 0 dBFS
+  .... spectrogram buffer accumulates rows with the right bin count
+  PASS  spectrogram buffer accumulates rows with the right bin count
+  .... goniometer correlation near +1 for in-phase L=R
+  PASS  goniometer correlation near +1 for in-phase L=R
+  .... goniometer correlation near -1 for out-of-phase L=-R
+  PASS  goniometer correlation near -1 for out-of-phase L=-R
+  .... triggered oscilloscope captures exactly the configured length
+  PASS  triggered oscilloscope captures exactly the configured length
+  .... ballistic meter settles near -18 dBFS (peak + VU)
+  PASS  ballistic meter settles near -18 dBFS (peak + VU)
+  .... meter ballistics id round-trip
+  PASS  meter ballistics id round-trip
+
+[phase19.advanceddsp]
+  .... multiband compressor: transparent bands sum flat
+  PASS  multiband compressor: transparent bands sum flat
+  .... multiband compressor: low band compresses independently
+  PASS  multiband compressor: low band compresses independently
+  .... advanced compressor: lookahead reacts to a transient
+  PASS  advanced compressor: lookahead reacts to a transient
+  .... mastering chain: output respects the true-peak ceiling
+  PASS  mastering chain: output respects the true-peak ceiling
+  .... phase vocoder: 2x stretch preserves pitch
+  PASS  phase vocoder: 2x stretch preserves pitch
+  .... pitch shifter: +12 semitones preserves length
+  PASS  pitch shifter: +12 semitones preserves length
+
+[phase20.aifoundation]
+  .... JSON: parse nested document + field access
+  PASS  JSON: parse nested document + field access
+  .... JSON: ToJSONString -> Parse round-trip
+  PASS  JSON: ToJSONString -> Parse round-trip
+  .... JSON: malformed input raises errParse
+  PASS  JSON: malformed input raises errParse
+  .... Credentials: key naming + display names
+  PASS  Credentials: key naming + display names
+  .... RateLimiter: acquire, exhaust, reset
+  PASS  RateLimiter: acquire, exhaust, reset
+  .... SecureLog: registered-secret + bearer-token redaction
+  PASS  SecureLog: registered-secret + bearer-token redaction
+  .... Types: TAIRole <-> id round-trip
+  PASS  Types: TAIRole <-> id round-trip
+  .... HTTP: cancel token
+  PASS  HTTP: cancel token
+  .... MCP: in-memory server registry add/find/remove
+  PASS  MCP: in-memory server registry add/find/remove
+
+[phase21.openai]
+  .... OpenAI: provider identity
+  PASS  OpenAI: provider identity
+  .... Providers: factory dispatch
+  PASS  Providers: factory dispatch
+
+[phase22.claude]
+  .... Claude: provider identity
+  PASS  Claude: provider identity
+  .... Providers: factory dispatch
+  PASS  Providers: factory dispatch
+
+[phase23.deepseek]
+  .... DeepSeek: provider identity
+  PASS  DeepSeek: provider identity
+  .... Providers: factory dispatch
+  PASS  Providers: factory dispatch
+
+[phase24.suno]
+  .... Suno: streaming and invalid proxy responses
+  PASS  Suno: streaming and invalid proxy responses
+  .... Suno: managed task lifecycle
+  PASS  Suno: managed task lifecycle
+  .... Suno: provider payload contracts
+  PASS  Suno: provider payload contracts
+  .... Suno: clip status text mapping
+  PASS  Suno: clip status text mapping
+  .... Suno: default base URL
+  PASS  Suno: default base URL
+  .... Suno: base URL trailing-slash trim
+  PASS  Suno: base URL trailing-slash trim
+
+[phase25.voice]
+  .... Voice: known commands parse
+  PASS  Voice: known commands parse
+  .... Voice: unrecognised text falls through to chat
+  PASS  Voice: unrecognised text falls through to chat
+  .... Voice: action display names
+  PASS  Voice: action display names
+
+[phase26.ai_tools]
+  .... ParseAIToolCalls: extracts a fenced tool block
+  PASS  ParseAIToolCalls: extracts a fenced tool block
+  .... ParseAIToolCalls: multiple blocks, malformed one skipped
+  PASS  ParseAIToolCalls: multiple blocks, malformed one skipped
+  .... ParseAIToolCalls: no fence => no calls
+  PASS  ParseAIToolCalls: no fence => no calls
+  .... AIToolKindFromId: accepts plan-example aliases
+  PASS  AIToolKindFromId: accepts plan-example aliases
+  .... IsDestructiveTool/IsReadOnlyTool classification
+  PASS  IsDestructiveTool/IsReadOnlyTool classification
+  .... ValidateToolCall: range and required-field checks
+  PASS  ValidateToolCall: range and required-field checks
+  .... Dispatcher: SetGain goes through the undo stack
+  PASS  Dispatcher: SetGain goes through the undo stack
+  .... Dispatcher: GetProjectInfo returns JSON, no undo entry
+  PASS  Dispatcher: GetProjectInfo returns JSON, no undo entry
+  .... Dispatcher: unknown track fails cleanly
+  PASS  Dispatcher: unknown track fails cleanly
+
+[phase26.mcp]
+  .... Registry: SaveToFile/LoadFromFile round-trip
+  PASS  Registry: SaveToFile/LoadFromFile round-trip
+  .... Registry: adding a duplicate name is rejected
+  PASS  Registry: adding a duplicate name is rejected
+  .... Registry: Update changes a config in place
+  PASS  Registry: Update changes a config in place
+  .... MCPBridge: parses a fenced mcp-tool block
+  PASS  MCPBridge: parses a fenced mcp-tool block
+  .... MCPBridge: malformed/incomplete blocks are skipped
+  PASS  MCPBridge: malformed/incomplete blocks are skipped
+  .... MCPBridge: unknown server fails cleanly
+  PASS  MCPBridge: unknown server fails cleanly
+  .... MCPServer: tools/list advertises the built-in DAW tools
+  PASS  MCPServer: tools/list advertises the built-in DAW tools
+  .... MCPServer: a read-only tool call works with no confirmation
+  PASS  MCPServer: a read-only tool call works with no confirmation
+  .... MCPServer: a destructive tool call is refused when AllowDestructive is off
+  PASS  MCPServer: a destructive tool call is refused when AllowDestructive is off
+  .... MCPServer: a destructive tool call needs confirm=true even when allowed
+  PASS  MCPServer: a destructive tool call needs confirm=true even when allowed
+  .... MCPServer: an unknown JSON-RPC method returns a clean error
+  PASS  MCPServer: an unknown JSON-RPC method returns a clean error
+
+[phase27.ai_mixing]
+  .... AnalyzeStereoBuffer: silent buffer
+  PASS  AnalyzeStereoBuffer: silent buffer
+  .... AnalyzeStereoBuffer: clipped square wave
+  PASS  AnalyzeStereoBuffer: clipped square wave
+  .... AnalyzeStereoBuffer: detects a clean sine's pitch
+  PASS  AnalyzeStereoBuffer: detects a clean sine's pitch
+  .... AnalysisResultToJSONString: carries the plan's example fields
+  PASS  AnalysisResultToJSONString: carries the plan's example fields
+  .... SuggestMixHeuristic: flags bass masking a Bass strip
+  PASS  SuggestMixHeuristic: flags bass masking a Bass strip
+  .... TAIMixingSession: Preview/Apply/Reject workflow
+  PASS  TAIMixingSession: Preview/Apply/Reject workflow
+  .... TAIMixingSession: Apply keeps the edit on the undo stack
+  PASS  TAIMixingSession: Apply keeps the edit on the undo stack
+
+[phase28.ai_mastering]
+  .... SuggestMasteringChain: hot true peak, controlled dynamics
+  PASS  SuggestMasteringChain: hot true peak, controlled dynamics
+  .... SuggestMasteringChain: heavy low end -> corrective EQ cut
+  PASS  SuggestMasteringChain: heavy low end -> corrective EQ cut
+  .... SuggestMasteringChain: very dynamic mix -> gentle glue compression
+  PASS  SuggestMasteringChain: very dynamic mix -> gentle glue compression
+  .... MasteringSuggestionToText: produces readable output
+  PASS  MasteringSuggestionToText: produces readable output
+  .... TAIMasteringSession: Preview/Compare/Reject on the master strip
+  PASS  TAIMasteringSession: Preview/Compare/Reject on the master strip
+
+[phase29.theming]
+  .... Five built-in themes exist
+  PASS  Five built-in themes exist
+  .... Built-in themes are visually distinct
+  PASS  Built-in themes are visually distinct
+  .... ThemeColorsGet falls back for an unknown name
+  PASS  ThemeColorsGet falls back for an unknown name
+  .... ThemeColorsApply changes the current theme
+  PASS  ThemeColorsApply changes the current theme
+  .... Save/Export/Import/Reset round-trip
+  PASS  Save/Export/Import/Reset round-trip
+
+[daw-import.ableton]
+  .... sniff accepts a real gzip file
+  PASS  sniff accepts a real gzip file
+  .... sniff rejects plain text with an .als extension
+  PASS  sniff rejects plain text with an .als extension
+  .... sniff rejects a missing file
+  PASS  sniff rejects a missing file
+  .... parse round-trips tempo/track/clip fields
+  PASS  parse round-trips tempo/track/clip fields
+  .... an unresolvable sample warns instead of failing the import
+  PASS  an unresolvable sample warns instead of failing the import
+  .... a non-Ableton gzip document raises
+  PASS  a non-Ableton gzip document raises
+
+[daw-import.flstudio]
+  .... sniff uses FLhd content magic
+  PASS  sniff uses FLhd content magic
+  .... parse imports a resolved playlist sampler clip
+  PASS  parse imports a resolved playlist sampler clip
+  .... unresolved sample warns without failing the project
+  PASS  unresolved sample warns without failing the project
+
+----------------------------------------
+460 passed, 2 failed, 462 total

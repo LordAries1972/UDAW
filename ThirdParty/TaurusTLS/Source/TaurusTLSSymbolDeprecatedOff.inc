@@ -1,0 +1,7 @@
+{$IFDEF HAS_DEPRECATED}
+  {$WARN SYMBOL_DEPRECATED OFF}
+{$ENDIF}
+{$ifdef HAS_DIRECTIVE_PUSHPOP}
+  {$push}
+  {$warn 05043 off}
+{$endif}

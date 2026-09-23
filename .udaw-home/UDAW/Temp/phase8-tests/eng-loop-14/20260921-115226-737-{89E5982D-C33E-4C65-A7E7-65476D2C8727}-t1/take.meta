@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-115226-737-{89E5982D-C33E-4C65-A7E7-65476D2C8727} (pass 2)
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=1
+frames=48000
+timeline_start=0.000000000
+source_offset=0.000000000
+started_utc=2026-09-21T11:52:27

@@ -1,0 +1,11 @@
+version=1
+name=Take 20260921-115224-797-{CF0D6E56-60FC-4D7B-A7F0-AF5488B539BC}
+sample_rate=48000
+channels=2
+pcm_format=float32
+status=finalized
+pass_index=0
+frames=24000
+timeline_start=0.500000000
+source_offset=0.000000000
+started_utc=2026-09-21T11:52:24

@@ -1,0 +1,98 @@
+[
+  {
+    "requestId": "0b922e37-1ede-470c-a5fa-75050f6c71e5",
+    "provider": "claude",
+    "model": "unknown",
+    "taskShape": "finalImplementationPatchMultiFile",
+    "latencyMs": 1121,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "failed": true,
+    "id": "d3fd6dde-97d3-47af-8234-3a6275380e65",
+    "recordedAt": "2026-09-11T02:28:33.578Z"
+  },
+  {
+    "requestId": "107fc9f1-3112-4681-90ac-e4dc9a1de857",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "taskShape": "finalImplementationPatchMultiFile",
+    "latencyMs": 165728,
+    "inputTokens": 72491,
+    "outputTokens": 18237,
+    "failed": false,
+    "id": "4fc81c78-15cf-441d-a776-309c509ab8b0",
+    "recordedAt": "2026-09-11T02:32:39.737Z"
+  },
+  {
+    "requestId": "2c751bc4-3454-4e42-89d7-c3352087c630",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "taskShape": "adversarialReview",
+    "latencyMs": 33573,
+    "inputTokens": 1457,
+    "outputTokens": 2956,
+    "failed": false,
+    "id": "9e521ad5-195b-4580-949d-9a78f49504a6",
+    "recordedAt": "2026-09-11T02:33:13.503Z"
+  },
+  {
+    "requestId": "450aef2e-26e0-423e-8b84-b2bb6effb898",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "taskShape": "finalImplementationPatchMultiFile",
+    "latencyMs": 89566,
+    "inputTokens": 14310,
+    "outputTokens": 9170,
+    "failed": false,
+    "id": "d769c589-9003-4e27-a121-8838d5d238de",
+    "recordedAt": "2026-09-11T02:36:19.235Z"
+  },
+  {
+    "requestId": "8a015e92-c24d-424b-bb0f-cfb5cee7f9d1",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "taskShape": "adversarialReview",
+    "latencyMs": 18371,
+    "inputTokens": 1304,
+    "outputTokens": 1519,
+    "failed": false,
+    "id": "9bdcbc19-137f-4123-a9ec-e0f38c2aa574",
+    "recordedAt": "2026-09-11T02:36:37.779Z"
+  },
+  {
+    "requestId": "fb0956dd-c8ac-4796-a9ab-af372ba80f2c",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "taskShape": "architectureAnalysisBounded",
+    "latencyMs": 23456,
+    "inputTokens": 842,
+    "outputTokens": 1775,
+    "failed": false,
+    "id": "d608295b-5673-409d-a793-d8da0134ec93",
+    "recordedAt": "2026-09-11T02:40:49.004Z"
+  },
+  {
+    "requestId": "b2fbdaf0-70d6-426c-b8ac-d6127d926cb9",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "taskShape": "finalImplementationPatchMultiFile",
+    "latencyMs": 124091,
+    "inputTokens": 30642,
+    "outputTokens": 12979,
+    "failed": false,
+    "id": "5285335d-bedc-4a36-98bd-2b460e7585ee",
+    "recordedAt": "2026-09-11T02:47:59.045Z"
+  },
+  {
+    "requestId": "b8083e31-76dc-4261-9237-3fb40c447030",
+    "provider": "claude",
+    "model": "claude-sonnet-5",
+    "taskShape": "adversarialReview",
+    "latencyMs": 31613,
+    "inputTokens": 1498,
+    "outputTokens": 3020,
+    "failed": false,
+    "id": "d1063dfc-5be7-4105-8dec-fbc10603af76",
+    "recordedAt": "2026-09-11T02:48:30.780Z"
+  }
+]
