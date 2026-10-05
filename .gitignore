@@ -2,3 +2,10 @@
 *.dcu
 *.dcu
 *.exe
+build/
+.agent-coder/
+.claude/
+.udaw-home/
+.vscode/
+.workspace
+.workspace.bak

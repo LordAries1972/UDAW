@@ -85,6 +85,8 @@ type
     OffsetSeconds: Double;   // from the clip's start
     LengthSeconds: Double;   // 0 = to the end of the clip
     Color: Integer;
+    Kind: string;            // effect kind it was rendered with ('' = unknown/older project)
+    Params: string;          // the settings it was rendered with, so it can be edited later
   end;
 
   TTimelineClip = class
@@ -125,7 +127,14 @@ type
     constructor Create(AId: Integer);
     procedure Assign(ASrc: TTimelineClip);
     function Clone: TTimelineClip;
-    procedure AddEffectRegion(const AName: string; AOffset, ALength: Double; AColor: Integer);
+    procedure AddEffectRegion(const AName: string; AOffset, ALength: Double; AColor: Integer;
+      const AKind: string = ''; const AParams: string = '');
+    { Keeps only the effect regions (and the legacy single EffectName span)
+      inside [AFrom, ATo) - seconds from the clip's current start - clipped
+      to that window and rebased so offsets count from AFrom. Called with the
+      clip's pre-edit length when a clip is split or sliced, so each piece
+      carries exactly the effects that lie inside it. }
+    procedure KeepEffectsWithin(AFrom, ATo: Double);
     property EffectRegions: TArray<TClipEffectRegion> read FEffectRegions write FEffectRegions;
 
     function EndSeconds: Double;
@@ -565,7 +574,7 @@ begin
 end;
 
 procedure TTimelineClip.AddEffectRegion(const AName: string; AOffset, ALength: Double;
-  AColor: Integer);
+  AColor: Integer; const AKind: string; const AParams: string);
 var
   n: Integer;
 begin
@@ -575,6 +584,57 @@ begin
   FEffectRegions[n].OffsetSeconds := AOffset;
   FEffectRegions[n].LengthSeconds := ALength;
   FEffectRegions[n].Color := AColor;
+  FEffectRegions[n].Kind := AKind;
+  FEffectRegions[n].Params := AParams;
+end;
+
+procedure TTimelineClip.KeepEffectsWithin(AFrom, ATo: Double);
+var
+  i, n: Integer;
+  s, e: Double;
+  kept: TArray<TClipEffectRegion>;
+begin
+  kept := nil;
+  n := 0;
+  for i := 0 to High(FEffectRegions) do
+  begin
+    s := FEffectRegions[i].OffsetSeconds;
+    if FEffectRegions[i].LengthSeconds > 0 then
+      e := s + FEffectRegions[i].LengthSeconds
+    else
+      e := FLengthSeconds;
+    s := Max(s, AFrom);
+    e := Min(e, ATo);
+    if e - s < TIMELINE_MIN_CLIP_SECONDS then Continue;
+    SetLength(kept, n + 1);
+    kept[n] := FEffectRegions[i];
+    kept[n].OffsetSeconds := s - AFrom;
+    kept[n].LengthSeconds := e - s;
+    Inc(n);
+  end;
+  FEffectRegions := kept;
+
+  if FEffectName <> '' then
+  begin
+    s := FEffectOffsetSeconds;
+    if FEffectLengthSeconds > 0 then
+      e := s + FEffectLengthSeconds
+    else
+      e := FLengthSeconds;
+    s := Max(s, AFrom);
+    e := Min(e, ATo);
+    if e - s < TIMELINE_MIN_CLIP_SECONDS then
+    begin
+      FEffectName := '';
+      FEffectOffsetSeconds := 0;
+      FEffectLengthSeconds := 0;
+    end
+    else
+    begin
+      FEffectOffsetSeconds := s - AFrom;
+      FEffectLengthSeconds := e - s;
+    end;
+  end;
 end;
 
 function TTimelineClip.Clone: TTimelineClip;
@@ -1233,6 +1293,10 @@ begin
 
   right := TTimelineClip.Create(newId);
   right.Assign(clip);
+  { each half keeps only the effect regions that lie inside it - rebased to
+    its own start - while both still hold the pre-split length }
+  right.KeepEffectsWithin(leftLen, leftLen + rightLen);
+  clip.KeepEffectsWithin(0, leftLen);
   right.FStartSeconds := ASeconds;
   right.FLengthSeconds := rightLen;
   { non-destructive: the right window continues from where the split lands }
@@ -1272,6 +1336,10 @@ begin
     if ANewSeconds >= clip.EndSeconds - TIMELINE_MIN_CLIP_SECONDS then
       RaiseUDAW(errInvalidArgument, TIMELINE_MODEL_SUBSYS, 'trim would collapse the clip');
     delta := ANewSeconds - clip.StartSeconds;   // >0 shrinks from the left
+    { effect regions are measured from the clip's start, so they move with
+      it: rebased onto the new start, and whatever the new head cuts off is
+      dropped (a pull outwards, delta < 0, just shifts them right) }
+    clip.KeepEffectsWithin(delta, clip.FLengthSeconds);
     clip.FStartSeconds := ANewSeconds;
     clip.FLengthSeconds := clip.FLengthSeconds - delta;
     if not clip.Reversed then

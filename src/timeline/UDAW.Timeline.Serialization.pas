@@ -73,8 +73,37 @@ begin
   Result := FloatToStr(AValue, Inv);
 end;
 
+{ Effect kind/settings text may hold spaces, file paths, the region
+  separators and the clip line's own ';'/'=' delimiters, so it is %-escaped
+  to stay one plain token. }
+function EscapeFxText(const S: string): string;
+begin
+  Result := StringReplace(S, '%', '%25', [rfReplaceAll]);
+  Result := StringReplace(Result, ' ', '%20', [rfReplaceAll]);
+  Result := StringReplace(Result, '|', '%7C', [rfReplaceAll]);
+  Result := StringReplace(Result, '~', '%7E', [rfReplaceAll]);
+  Result := StringReplace(Result, '"', '%22', [rfReplaceAll]);
+  Result := StringReplace(Result, #9, '%09', [rfReplaceAll]);
+  Result := StringReplace(Result, ';', '%3B', [rfReplaceAll]);
+  Result := StringReplace(Result, '=', '%3D', [rfReplaceAll]);
+end;
+
+function UnescapeFxText(const S: string): string;
+begin
+  Result := StringReplace(S, '%3D', '=', [rfReplaceAll]);
+  Result := StringReplace(Result, '%3B', ';', [rfReplaceAll]);
+  Result := StringReplace(Result, '%09', #9, [rfReplaceAll]);
+  Result := StringReplace(Result, '%22', '"', [rfReplaceAll]);
+  Result := StringReplace(Result, '%7E', '~', [rfReplaceAll]);
+  Result := StringReplace(Result, '%7C', '|', [rfReplaceAll]);
+  Result := StringReplace(Result, '%20', ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, '%25', '%', [rfReplaceAll]);
+end;
+
 { All effect regions of a clip in one space-free token: name~off~len~color
-  entries joined by '|' ('-' when none). Spaces in names become '_'. }
+  entries joined by '|' ('-' when none). Spaces in names become '_'. A region
+  that knows the effect it was rendered with adds ~kind~params (escaped);
+  older readers ignore the extra fields. }
 function EncodeEffectRegions(AClip: TTimelineClip): string;
 var
   i: Integer;
@@ -89,6 +118,8 @@ begin
     Result := Result + StringReplace(StringReplace(StringReplace(r.Name, ' ', '_', [rfReplaceAll]),
       '|', '', [rfReplaceAll]), '~', '', [rfReplaceAll]) + '~' + F(r.OffsetSeconds) + '~' +
       F(r.LengthSeconds) + '~' + IntToStr(r.Color);
+    if r.Kind <> '' then
+      Result := Result + '~' + EscapeFxText(r.Kind) + '~' + EscapeFxText(r.Params);
   end;
 end;
 
@@ -104,6 +135,7 @@ var
   e: string;
   off, len: Double;
   col: Integer;
+  kind, params: string;
 begin
   if (AText = '') or (AText = '-') then Exit;
   entries := AText.Split(['|']);
@@ -114,7 +146,15 @@ begin
     if not TryStrToFloat(parts[1], off, Inv) then Continue;
     if not TryStrToFloat(parts[2], len, Inv) then Continue;
     if not TryStrToInt(parts[3], col) then Continue;
-    AClip.AddEffectRegion(StringReplace(parts[0], '_', ' ', [rfReplaceAll]), off, len, col);
+    kind := '';
+    params := '';
+    if Length(parts) >= 6 then
+    begin
+      kind := UnescapeFxText(parts[4]);
+      params := UnescapeFxText(parts[5]);
+    end;
+    AClip.AddEffectRegion(StringReplace(parts[0], '_', ' ', [rfReplaceAll]), off, len, col,
+      kind, params);
   end;
 end;
 

@@ -829,6 +829,165 @@ begin
   end;
 end;
 
+procedure Test_Model_SplitPartitionsEffectRegions;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  left, right: TTimelineClip;
+  srcId: Integer;
+begin
+  tl := TTimeline.Create;
+  try
+    srcId := tl.AddSource('x.wav', 48000, 2, 480000).Id;
+    trk := tl.AddTrack(tkAudio, 'T');
+    left := tl.AddClip(trk.Id, srcId, 'C', 0.0, 0.0, 4.0);
+    left.AddEffectRegion('Reverb', 1.0, 2.0, 1, 'reverb', 'p');
+    left.AddEffectRegion('Chorus', 3.5, 0.0, 2);   // 0 = to the clip's end
+    right := tl.SplitClip(left.Id, 2.0);
+    CheckEqualInt(1, Length(left.EffectRegions), 'left keeps only the region inside it');
+    CheckEqualStr('Reverb', left.EffectRegions[0].Name, 'left region is Reverb');
+    CheckNear(1.0, left.EffectRegions[0].OffsetSeconds, 1e-9, 'left region offset');
+    CheckNear(1.0, left.EffectRegions[0].LengthSeconds, 1e-9, 'left region clipped at the split');
+    CheckEqualInt(2, Length(right.EffectRegions), 'right keeps both regions it overlaps');
+    CheckNear(0.0, right.EffectRegions[0].OffsetSeconds, 1e-9, 'right Reverb rebased to its start');
+    CheckNear(1.0, right.EffectRegions[0].LengthSeconds, 1e-9, 'right Reverb remaining length');
+    CheckEqualStr('reverb', right.EffectRegions[0].Kind, 'region kind survives the split');
+    CheckNear(1.5, right.EffectRegions[1].OffsetSeconds, 1e-9, 'right Chorus rebased');
+    CheckNear(0.5, right.EffectRegions[1].LengthSeconds, 1e-9, 'right Chorus runs to the end');
+  finally
+    tl.Free;
+  end;
+end;
+
+procedure Test_Model_TrimStartMovesEffectRegions;
+var
+  doc: TProjectDocument;
+  mgr: TCommandManager;
+  trkId, srcId, clipId: Integer;
+  c: TTimelineClip;
+begin
+  doc := TProjectDocument.CreateNew('c');
+  mgr := TCommandManager.Create;
+  try
+    srcId := doc.Timeline.AddSource('x.wav', 48000, 2, 480000).Id;
+    trkId := doc.Timeline.AddTrack(tkAudio, 'T').Id;
+    c := doc.Timeline.AddClip(trkId, srcId, 'C', 2.0, 2.0, 4.0);
+    clipId := c.Id;
+    c.AddEffectRegion('Reverb', 1.0, 2.0, 1);    // timeline 3..5
+    c.AddEffectRegion('Chorus', 0.2, 0.5, 2);    // timeline 2.2..2.7
+
+    { pull the head in past Chorus and into Reverb }
+    doc.Timeline.TrimClip(clipId, ceStart, 3.5);
+    CheckEqualInt(1, Length(c.EffectRegions), 'region cut off by the trim is dropped');
+    CheckEqualStr('Reverb', c.EffectRegions[0].Name, 'Reverb kept');
+    CheckNear(0.0, c.EffectRegions[0].OffsetSeconds, 1e-9, 'Reverb rebased to the new start');
+    CheckNear(1.5, c.EffectRegions[0].LengthSeconds, 1e-9, 'Reverb keeps its end at 5.0');
+
+    { pull the head back out: regions shift right, staying on the same audio }
+    doc.Timeline.TrimClip(clipId, ceStart, 3.0);
+    CheckNear(0.5, c.EffectRegions[0].OffsetSeconds, 1e-9, 'Reverb still starts at 3.5 on the timeline');
+    CheckNear(1.5, c.EffectRegions[0].LengthSeconds, 1e-9, 'Reverb length unchanged');
+
+    { a merged drag that goes in and comes back out loses nothing }
+    c := doc.Timeline.AddClip(trkId, srcId, 'D', 10.0, 0.0, 4.0);
+    clipId := c.Id;
+    c.AddEffectRegion('Chorus', 0.2, 0.5, 2);
+    mgr.Perform(TTrimTimelineClipCommand.Create(doc, clipId, ceStart, 11.0));
+    CheckEqualInt(0, Length(doc.Timeline.ClipById(clipId).EffectRegions), 'drag in drops Chorus');
+    mgr.Perform(TTrimTimelineClipCommand.Create(doc, clipId, ceStart, 10.0));
+    c := doc.Timeline.ClipById(clipId);
+    CheckEqualInt(1, Length(c.EffectRegions), 'dragging back out brings Chorus back');
+    CheckNear(0.2, c.EffectRegions[0].OffsetSeconds, 1e-9, 'Chorus back at its original offset');
+    mgr.Undo;
+    CheckNear(10.0, doc.Timeline.ClipById(clipId).StartSeconds, 1e-9, 'undo restores the start');
+    CheckEqualInt(1, Length(doc.Timeline.ClipById(clipId).EffectRegions), 'undo keeps the region');
+  finally
+    mgr.Free;
+    doc.Free;
+  end;
+end;
+
+procedure Test_Cmd_RangeClipboardKeepsEffects;
+var
+  doc: TProjectDocument;
+  mgr: TCommandManager;
+  trkId, srcId, clipId: Integer;
+  c: TTimelineClip;
+  st: TClipState;
+  addCmd: TAddTimelineClipStateCommand;
+  regCmd: TAddTimelineRegionCommand;
+  markCmd: TAddTimelineMarkerCommand;
+begin
+  doc := TProjectDocument.CreateNew('c');
+  mgr := TCommandManager.Create;
+  try
+    srcId := doc.Timeline.AddSource('x.wav', 48000, 2, 480000).Id;
+    trkId := doc.Timeline.AddTrack(tkAudio, 'T').Id;
+    c := doc.Timeline.AddClip(trkId, srcId, 'C', 0.0, 0.0, 4.0);
+    clipId := c.Id;
+    c.AddEffectRegion('Reverb', 1.0, 2.0, 1);
+    c.AddEffectRegion('Chorus', 3.5, 0.0, 2);
+    c.SourceBPM := 120;
+
+    { remove + undo brings the clip back with its effects }
+    mgr.Perform(TRemoveTimelineClipCommand.Create(doc, clipId));
+    mgr.Undo;
+    c := doc.Timeline.ClipById(clipId);
+    CheckEqualInt(2, Length(c.EffectRegions), 'undo of remove restores effect regions');
+    CheckNear(120, c.SourceBPM, 1e-9, 'undo of remove restores the clip tempo');
+
+    { a range slice carries only the effects inside it, rebased }
+    st := CaptureTimelineClipSlice(doc.Timeline, clipId, 1.5, 3.8);
+    CheckNear(1.5, st.StartSeconds, 1e-9, 'slice starts at the range start');
+    CheckNear(2.3, st.LengthSeconds, 1e-9, 'slice length');
+    CheckNear(1.5, st.SourceOffsetSeconds, 1e-9, 'slice source offset');
+    CheckEqualInt(2, Length(st.EffectRegions), 'slice holds both overlapping regions');
+    CheckNear(0.0, st.EffectRegions[0].OffsetSeconds, 1e-9, 'Reverb rebased to slice');
+    CheckNear(1.5, st.EffectRegions[0].LengthSeconds, 1e-9, 'Reverb clipped to slice');
+    CheckNear(2.0, st.EffectRegions[1].OffsetSeconds, 1e-9, 'Chorus rebased to slice');
+    CheckNear(0.3, st.EffectRegions[1].LengthSeconds, 1e-9, 'Chorus clipped to slice');
+    CheckNear(4.0, doc.Timeline.ClipById(clipId).LengthSeconds, 1e-9, 'slicing leaves the clip alone');
+
+    { paste it elsewhere: effects come along; undo takes it away again }
+    st.StartSeconds := 10.0;
+    addCmd := TAddTimelineClipStateCommand.Create(doc, st);
+    mgr.Perform(addCmd);
+    c := doc.Timeline.ClipById(addCmd.CreatedId);
+    Check(c <> nil, 'pasted clip exists');
+    CheckNear(10.0, c.StartSeconds, 1e-9, 'pasted at the new position');
+    CheckEqualInt(2, Length(c.EffectRegions), 'pasted clip keeps its effect regions');
+    CheckEqualStr('Chorus', c.EffectRegions[1].Name, 'pasted region names');
+    mgr.Undo;
+    Check(doc.Timeline.ClipById(addCmd.CreatedId) = nil, 'undo removes the pasted clip');
+    mgr.Redo;
+    CheckEqualInt(2, Length(doc.Timeline.ClipById(addCmd.CreatedId).EffectRegions),
+      'redo restores the pasted clip with its effects');
+
+    { markers, regions and titles are undoable too }
+    markCmd := TAddTimelineMarkerCommand.Create(doc, 'Verse', 2.0);
+    mgr.Perform(markCmd);
+    mgr.Perform(TRemoveTimelineMarkerCommand.Create(doc, markCmd.CreatedId));
+    CheckEqualInt(0, doc.Timeline.MarkerCount, 'marker removed');
+    mgr.Undo;
+    CheckEqualInt(1, doc.Timeline.MarkerCount, 'undo restores the marker');
+    regCmd := TAddTimelineRegionCommand.Create(doc, 'Hook', 1.0, 2.0, 7);
+    mgr.Perform(regCmd);
+    CheckEqualInt(7, doc.Timeline.GetRegion(0).Color, 'region colour kept');
+    mgr.Perform(TRemoveTimelineRegionCommand.Create(doc, regCmd.CreatedId));
+    CheckEqualInt(0, doc.Timeline.RegionCount, 'region removed');
+    mgr.Undo;
+    CheckEqualInt(1, doc.Timeline.RegionCount, 'undo restores the region');
+    CheckNear(2.0, doc.Timeline.GetRegion(0).LengthSeconds, 1e-9, 'restored region length');
+    mgr.Perform(TSetTimelineTrackTitleCommand.Create(doc, trkId, 'Reverb, Chorus'));
+    CheckEqualStr('Reverb, Chorus', doc.Timeline.TrackById(trkId).Title, 'title set');
+    mgr.Undo;
+    CheckEqualStr('', doc.Timeline.TrackById(trkId).Title, 'undo restores the old title');
+  finally
+    mgr.Free;
+    doc.Free;
+  end;
+end;
+
 procedure Test_Cmd_ClipGainMerge;
 var
   doc: TProjectDocument;
@@ -1084,6 +1243,8 @@ begin
 
   RegisterTest('timeline.model', 'add + query',               @Test_Model_AddAndQuery);
   RegisterTest('timeline.model', 'split is non-destructive',  @Test_Model_SplitIsNonDestructive);
+  RegisterTest('timeline.model', 'split partitions effect regions', @Test_Model_SplitPartitionsEffectRegions);
+  RegisterTest('timeline.model', 'trim start moves effect regions', @Test_Model_TrimStartMovesEffectRegions);
   RegisterTest('timeline.model', 'trim + slip',               @Test_Model_TrimAndSlip);
   RegisterTest('timeline.model', 'move + duplicate + remove', @Test_Model_MoveDuplicateRemove);
   RegisterTest('timeline.model', 'lock guard',                @Test_Model_LockGuard);
@@ -1100,6 +1261,7 @@ begin
   RegisterTest('timeline.cmd', 'clip move merge + remove',    @Test_Cmd_ClipMoveMergeAndRemove);
   RegisterTest('timeline.cmd', 'split undo / redo',           @Test_Cmd_SplitUndoRedo);
   RegisterTest('timeline.cmd', 'clip gain merge',             @Test_Cmd_ClipGainMerge);
+  RegisterTest('timeline.cmd', 'range clipboard keeps effects', @Test_Cmd_RangeClipboardKeepsEffects);
 
   RegisterTest('timeline.playback', 'clip audible at gain/pan',    @Test_Playback_ClipAudibleAtGain);
   RegisterTest('timeline.playback', 'track mute + solo',           @Test_Playback_MuteAndSolo);

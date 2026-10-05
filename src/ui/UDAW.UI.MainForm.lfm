@@ -4821,16 +4821,31 @@
           Caption = '-'
         end
         object mnuTlCut: TMenuItem
-          Caption = 'Cut clip'
+          Caption = 'Cut'
           OnClick = btnTlCutClick
         end
         object mnuTlCopy: TMenuItem
-          Caption = 'Copy clip'
+          Caption = 'Copy'
           OnClick = btnTlCopyClick
         end
         object mnuTlPaste: TMenuItem
-          Caption = 'Paste clip at playhead'
+          Caption = 'Paste at playhead'
           OnClick = btnTlPasteClick
+        end
+        object mnuTlEditSepSel: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlCutSelection: TMenuItem
+          Caption = 'Cut Selection'
+          OnClick = pmTlCutSelectionClick
+        end
+        object mnuTlCopySelection: TMenuItem
+          Caption = 'Copy Selection'
+          OnClick = pmTlCopySelectionClick
+        end
+        object mnuTlPasteSelection: TMenuItem
+          Caption = 'Paste Selection'
+          OnClick = pmTlPasteSelectionClick
         end
         object mnuTlEditSep3: TMenuItem
           Caption = '-'
@@ -5866,6 +5881,28 @@
       end
     end
   end
+  object pmTlEffect: TPopupMenu
+    OnPopup = pmTlEffectPopup
+    Left = 216
+    Top = 72
+    object pmTlEffTitle: TMenuItem
+      Caption = 'Effect'
+      Enabled = False
+    end
+    object pmTlEffSepA: TMenuItem
+      Caption = '-'
+    end
+    object pmTlEffEdit: TMenuItem
+      Caption = 'Edit Effect...'
+      Hint = 'Change this effect''s settings and render it again over the same region'
+      OnClick = pmTlEffEditClick
+    end
+    object pmTlEffUndo: TMenuItem
+      Caption = 'Undo Effect'
+      Hint = 'Put the original sound back over this region (from the kept original, or from the Master track when no original exists)'
+      OnClick = TlUndoEffectClick
+    end
+  end
   object pmTimeline: TPopupMenu
     OnPopup = pmTimelinePopup
     Left = 216
@@ -6095,19 +6132,23 @@
         Caption = '-'
       end
       object pmTlCut: TMenuItem
-        Caption = 'Cut clip'
+        Caption = 'Cut'
         OnClick = btnTlCutClick
       end
       object pmTlCopy: TMenuItem
-        Caption = 'Copy clip'
+        Caption = 'Copy'
         OnClick = btnTlCopyClick
       end
       object pmTlPaste: TMenuItem
-        Caption = 'Paste clip at playhead'
+        Caption = 'Paste at playhead'
         OnClick = btnTlPasteClick
       end
       object pmTlSepEditB: TMenuItem
         Caption = '-'
+      end
+      object pmTlCutSelection: TMenuItem
+        Caption = 'Cut Selection'
+        OnClick = pmTlCutSelectionClick
       end
       object pmTlCopySelection: TMenuItem
         Caption = 'Copy Selection'
@@ -6437,6 +6478,18 @@
     object pmTlrDeleteRange: TMenuItem
       Caption = 'Delete Range'
       OnClick = btnTlDeleteRangeClick
+    end
+    object pmTlrCutRange: TMenuItem
+      Caption = 'Cut Range'
+      OnClick = pmTlCutSelectionClick
+    end
+    object pmTlrCopyRange: TMenuItem
+      Caption = 'Copy Range'
+      OnClick = pmTlCopySelectionClick
+    end
+    object pmTlrPasteRange: TMenuItem
+      Caption = 'Paste Range at Playhead'
+      OnClick = pmTlPasteSelectionClick
     end
     object pmTlrFadeInRange: TMenuItem
       Caption = 'Fade In Range'

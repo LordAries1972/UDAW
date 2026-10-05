@@ -32,6 +32,16 @@ type
     FadeInShape, FadeOutShape: TFadeShape;
     Reversed, Muted, Locked, Loop: Boolean;
     Color: Integer;
+    { rendered effects (regions + the legacy single span), tempo and the
+      pre-effect original - so undo, cut/copy/paste and track removal bring a
+      clip back with every effect it had, not just its bare audio window }
+    EffectName: string;
+    EffectOffsetSeconds, EffectLengthSeconds: Double;
+    EffectRegions: TArray<TClipEffectRegion>;
+    SourceBPM: Double;
+    HasOrig: Boolean;
+    OrigSourceId: Integer;
+    OrigDelta: Double;
   end;
 
   TAddTimelineTrackCommand = class(TDAWCommand)
@@ -304,6 +314,90 @@ type
     property CreatedId: Integer read FCreatedId;
   end;
 
+  TRemoveTimelineMarkerCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FMarkerId: Integer;
+    FName: string;
+    FSeconds: Double;
+  public
+    constructor Create(ADoc: TProjectDocument; AMarkerId: Integer);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+  end;
+
+  TAddTimelineRegionCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FName: string;
+    FStart, FLength: Double;
+    FColor: Integer;
+    FCreatedId: Integer;
+  public
+    constructor Create(ADoc: TProjectDocument; const AName: string; AStart, ALength: Double;
+      AColor: Integer);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Redo: Boolean; override;
+    function Description: string; override;
+    property CreatedId: Integer read FCreatedId;
+  end;
+
+  TRemoveTimelineRegionCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FRegionId: Integer;
+    FName: string;
+    FStart, FLength: Double;
+    FColor: Integer;
+  public
+    constructor Create(ADoc: TProjectDocument; ARegionId: Integer);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+  end;
+
+  { Sets a track's title band text (TTimelineTrack.Title). }
+  TSetTimelineTrackTitleCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FTrackId: Integer;
+    FOldTitle, FNewTitle: string;
+  public
+    constructor Create(ADoc: TProjectDocument; ATrackId: Integer; const ANewTitle: string);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+  end;
+
+  { Adds a clip from a full TClipState (paste): a fresh id is allocated, then
+    every captured field - gain, fades, effect regions, tempo, original-audio
+    link - is restored onto it. AState.Id is ignored; AState.TrackId is the
+    destination track. }
+  TAddTimelineClipStateCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FState: TClipState;
+    FCreatedId: Integer;
+  public
+    constructor Create(ADoc: TProjectDocument; const AState: TClipState);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Redo: Boolean; override;
+    function Description: string; override;
+    property CreatedId: Integer read FCreatedId;
+  end;
+
+{ Full snapshot of clip AClipId (raises when it does not exist). }
+function CaptureTimelineClip(ATimeline: TTimeline; AClipId: Integer): TClipState;
+{ Snapshot of only the part of clip AClipId inside timeline seconds
+  [AFrom, ATo]: start/length/source offset narrowed exactly as a split at
+  both edges would, fades kept only on untouched outer edges, and effect
+  regions clipped + rebased to the slice. The clip itself is not changed. }
+function CaptureTimelineClipSlice(ATimeline: TTimeline; AClipId: Integer;
+  AFrom, ATo: Double): TClipState;
+
 implementation
 
 uses
@@ -314,16 +408,13 @@ const
 
 { ---- clip state capture / restore ---- }
 
-function CaptureClip(ATimeline: TTimeline; AClipId: Integer): TClipState;
+function StateOfClip(AClip: TTimelineClip; ATrackId: Integer): TClipState;
 var
-  trk: TTimelineTrack;
   c: TTimelineClip;
 begin
-  c := ATimeline.ClipById(AClipId, trk);
-  if c = nil then
-    RaiseUDAWFmt(errInvalidArgument, 'Timeline.Cmd', 'no clip with id %d', [AClipId]);
+  c := AClip;
   Result.Id := c.Id;
-  Result.TrackId := trk.Id;
+  Result.TrackId := ATrackId;
   Result.SourceId := c.SourceId;
   Result.Name := c.Name;
   Result.StartSeconds := c.StartSeconds;
@@ -339,6 +430,69 @@ begin
   Result.Locked := c.Locked;
   Result.Loop := c.Loop;
   Result.Color := c.Color;
+  Result.EffectName := c.EffectName;
+  Result.EffectOffsetSeconds := c.EffectOffsetSeconds;
+  Result.EffectLengthSeconds := c.EffectLengthSeconds;
+  Result.EffectRegions := Copy(c.EffectRegions);
+  Result.SourceBPM := c.SourceBPM;
+  Result.HasOrig := c.HasOrig;
+  Result.OrigSourceId := c.OrigSourceId;
+  Result.OrigDelta := c.OrigDelta;
+end;
+
+function CaptureClip(ATimeline: TTimeline; AClipId: Integer): TClipState;
+var
+  trk: TTimelineTrack;
+  c: TTimelineClip;
+begin
+  c := ATimeline.ClipById(AClipId, trk);
+  if c = nil then
+    RaiseUDAWFmt(errInvalidArgument, 'Timeline.Cmd', 'no clip with id %d', [AClipId]);
+  Result := StateOfClip(c, trk.Id);
+end;
+
+function CaptureTimelineClip(ATimeline: TTimeline; AClipId: Integer): TClipState;
+begin
+  Result := CaptureClip(ATimeline, AClipId);
+end;
+
+function CaptureTimelineClipSlice(ATimeline: TTimeline; AClipId: Integer;
+  AFrom, ATo: Double): TClipState;
+var
+  trk: TTimelineTrack;
+  c, tmp: TTimelineClip;
+  s, e, headCut, tailCut, len: Double;
+begin
+  c := ATimeline.ClipById(AClipId, trk);
+  if c = nil then
+    RaiseUDAWFmt(errInvalidArgument, 'Timeline.Cmd', 'no clip with id %d', [AClipId]);
+  s := Max(c.StartSeconds, AFrom);
+  e := Min(c.EndSeconds, ATo);
+  if e - s < TIMELINE_MIN_CLIP_SECONDS then
+    RaiseUDAWFmt(errInvalidArgument, 'Timeline.Cmd', 'clip %d does not overlap %.6f..%.6f',
+      [AClipId, AFrom, ATo]);
+  headCut := s - c.StartSeconds;
+  tailCut := c.EndSeconds - e;
+  len := e - s;
+  tmp := c.Clone;
+  try
+    tmp.KeepEffectsWithin(headCut, c.LengthSeconds - tailCut);
+    tmp.StartSeconds := s;
+    tmp.LengthSeconds := len;
+    { non-destructive, mirroring TTimeline.SplitClip: a reversed clip plays
+      its source backwards, so trimming its tail advances the offset }
+    if c.Reversed then
+      tmp.SourceOffsetSeconds := c.SourceOffsetSeconds + tailCut
+    else
+      tmp.SourceOffsetSeconds := c.SourceOffsetSeconds + headCut;
+    if headCut > TIMELINE_MIN_CLIP_SECONDS then tmp.FadeInSeconds := 0;
+    if tailCut > TIMELINE_MIN_CLIP_SECONDS then tmp.FadeOutSeconds := 0;
+    tmp.FadeInSeconds := Min(tmp.FadeInSeconds, len);
+    tmp.FadeOutSeconds := Min(tmp.FadeOutSeconds, len - tmp.FadeInSeconds);
+    Result := StateOfClip(tmp, trk.Id);
+  finally
+    tmp.Free;
+  end;
 end;
 
 procedure ApplyClipState(ATimeline: TTimeline; const AState: TClipState);
@@ -375,6 +529,14 @@ begin
   c.Locked := AState.Locked;
   c.Loop := AState.Loop;
   c.Color := AState.Color;
+  c.EffectName := AState.EffectName;
+  c.EffectOffsetSeconds := AState.EffectOffsetSeconds;
+  c.EffectLengthSeconds := AState.EffectLengthSeconds;
+  c.EffectRegions := Copy(AState.EffectRegions);
+  c.SourceBPM := AState.SourceBPM;
+  c.HasOrig := AState.HasOrig;
+  c.OrigSourceId := AState.OrigSourceId;
+  c.OrigDelta := AState.OrigDelta;
   trk.SortClips;
 end;
 
@@ -780,6 +942,10 @@ begin
   begin
     n := TTrimTimelineClipCommand(ANext);
     FNewSeconds := n.FNewSeconds;
+    { re-trim from the drag's starting state, not step by step: a start trim
+      drops the effect regions it cuts off, so a drag that goes in and comes
+      back out would otherwise lose them }
+    ApplyClipState(FDoc.Timeline, FBefore);
     FDoc.Timeline.TrimClip(FClipId, FEdge, FNewSeconds);
     FDoc.Touch;
     Restamp;
@@ -1182,6 +1348,211 @@ end;
 function TAddTimelineMarkerCommand.Description: string;
 begin
   Result := Format('Add marker "%s"', [FName]);
+end;
+
+{ ================= TRemoveTimelineMarkerCommand ================= }
+
+constructor TRemoveTimelineMarkerCommand.Create(ADoc: TProjectDocument; AMarkerId: Integer);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FMarkerId := AMarkerId;
+end;
+
+function TRemoveTimelineMarkerCommand.Execute: Boolean;
+var
+  i: Integer;
+  m: TTimelineMarker;
+begin
+  Result := False;
+  for i := 0 to FDoc.Timeline.MarkerCount - 1 do
+  begin
+    m := FDoc.Timeline.GetMarker(i);
+    if m.Id = FMarkerId then
+    begin
+      FName := m.Name;
+      FSeconds := m.Seconds;
+      FDoc.Timeline.RemoveMarker(FMarkerId);
+      FDoc.Touch;
+      Exit(True);
+    end;
+  end;
+end;
+
+procedure TRemoveTimelineMarkerCommand.Undo;
+begin
+  FDoc.Timeline.AddMarkerWithId(FMarkerId, FName, FSeconds);
+  FDoc.Touch;
+end;
+
+function TRemoveTimelineMarkerCommand.Description: string;
+begin
+  Result := Format('Remove marker "%s"', [FName]);
+end;
+
+{ ================= TAddTimelineRegionCommand ================= }
+
+constructor TAddTimelineRegionCommand.Create(ADoc: TProjectDocument; const AName: string;
+  AStart, ALength: Double; AColor: Integer);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FName := AName;
+  FStart := AStart;
+  FLength := ALength;
+  FColor := AColor;
+  FCreatedId := -1;
+end;
+
+function TAddTimelineRegionCommand.Execute: Boolean;
+var
+  r: TTimelineRegion;
+begin
+  r := FDoc.Timeline.AddRegion(FName, FStart, FLength);
+  r.Color := FColor;
+  FCreatedId := r.Id;
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TAddTimelineRegionCommand.Undo;
+begin
+  FDoc.Timeline.RemoveRegion(FCreatedId);
+  FDoc.Touch;
+end;
+
+function TAddTimelineRegionCommand.Redo: Boolean;
+begin
+  FDoc.Timeline.AddRegionWithId(FCreatedId, FName, FStart, FLength).Color := FColor;
+  FDoc.Touch;
+  Result := True;
+end;
+
+function TAddTimelineRegionCommand.Description: string;
+begin
+  Result := Format('Add region "%s"', [FName]);
+end;
+
+{ ================= TRemoveTimelineRegionCommand ================= }
+
+constructor TRemoveTimelineRegionCommand.Create(ADoc: TProjectDocument; ARegionId: Integer);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FRegionId := ARegionId;
+end;
+
+function TRemoveTimelineRegionCommand.Execute: Boolean;
+var
+  i: Integer;
+  r: TTimelineRegion;
+begin
+  Result := False;
+  for i := 0 to FDoc.Timeline.RegionCount - 1 do
+  begin
+    r := FDoc.Timeline.GetRegion(i);
+    if r.Id = FRegionId then
+    begin
+      FName := r.Name;
+      FStart := r.StartSeconds;
+      FLength := r.LengthSeconds;
+      FColor := r.Color;
+      FDoc.Timeline.RemoveRegion(FRegionId);
+      FDoc.Touch;
+      Exit(True);
+    end;
+  end;
+end;
+
+procedure TRemoveTimelineRegionCommand.Undo;
+begin
+  FDoc.Timeline.AddRegionWithId(FRegionId, FName, FStart, FLength).Color := FColor;
+  FDoc.Touch;
+end;
+
+function TRemoveTimelineRegionCommand.Description: string;
+begin
+  Result := Format('Remove region "%s"', [FName]);
+end;
+
+{ ================= TSetTimelineTrackTitleCommand ================= }
+
+constructor TSetTimelineTrackTitleCommand.Create(ADoc: TProjectDocument; ATrackId: Integer;
+  const ANewTitle: string);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FTrackId := ATrackId;
+  FNewTitle := ANewTitle;
+end;
+
+function TSetTimelineTrackTitleCommand.Execute: Boolean;
+var
+  trk: TTimelineTrack;
+begin
+  trk := FDoc.Timeline.TrackById(FTrackId);
+  if trk = nil then Exit(False);
+  FOldTitle := trk.Title;
+  trk.Title := FNewTitle;
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TSetTimelineTrackTitleCommand.Undo;
+var
+  trk: TTimelineTrack;
+begin
+  trk := FDoc.Timeline.TrackById(FTrackId);
+  if trk <> nil then trk.Title := FOldTitle;
+  FDoc.Touch;
+end;
+
+function TSetTimelineTrackTitleCommand.Description: string;
+begin
+  Result := Format('Set title of track %d', [FTrackId]);
+end;
+
+{ ================= TAddTimelineClipStateCommand ================= }
+
+constructor TAddTimelineClipStateCommand.Create(ADoc: TProjectDocument; const AState: TClipState);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FState := AState;
+  FState.EffectRegions := Copy(AState.EffectRegions);
+  FCreatedId := -1;
+end;
+
+function TAddTimelineClipStateCommand.Execute: Boolean;
+var
+  c: TTimelineClip;
+begin
+  c := FDoc.Timeline.AddClip(FState.TrackId, FState.SourceId, FState.Name,
+    FState.StartSeconds, FState.SourceOffsetSeconds, FState.LengthSeconds);
+  FCreatedId := c.Id;
+  FState.Id := c.Id;
+  FState.StartSeconds := c.StartSeconds;   // AddClip clamps a negative start
+  ApplyClipState(FDoc.Timeline, FState);
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TAddTimelineClipStateCommand.Undo;
+begin
+  FDoc.Timeline.RemoveClip(FCreatedId);
+  FDoc.Touch;
+end;
+
+function TAddTimelineClipStateCommand.Redo: Boolean;
+begin
+  ApplyClipState(FDoc.Timeline, FState);
+  FDoc.Touch;
+  Result := True;
+end;
+
+function TAddTimelineClipStateCommand.Description: string;
+begin
+  Result := Format('Paste clip "%s"', [FState.Name]);
 end;
 
 end.

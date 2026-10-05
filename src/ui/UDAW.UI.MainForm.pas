@@ -105,6 +105,38 @@ type
     pbMixerMouseDown/MouseMove/MouseUp. }
   TMixDragMode = (mdmNone, mdmFader, mdmPan, mdmReorderStrip, mdmReorderInsert);
 
+  { Timeline range clipboard (Cut/Copy/Paste Selection) - everything that
+    lives inside the copied time range, not only the audio: each clip slice
+    with its rendered effect regions, the markers and regions in the range,
+    and the title band of every channel copied from. }
+  TTlRangeClip = record
+    State: TClipState;     // sliced to the range (see CaptureTimelineClipSlice)
+    RelStart: Double;      // slice start - range start
+    RelTrack: Integer;     // channel index relative to the anchor channel
+  end;
+  TTlRangeMarker = record
+    Name: string;
+    RelSeconds: Double;
+  end;
+  TTlRangeRegion = record
+    Name: string;
+    RelStart, LengthSeconds: Double;
+    Color: Integer;
+  end;
+  TTlRangeTitle = record
+    RelTrack: Integer;
+    Title: string;
+  end;
+  { enough of a TMediaSource to re-register it when a paste lands in a
+    project (or a reloaded one) that no longer has that source id }
+  TTlClipboardSource = record
+    Id: Integer;
+    Path: string;
+    SampleRate, Channels: Integer;
+    FrameCount: Int64;
+    Kind: TMediaKind;
+  end;
+
   TfrmMain = class(TForm)
     mnuMain: TMainMenu;
     pnlTop: TPanel;
@@ -536,6 +568,10 @@ type
     mnuTlCut: TMenuItem;
     mnuTlCopy: TMenuItem;
     mnuTlPaste: TMenuItem;
+    mnuTlEditSepSel: TMenuItem;
+    mnuTlCutSelection: TMenuItem;
+    mnuTlCopySelection: TMenuItem;
+    mnuTlPasteSelection: TMenuItem;
     mnuTlEditSep3: TMenuItem;
     mnuTlNormalizeRange: TMenuItem;
     mnuTlReverseRange: TMenuItem;
@@ -590,6 +626,11 @@ type
     mnuTlExportMp4: TMenuItem;
     mnuTlExportFlac: TMenuItem;
     mnuTlExportSep: TMenuItem;
+    pmTlEffect: TPopupMenu;
+    pmTlEffTitle: TMenuItem;
+    pmTlEffSepA: TMenuItem;
+    pmTlEffEdit: TMenuItem;
+    pmTlEffUndo: TMenuItem;
     pmTimeline: TPopupMenu;
     pmTlAddClip: TMenuItem;
     pmTlSplit: TMenuItem;
@@ -626,6 +667,7 @@ type
     pmTlCut: TMenuItem;
     pmTlCopy: TMenuItem;
     pmTlPaste: TMenuItem;
+    pmTlCutSelection: TMenuItem;
     pmTlCopySelection: TMenuItem;
     pmTlPasteSelection: TMenuItem;
     pmTlSepEditC: TMenuItem;
@@ -683,6 +725,9 @@ type
     pmTlrSepRange: TMenuItem;
     pmTlrSplitRange: TMenuItem;
     pmTlrDeleteRange: TMenuItem;
+    pmTlrCutRange: TMenuItem;
+    pmTlrCopyRange: TMenuItem;
+    pmTlrPasteRange: TMenuItem;
     pmTlrFadeInRange: TMenuItem;
     pmTlrFadeOutRange: TMenuItem;
     pmTlrSep1: TMenuItem;
@@ -1253,6 +1298,8 @@ type
     procedure TlClipTempoClick(Sender: TObject);
     procedure TlFxMenuClick(Sender: TObject);
     procedure TlUndoEffectClick(Sender: TObject);
+    procedure pmTlEffectPopup(Sender: TObject);
+    procedure pmTlEffEditClick(Sender: TObject);
     procedure TlFxFadeInClick(Sender: TObject);
     procedure TlFxFadeOutClick(Sender: TObject);
     procedure btnTlAddMarkerHereClick(Sender: TObject);
@@ -1288,6 +1335,7 @@ type
     procedure btnTlPasteClick(Sender: TObject);
     procedure pmTlCopySelectionClick(Sender: TObject);
     procedure pmTlPasteSelectionClick(Sender: TObject);
+    procedure pmTlCutSelectionClick(Sender: TObject);
     procedure btnTlTrackUpClick(Sender: TObject);
     procedure btnTlTrackDownClick(Sender: TObject);
     procedure pmTlMuteTrackClick(Sender: TObject);
@@ -1603,6 +1651,16 @@ type
                                    // above each track are the only things this leaves
                                    // untouched - see TlTrackTop/sbTlVertChange
     FTlRulerCtxActive: Boolean;   // right-click landed in the ruler - see pbTimelineMouseUp
+    { an effect name in a channel's title band was pressed - pbTimelineMouseUp
+      shows pmTlEffect (Edit / Undo) for that region instead of pmTimeline }
+    FTlEffCtxActive: Boolean;
+    FTlEffCtx: TClipEffectRegion;
+    { left press in the lanes: where it started, and whether the mouse has
+      since moved past TL_DRAG_THRESHOLD - a clip move/trim/fade only starts
+      once it has, so a plain click never shifts anything }
+    FTlPressX, FTlPressY: Integer;
+    FTlPressMoved: Boolean;
+    FTlPressClipId: Integer;
     FTlBuffer: TBitmap;
     { Out L/R level graphs on the Timeline toolbar (pbTlMeters) - smoothed
       0..1 peak with VU-style decay, read from App.Audio.OutputPeak while
@@ -1634,17 +1692,23 @@ type
     FTlRubberStartX, FTlRubberStartY: Integer;
     FTlRubberX, FTlRubberY: Integer;
     FTlClipboard: TClipState;
+    FTlClipboardSources: TArray<TTlClipboardSource>;
     FTlHaveClipboard: Boolean;
-    { multi-clip "selection" clipboard for Copy Selection/Paste Selection:
-      every clip overlapping the active range selection, across every
-      channel, captured with its offset from the range start and its
-      channel index relative to the channel that was active at copy time -
-      so Paste Selection can drop the whole group at the playhead, anchored
-      on whichever channel is active when you paste. }
-    FTlSelectionClipboard: TArray<TClipState>;
-    FTlSelectionClipboardRelStart: TArray<Double>;
-    FTlSelectionClipboardRelTrack: TArray<Integer>;
+    { range clipboard for Cut/Copy/Paste Selection: every clip slice inside
+      the range on the selected channel(s) (all channels when none is
+      selected) with its effects, plus the range's markers, regions and the
+      copied channels' titles - captured relative to the range start and to
+      the channel active at copy time, so Paste Selection drops the whole
+      group at the playhead, anchored on whichever channel is active then. }
+    FTlRangeClips: TArray<TTlRangeClip>;
+    FTlRangeMarkers: TArray<TTlRangeMarker>;
+    FTlRangeRegions: TArray<TTlRangeRegion>;
+    FTlRangeTitles: TArray<TTlRangeTitle>;
+    FTlRangeSources: TArray<TTlClipboardSource>;
     FTlHaveSelectionClipboard: Boolean;
+    { which clipboard plain Paste uses: True when the last Cut/Copy was of a
+      range (the range clipboard), False when it was of a single clip }
+    FTlPasteRangeNext: Boolean;
     { time-range ("section") selection: an independent drag-to-select gesture
       on the ruler, spanning every track (not one clip's worth of pixels like
       the rubber-band above). Highlighted in pbTimelinePaint and consumed by
@@ -1848,7 +1912,15 @@ type
     procedure TlTempoUnknownClick;
     function TlTrackTitleRect(ATop, AWidth: Integer): TRect;
     function TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
-      out AStartSec, AEndSec: Double): Boolean;
+      out AStartSec, AEndSec: Double): Boolean; overload;
+    function TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
+      out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean; overload;
+    function TlClipRegionAtSec(AClip: TTimelineClip; ASec: Double;
+      out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean;
+    procedure TlShowEffectMenu(AX, AY: Integer);
+    function TlFxPreset(ATag: Integer; out AKind, AParams, AName: string): Boolean;
+    function TlFxPresetByName(const AName: string; out AKind, AParams: string): Boolean;
+    function TlMasterTrack: TTimelineTrack;
     procedure TlNoteEffectAdded(AStripId: Integer; const AEffectName: string);
     function TlEffectColor(const AEffectName: string): TColor;
     function TlClipRegions(AClip: TTimelineClip): TArray<TClipEffectRegion>;
@@ -1863,11 +1935,19 @@ type
     function TlDuplicateSelectedClips: TArray<Integer>;
     procedure TlSelectRubberBand;
     procedure TlSplitAtRangeEdges;
+    procedure TlSplitTracksAtRangeEdges(const ATrackIds: TArray<Integer>);
+    function TlRangeScopeTrackIds: TArray<Integer>;
+    function TlCopyRangeToClipboard: Boolean;
+    procedure TlClearRangeOnTracks(const ATrackIds: TArray<Integer>; ARemoveMarkersRegions: Boolean);
+    procedure TlNoteClipboardSource(var ASources: TArray<TTlClipboardSource>; ASourceId: Integer);
+    function TlResolveClipboardSource(const ASources: TArray<TTlClipboardSource>; ASourceId: Integer): Integer;
+    procedure TlRemapClipSources(var AState: TClipState; const ASources: TArray<TTlClipboardSource>);
+    procedure TlMergeTrackTitle(ATrackId: Integer; const ATitle: string);
     procedure TlApplyEffectToRange(const AKind, AParams, AEffectName: string);
     procedure TlSplitStemsSelected;
     procedure TlAudioToMidiSelected;
     procedure TlApplySilenceToRange;
-    procedure TlUndoEffectInRange;
+    function TlUndoEffectInRange: Boolean;
     function TlHealMissingEffectSources: Boolean;
     function MidiRowHeight: Integer;
     function MidiNoteAtY(AY: Integer): Integer;
@@ -7443,19 +7523,59 @@ end;
   pbTimelinePaint): returns the timeline section that effect covers, clamped
   to its clip exactly as it is painted. Where effects overlap the shortest
   (most specific) one under the cursor wins. }
+{ The effect region of AClip that covers timeline second ASec, clamped to the
+  clip exactly as it is painted; where effects overlap, the shortest (most
+  specific) one wins. }
+function TfrmMain.TlClipRegionAtSec(AClip: TTimelineClip; ASec: Double;
+  out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean;
+var
+  regStart, regEnd: Double;
+begin
+  Result := False;
+  AStartSec := 0;
+  AEndSec := 0;
+  ARegion := Default(TClipEffectRegion);
+  for var reg in TlClipRegions(AClip) do
+  begin
+    regStart := AClip.StartSeconds + Min(reg.OffsetSeconds, AClip.LengthSeconds);
+    regEnd := AClip.EndSeconds;
+    if reg.LengthSeconds > 0 then
+      regEnd := Min(AClip.EndSeconds, AClip.StartSeconds + reg.OffsetSeconds + reg.LengthSeconds);
+    if (regEnd - regStart <= TIMELINE_MIN_CLIP_SECONDS) or
+       (ASec < regStart) or (ASec > regEnd) then Continue;
+    if (not Result) or (regEnd - regStart < AEndSec - AStartSec) then
+    begin
+      AStartSec := regStart;
+      AEndSec := regEnd;
+      ARegion := reg;
+      Result := True;
+    end;
+  end;
+end;
+
 function TfrmMain.TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
   out AStartSec, AEndSec: Double): Boolean;
+var
+  reg: TClipEffectRegion;
+begin
+  Result := TlEffectLabelAtPoint(AX, AY, ATrackId, AStartSec, AEndSec, reg);
+end;
+
+function TfrmMain.TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
+  out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean;
 var
   tl: TTimeline;
   trk: TTimelineTrack;
   clip: TTimelineClip;
   ti, j: Integer;
   sec, regStart, regEnd: Double;
+  reg: TClipEffectRegion;
 begin
   Result := False;
   ATrackId := -1;
   AStartSec := 0;
   AEndSec := 0;
+  ARegion := Default(TClipEffectRegion);
   if FProject = nil then Exit;
   tl := FProject.Timeline;
   sec := FTlView.XToSeconds(AX);
@@ -7467,21 +7587,14 @@ begin
     for j := 0 to trk.ClipCount - 1 do
     begin
       clip := trk.GetClip(j);
-      for var reg in TlClipRegions(clip) do
+      if TlClipRegionAtSec(clip, sec, regStart, regEnd, reg) and
+         ((not Result) or (regEnd - regStart < AEndSec - AStartSec)) then
       begin
-        regStart := clip.StartSeconds + Min(reg.OffsetSeconds, clip.LengthSeconds);
-        regEnd := clip.EndSeconds;
-        if reg.LengthSeconds > 0 then
-          regEnd := Min(clip.EndSeconds, clip.StartSeconds + reg.OffsetSeconds + reg.LengthSeconds);
-        if (regEnd - regStart <= TIMELINE_MIN_CLIP_SECONDS) or
-           (sec < regStart) or (sec > regEnd) then Continue;
-        if (not Result) or (regEnd - regStart < AEndSec - AStartSec) then
-        begin
-          ATrackId := trk.Id;
-          AStartSec := regStart;
-          AEndSec := regEnd;
-          Result := True;
-        end;
+        ATrackId := trk.Id;
+        AStartSec := regStart;
+        AEndSec := regEnd;
+        ARegion := reg;
+        Result := True;
       end;
     end;
     Exit;
@@ -8767,14 +8880,18 @@ begin
   mnuTlStop.Enabled := FTlPlaying;
   pmTlStop.Enabled := FTlPlaying;
 
-  { Cut/Copy act on the current selection; Paste needs a held clip. }
-  mnuTlCut.Enabled := sel <> nil;
-  pmTlCut.Enabled := sel <> nil;
-  mnuTlCopy.Enabled := sel <> nil;
-  pmTlCopy.Enabled := sel <> nil;
-  mnuTlPaste.Enabled := FTlHaveClipboard;
-  pmTlPaste.Enabled := FTlHaveClipboard;
+  { Cut/Copy act on the range when one is showing, else the selected clip;
+    Paste needs whichever clipboard the last Cut/Copy filled. }
+  mnuTlCut.Enabled := (sel <> nil) or FTlRangeActive;
+  pmTlCut.Enabled := mnuTlCut.Enabled;
+  mnuTlCopy.Enabled := mnuTlCut.Enabled;
+  pmTlCopy.Enabled := mnuTlCut.Enabled;
+  mnuTlPaste.Enabled := FTlHaveClipboard or FTlHaveSelectionClipboard;
+  pmTlPaste.Enabled := mnuTlPaste.Enabled;
+  pmTlCutSelection.Enabled := FTlRangeActive;
   pmTlCopySelection.Enabled := FTlRangeActive;
+  mnuTlCutSelection.Enabled := FTlRangeActive;
+  mnuTlCopySelection.Enabled := FTlRangeActive;
   mnuTlSaveSelWav.Enabled := FTlRangeActive;
   mnuTlSaveSelPcm.Enabled := FTlRangeActive;
   mnuTlSaveSelFlac.Enabled := FTlRangeActive;
@@ -8782,6 +8899,7 @@ begin
   pmTlSaveSelPcm.Enabled := FTlRangeActive;
   pmTlSaveSelFlac.Enabled := FTlRangeActive;
   pmTlPasteSelection.Enabled := FTlHaveSelectionClipboard;
+  mnuTlPasteSelection.Enabled := FTlHaveSelectionClipboard;
 
   { Track reorder: only enabled when the context track can actually move. }
   ctxIndex := -1;
@@ -8954,6 +9072,9 @@ begin
   PopulateTimelineHistoryMenu(pmTlrHistory);
   pmTlrSplitRange.Enabled := FTlRangeActive;
   pmTlrDeleteRange.Enabled := FTlRangeActive;
+  pmTlrCutRange.Enabled := FTlRangeActive;
+  pmTlrCopyRange.Enabled := FTlRangeActive;
+  pmTlrPasteRange.Enabled := FTlHaveSelectionClipboard;
   pmTlrFadeInRange.Enabled := FTlRangeActive;
   pmTlrFadeOutRange.Enabled := FTlRangeActive;
 end;
@@ -9683,41 +9804,48 @@ begin
 end;
 
 { ---- Cut / Copy / Paste: clipboard is a single in-memory TClipState held
-       across calls, mirroring how the undo commands snapshot a clip. ---- }
+       across calls - the same full snapshot the undo commands take, so a
+       pasted clip keeps its rendered effect regions, tempo and original-audio
+       link, not only its audio window. ---- }
 procedure TfrmMain.btnTlCopyClick(Sender: TObject);
 var
   tl: TTimeline;
-  trk: TTimelineTrack;
   c: TTimelineClip;
 begin
-  if (FProject = nil) or (FTlSelClipId < 0) then Exit;
+  if FProject = nil then Exit;
+  { a range showing on the timeline is what Copy acts on - right-clicking
+    inside it also selects the clip under the cursor, and that must not win }
+  if FTlRangeActive then
+  begin
+    pmTlCopySelectionClick(Sender);
+    Exit;
+  end;
+  if FTlSelClipId < 0 then Exit;
   tl := FProject.Timeline;
-  c := tl.ClipById(FTlSelClipId, trk);
+  c := tl.ClipById(FTlSelClipId);
   if c = nil then Exit;
-  FTlClipboard.Id := c.Id;
-  FTlClipboard.TrackId := trk.Id;
-  FTlClipboard.SourceId := c.SourceId;
-  FTlClipboard.Name := c.Name;
-  FTlClipboard.StartSeconds := c.StartSeconds;
-  FTlClipboard.SourceOffsetSeconds := c.SourceOffsetSeconds;
-  FTlClipboard.LengthSeconds := c.LengthSeconds;
-  FTlClipboard.GainDb := c.GainDb;
-  FTlClipboard.FadeInSeconds := c.FadeInSeconds;
-  FTlClipboard.FadeOutSeconds := c.FadeOutSeconds;
-  FTlClipboard.FadeInShape := c.FadeInShape;
-  FTlClipboard.FadeOutShape := c.FadeOutShape;
-  FTlClipboard.Reversed := c.Reversed;
-  FTlClipboard.Muted := c.Muted;
+  FTlClipboard := CaptureTimelineClip(tl, c.Id);
   FTlClipboard.Locked := False;   // a paste should never be born locked
-  FTlClipboard.Loop := c.Loop;
-  FTlClipboard.Color := c.Color;
+  FTlClipboardSources := nil;
+  TlNoteClipboardSource(FTlClipboardSources, FTlClipboard.SourceId);
+  if FTlClipboard.HasOrig then
+    TlNoteClipboardSource(FTlClipboardSources, FTlClipboard.OrigSourceId);
   FTlHaveClipboard := True;
+  FTlPasteRangeNext := False;
   memTimeline.Lines.Insert(0, Format('Copied clip "%s"', [c.Name]));
 end;
 
 procedure TfrmMain.btnTlCutClick(Sender: TObject);
 begin
-  if (FProject = nil) or (FTlSelClipId < 0) then Exit;
+  if FProject = nil then Exit;
+  { with a range showing, Cut cuts that range on the selected channel(s) -
+    not the whole clip the right-click happened to land on }
+  if FTlRangeActive then
+  begin
+    pmTlCutSelectionClick(Sender);
+    Exit;
+  end;
+  if FTlSelClipId < 0 then Exit;
   btnTlCopyClick(Sender);
   try
     FCmds.Perform(TRemoveTimelineClipCommand.Create(FProject, FTlSelClipId));
@@ -9732,11 +9860,17 @@ end;
 procedure TfrmMain.btnTlPasteClick(Sender: TObject);
 var
   tl: TTimeline;
-  addCmd: TAddTimelineClipCommand;
-  c: TTimelineClip;
+  addCmd: TAddTimelineClipStateCommand;
+  st: TClipState;
   destTrackId: Integer;
 begin
-  if (FProject = nil) or not FTlHaveClipboard then Exit;
+  if FProject = nil then Exit;
+  if FTlPasteRangeNext and FTlHaveSelectionClipboard then
+  begin
+    pmTlPasteSelectionClick(Sender);
+    Exit;
+  end;
+  if not FTlHaveClipboard then Exit;
   tl := FProject.Timeline;
   { paste onto the active (selected) channel, not the channel copied from }
   destTrackId := FTlSelectedTrackId;
@@ -9750,23 +9884,12 @@ begin
     if destTrackId < 0 then Exit;
   end;
   try
-    addCmd := TAddTimelineClipCommand.Create(FProject, destTrackId, FTlClipboard.SourceId,
-      FTlClipboard.Name, FTlView.Snap(tl.PlayheadSeconds), FTlClipboard.SourceOffsetSeconds,
-      FTlClipboard.LengthSeconds);
+    st := FTlClipboard;
+    st.TrackId := destTrackId;
+    st.StartSeconds := FTlView.Snap(tl.PlayheadSeconds);
+    TlRemapClipSources(st, FTlClipboardSources);
+    addCmd := TAddTimelineClipStateCommand.Create(FProject, st);
     FCmds.Perform(addCmd);
-    { restore the gain/fade/reverse/mute state that a bare add-clip doesn't carry }
-    c := tl.ClipById(addCmd.CreatedId);
-    if c <> nil then
-    begin
-      c.GainDb := FTlClipboard.GainDb;
-      c.FadeInSeconds := FTlClipboard.FadeInSeconds;
-      c.FadeOutSeconds := FTlClipboard.FadeOutSeconds;
-      c.FadeInShape := FTlClipboard.FadeInShape;
-      c.FadeOutShape := FTlClipboard.FadeOutShape;
-      c.Reversed := FTlClipboard.Reversed;
-      c.Muted := FTlClipboard.Muted;
-      c.Color := FTlClipboard.Color;
-    end;
     FTlSelClipId := addCmd.CreatedId;
     RefreshTimelineTab;
   except
@@ -9775,79 +9898,344 @@ begin
   end;
 end;
 
-{ Copy Selection: snapshots every clip overlapping the active range
-  selection (FTlRangeStartSec/FTlRangeEndSec), across every channel, keyed
-  by its offset from the range start and its channel index relative to
-  the channel that is active (FTlSelectedTrackId) at copy time. }
-procedure TfrmMain.pmTlCopySelectionClick(Sender: TObject);
+{ Records source ASourceId's file details (once per id) so a later paste can
+  re-register it - see TlResolveClipboardSource. MIDI clip references
+  (negative ids) and unknown ids are skipped. }
+procedure TfrmMain.TlNoteClipboardSource(var ASources: TArray<TTlClipboardSource>;
+  ASourceId: Integer);
+var
+  src: TMediaSource;
+  i, n: Integer;
+begin
+  if ASourceId < 0 then Exit;
+  for i := 0 to High(ASources) do
+    if ASources[i].Id = ASourceId then Exit;
+  src := FProject.Timeline.SourceById(ASourceId);
+  if src = nil then Exit;
+  n := Length(ASources);
+  SetLength(ASources, n + 1);
+  ASources[n].Id := src.Id;
+  ASources[n].Path := src.Path;
+  ASources[n].SampleRate := src.SampleRate;
+  ASources[n].Channels := src.Channels;
+  ASources[n].FrameCount := src.FrameCount;
+  ASources[n].Kind := src.Kind;
+end;
+
+{ The source id a clipboard clip pastes against: the copied id while this
+  timeline still has that same file under it, else a source already
+  registered for the file, else the file registered afresh (the project was
+  reloaded or switched since copying). An id with no recorded details is
+  returned unchanged, so the add fails loudly rather than pointing at the
+  wrong audio. }
+function TfrmMain.TlResolveClipboardSource(const ASources: TArray<TTlClipboardSource>;
+  ASourceId: Integer): Integer;
 var
   tl: TTimeline;
-  ti, j, activeIdx, n: Integer;
+  src: TMediaSource;
+  i, k: Integer;
+begin
+  Result := ASourceId;
+  if ASourceId < 0 then Exit;   // MIDI clip reference
+  tl := FProject.Timeline;
+  for i := 0 to High(ASources) do
+    if ASources[i].Id = ASourceId then
+    begin
+      src := tl.SourceById(ASourceId);
+      if (src <> nil) and SameText(src.Path, ASources[i].Path) then Exit;
+      if ASources[i].Path <> '' then
+        for k := 0 to tl.SourceCount - 1 do
+          if SameText(tl.GetSource(k).Path, ASources[i].Path) then
+            Exit(tl.GetSource(k).Id);
+      Exit(tl.AddSource(ASources[i].Path, ASources[i].SampleRate, ASources[i].Channels,
+        ASources[i].FrameCount, ASources[i].Kind).Id);
+    end;
+end;
+
+procedure TfrmMain.TlRemapClipSources(var AState: TClipState;
+  const ASources: TArray<TTlClipboardSource>);
+begin
+  AState.SourceId := TlResolveClipboardSource(ASources, AState.SourceId);
+  if AState.HasOrig then
+  begin
+    AState.OrigSourceId := TlResolveClipboardSource(ASources, AState.OrigSourceId);
+    { no original to restore to - drop the link rather than keep a dangling id }
+    if FProject.Timeline.SourceById(AState.OrigSourceId) = nil then
+      AState.HasOrig := False;
+  end;
+end;
+
+{ Appends each comma-separated entry of ATitle that track ATrackId's title
+  band does not already show - undoable, so undoing a paste takes the
+  pasted titles back off too. }
+procedure TfrmMain.TlMergeTrackTitle(ATrackId: Integer; const ATitle: string);
+var
+  trk: TTimelineTrack;
+  merged, part, have, entry: string;
+  found: Boolean;
+begin
+  trk := FProject.Timeline.TrackById(ATrackId);
+  if trk = nil then Exit;
+  merged := trk.Title;
+  for part in ATitle.Split([',']) do
+  begin
+    entry := Trim(part);
+    if entry = '' then Continue;
+    found := False;
+    for have in merged.Split([',']) do
+      if SameText(Trim(have), entry) then
+      begin
+        found := True;
+        Break;
+      end;
+    if found then Continue;
+    if merged = '' then
+      merged := entry
+    else
+      merged := merged + ', ' + entry;
+  end;
+  if merged <> trk.Title then
+    FCmds.Perform(TSetTimelineTrackTitleCommand.Create(FProject, ATrackId, merged));
+end;
+
+{ Channels a range Cut/Copy Selection acts on: the selected channel(s) (see
+  TlRangeTrackIds), or every channel when none is selected. }
+function TfrmMain.TlRangeScopeTrackIds: TArray<Integer>;
+var
+  i: Integer;
+begin
+  Result := TlRangeTrackIds;
+  if Length(Result) > 0 then Exit;
+  for i := 0 to FProject.Timeline.TrackCount - 1 do
+    Result := Result + [FProject.Timeline.GetTrack(i).Id];
+end;
+
+{ Snapshots everything inside the active range onto the range clipboard:
+  on each scope channel, the in-range slice of every overlapping clip (a clip
+  straddling an edge contributes only its inside part) with its effect
+  regions clipped to that slice, and the channel's title band; timeline-wide,
+  the markers inside the range and the part of each region overlapping it.
+  Positions are kept relative to the range start and channels relative to
+  the active channel, so Paste Selection can re-create it anywhere. Returns
+  False (clipboard emptied) when the range holds nothing. }
+function TfrmMain.TlCopyRangeToClipboard: Boolean;
+var
+  tl: TTimeline;
+  scope: TArray<Integer>;
+  trackId, ti, j, k, activeIdx, clipsBefore, fxCount: Integer;
   trk: TTimelineTrack;
   c: TTimelineClip;
+  m: TTimelineMarker;
+  r: TTimelineRegion;
+  s, e: Double;
 begin
+  Result := False;
   if (FProject = nil) or not FTlRangeActive then Exit;
   tl := FProject.Timeline;
+  scope := TlRangeScopeTrackIds;
   activeIdx := tl.IndexOfTrack(FTlSelectedTrackId);
+  if (activeIdx < 0) and (Length(scope) > 0) then
+    activeIdx := tl.IndexOfTrack(scope[0]);
   if activeIdx < 0 then activeIdx := 0;
-  SetLength(FTlSelectionClipboard, 0);
-  SetLength(FTlSelectionClipboardRelStart, 0);
-  SetLength(FTlSelectionClipboardRelTrack, 0);
-  n := 0;
-  for ti := 0 to tl.TrackCount - 1 do
+  FTlRangeClips := nil;
+  FTlRangeMarkers := nil;
+  FTlRangeRegions := nil;
+  FTlRangeTitles := nil;
+  FTlRangeSources := nil;
+  fxCount := 0;
+
+  for trackId in scope do
   begin
-    trk := tl.GetTrack(ti);
+    trk := tl.TrackById(trackId);
+    if trk = nil then Continue;
+    ti := tl.IndexOfTrack(trackId);
+    clipsBefore := Length(FTlRangeClips);
     for j := 0 to trk.ClipCount - 1 do
     begin
       c := trk.GetClip(j);
-      if (c.StartSeconds >= FTlRangeStartSec - TIMELINE_MIN_CLIP_SECONDS) and
-         (c.EndSeconds <= FTlRangeEndSec + TIMELINE_MIN_CLIP_SECONDS) then
-      begin
-        Inc(n);
-        SetLength(FTlSelectionClipboard, n);
-        SetLength(FTlSelectionClipboardRelStart, n);
-        SetLength(FTlSelectionClipboardRelTrack, n);
-        FTlSelectionClipboard[n - 1].Id := c.Id;
-        FTlSelectionClipboard[n - 1].TrackId := trk.Id;
-        FTlSelectionClipboard[n - 1].SourceId := c.SourceId;
-        FTlSelectionClipboard[n - 1].Name := c.Name;
-        FTlSelectionClipboard[n - 1].StartSeconds := c.StartSeconds;
-        FTlSelectionClipboard[n - 1].SourceOffsetSeconds := c.SourceOffsetSeconds;
-        FTlSelectionClipboard[n - 1].LengthSeconds := c.LengthSeconds;
-        FTlSelectionClipboard[n - 1].GainDb := c.GainDb;
-        FTlSelectionClipboard[n - 1].FadeInSeconds := c.FadeInSeconds;
-        FTlSelectionClipboard[n - 1].FadeOutSeconds := c.FadeOutSeconds;
-        FTlSelectionClipboard[n - 1].FadeInShape := c.FadeInShape;
-        FTlSelectionClipboard[n - 1].FadeOutShape := c.FadeOutShape;
-        FTlSelectionClipboard[n - 1].Reversed := c.Reversed;
-        FTlSelectionClipboard[n - 1].Muted := c.Muted;
-        FTlSelectionClipboard[n - 1].Locked := False;
-        FTlSelectionClipboard[n - 1].Loop := c.Loop;
-        FTlSelectionClipboard[n - 1].Color := c.Color;
-        FTlSelectionClipboardRelStart[n - 1] := c.StartSeconds - FTlRangeStartSec;
-        FTlSelectionClipboardRelTrack[n - 1] := ti - activeIdx;
-      end;
+      if (c.EndSeconds <= FTlRangeStartSec + TIMELINE_MIN_CLIP_SECONDS) or
+         (c.StartSeconds >= FTlRangeEndSec - TIMELINE_MIN_CLIP_SECONDS) then
+        Continue;
+      k := Length(FTlRangeClips);
+      SetLength(FTlRangeClips, k + 1);
+      FTlRangeClips[k].State := CaptureTimelineClipSlice(tl, c.Id, FTlRangeStartSec, FTlRangeEndSec);
+      FTlRangeClips[k].State.Locked := False;   // a paste should never be born locked
+      FTlRangeClips[k].RelStart := FTlRangeClips[k].State.StartSeconds - FTlRangeStartSec;
+      FTlRangeClips[k].RelTrack := ti - activeIdx;
+      TlNoteClipboardSource(FTlRangeSources, FTlRangeClips[k].State.SourceId);
+      if FTlRangeClips[k].State.HasOrig then
+        TlNoteClipboardSource(FTlRangeSources, FTlRangeClips[k].State.OrigSourceId);
+      if Length(FTlRangeClips[k].State.EffectRegions) > 0 then
+        Inc(fxCount, Length(FTlRangeClips[k].State.EffectRegions))
+      else if FTlRangeClips[k].State.EffectName <> '' then
+        Inc(fxCount);
+    end;
+    { the channel's title travels with whatever was copied from it }
+    if (Length(FTlRangeClips) > clipsBefore) and (Trim(trk.Title) <> '') then
+    begin
+      k := Length(FTlRangeTitles);
+      SetLength(FTlRangeTitles, k + 1);
+      FTlRangeTitles[k].RelTrack := ti - activeIdx;
+      FTlRangeTitles[k].Title := trk.Title;
     end;
   end;
-  FTlHaveSelectionClipboard := (n > 0);
-  if FTlHaveSelectionClipboard then
-    memTimeline.Lines.Insert(0, Format('Copied selection (%d clip(s))', [n]))
+
+  for j := 0 to tl.MarkerCount - 1 do
+  begin
+    m := tl.GetMarker(j);
+    if (m.Seconds < FTlRangeStartSec) or (m.Seconds > FTlRangeEndSec) then Continue;
+    k := Length(FTlRangeMarkers);
+    SetLength(FTlRangeMarkers, k + 1);
+    FTlRangeMarkers[k].Name := m.Name;
+    FTlRangeMarkers[k].RelSeconds := m.Seconds - FTlRangeStartSec;
+  end;
+
+  for j := 0 to tl.RegionCount - 1 do
+  begin
+    r := tl.GetRegion(j);
+    if r.LengthSeconds <= 0 then
+    begin
+      { a zero-length region is a point - kept when it sits inside the range }
+      if (r.StartSeconds < FTlRangeStartSec) or (r.StartSeconds > FTlRangeEndSec) then Continue;
+      s := r.StartSeconds;
+      e := s;
+    end
+    else
+    begin
+      s := Max(r.StartSeconds, FTlRangeStartSec);
+      e := Min(r.EndSeconds, FTlRangeEndSec);
+      if e - s < TIMELINE_MIN_CLIP_SECONDS then Continue;
+    end;
+    k := Length(FTlRangeRegions);
+    SetLength(FTlRangeRegions, k + 1);
+    FTlRangeRegions[k].Name := r.Name;
+    FTlRangeRegions[k].RelStart := s - FTlRangeStartSec;
+    FTlRangeRegions[k].LengthSeconds := e - s;
+    FTlRangeRegions[k].Color := r.Color;
+  end;
+
+  Result := (Length(FTlRangeClips) > 0) or (Length(FTlRangeMarkers) > 0) or
+    (Length(FTlRangeRegions) > 0);
+  FTlHaveSelectionClipboard := Result;
+  if Result then FTlPasteRangeNext := True;
+  if Result then
+    memTimeline.Lines.Insert(0, Format(
+      'Copied selection: %d clip(s), %d effect(s), %d title(s), %d marker(s), %d region(s)',
+      [Length(FTlRangeClips), fxCount, Length(FTlRangeTitles), Length(FTlRangeMarkers),
+       Length(FTlRangeRegions)]))
   else
     memTimeline.Lines.Insert(0, 'Copy Selection: nothing in range');
 end;
 
-{ Paste Selection: re-creates the copied group anchored on the playhead and
-  on whichever channel is active NOW (FTlSelectedTrackId), preserving each
-  clip's relative timing and relative channel offset from copy time. Clips
-  whose relative channel falls outside the current channel list are dropped
-  onto the nearest in-range channel rather than silently lost. }
+{ Removes everything inside the active range on ATrackIds: clips straddling
+  a range edge are split there first (so their outside parts stay, each
+  keeping only its own effect regions), then every clip piece inside the
+  range is removed. Locked clips are left untouched. With
+  ARemoveMarkersRegions (the cut spans every channel) the timeline-wide
+  markers inside the range and the regions lying wholly inside it go too -
+  they belong to the whole timeline, so cutting one channel keeps them. Every
+  step is an ordinary undoable command. }
+procedure TfrmMain.TlClearRangeOnTracks(const ATrackIds: TArray<Integer>;
+  ARemoveMarkersRegions: Boolean);
+var
+  tl: TTimeline;
+  trackId, j, locked: Integer;
+  trk: TTimelineTrack;
+  ids: TArray<Integer>;
+  id: Integer;
+  c: TTimelineClip;
+  r: TTimelineRegion;
+begin
+  tl := FProject.Timeline;
+  TlSplitTracksAtRangeEdges(ATrackIds);
+  locked := 0;
+  for trackId in ATrackIds do
+  begin
+    trk := tl.TrackById(trackId);
+    if trk = nil then Continue;
+    SetLength(ids, trk.ClipCount);
+    for j := 0 to trk.ClipCount - 1 do
+      ids[j] := trk.GetClip(j).Id;
+    for id in ids do
+    begin
+      c := tl.ClipById(id);
+      if (c = nil) or (c.StartSeconds < FTlRangeStartSec - TIMELINE_MIN_CLIP_SECONDS) or
+         (c.EndSeconds > FTlRangeEndSec + TIMELINE_MIN_CLIP_SECONDS) then
+        Continue;
+      if c.Locked then
+      begin
+        Inc(locked);
+        Continue;
+      end;
+      FCmds.Perform(TRemoveTimelineClipCommand.Create(FProject, id));
+    end;
+  end;
+  if locked > 0 then
+    memTimeline.Lines.Insert(0, Format('Cut Selection: %d locked clip(s) left in place', [locked]));
+
+  if not ARemoveMarkersRegions then Exit;
+  ids := nil;
+  for j := 0 to tl.MarkerCount - 1 do
+    if (tl.GetMarker(j).Seconds >= FTlRangeStartSec) and (tl.GetMarker(j).Seconds <= FTlRangeEndSec) then
+      ids := ids + [tl.GetMarker(j).Id];
+  for id in ids do
+    FCmds.Perform(TRemoveTimelineMarkerCommand.Create(FProject, id));
+  ids := nil;
+  for j := 0 to tl.RegionCount - 1 do
+  begin
+    r := tl.GetRegion(j);
+    if (r.StartSeconds >= FTlRangeStartSec - TIMELINE_MIN_CLIP_SECONDS) and
+       (r.EndSeconds <= FTlRangeEndSec + TIMELINE_MIN_CLIP_SECONDS) then
+      ids := ids + [r.Id];
+  end;
+  for id in ids do
+    FCmds.Perform(TRemoveTimelineRegionCommand.Create(FProject, id));
+end;
+
+procedure TfrmMain.pmTlCopySelectionClick(Sender: TObject);
+begin
+  if (FProject = nil) or not FTlRangeActive then Exit;
+  try
+    TlCopyRangeToClipboard;
+  except
+    on E: Exception do
+      memTimeline.Lines.Insert(0, 'Copy Selection FAILED: ' + E.Message);
+  end;
+end;
+
+{ Cut Selection: Copy Selection, then clear the range on the same channels
+  (see TlClearRangeOnTracks) - so Paste Selection brings back the audio with
+  every effect, title, marker and region that was cut. }
+procedure TfrmMain.pmTlCutSelectionClick(Sender: TObject);
+var
+  scope: TArray<Integer>;
+begin
+  if (FProject = nil) or not FTlRangeActive then Exit;
+  try
+    if not TlCopyRangeToClipboard then Exit;
+    scope := TlRangeScopeTrackIds;
+    TlClearRangeOnTracks(scope, Length(scope) = FProject.Timeline.TrackCount);
+    FTlSelClipId := -1;
+    SetLength(FTlSelClipIds, 0);
+    RefreshTimelineTab;
+  except
+    on E: Exception do
+      memTimeline.Lines.Insert(0, 'Cut Selection FAILED: ' + E.Message);
+  end;
+end;
+
+{ Paste Selection: re-creates the range clipboard anchored on the playhead
+  and on whichever channel is active NOW (FTlSelectedTrackId) - every clip
+  slice with its effect regions, each copied channel's title merged into its
+  destination channel's title band, and the copied markers and regions -
+  preserving relative timing and relative channel offsets from copy time.
+  Clips whose relative channel falls outside the current channel list are
+  dropped onto the nearest in-range channel rather than silently lost. }
 procedure TfrmMain.pmTlPasteSelectionClick(Sender: TObject);
 var
   tl: TTimeline;
   i, activeIdx, destIdx: Integer;
-  destTrackId: Integer;
-  addCmd: TAddTimelineClipCommand;
-  c: TTimelineClip;
+  st: TClipState;
   anchorSec: Double;
 begin
   if (FProject = nil) or not FTlHaveSelectionClipboard then Exit;
@@ -9857,31 +10245,38 @@ begin
   if activeIdx < 0 then activeIdx := 0;
   anchorSec := FTlView.Snap(tl.PlayheadSeconds);
   try
-    for i := 0 to High(FTlSelectionClipboard) do
+    for i := 0 to High(FTlRangeClips) do
     begin
-      destIdx := EnsureRange(activeIdx + FTlSelectionClipboardRelTrack[i], 0, tl.TrackCount - 1);
-      destTrackId := tl.GetTrack(destIdx).Id;
-      addCmd := TAddTimelineClipCommand.Create(FProject, destTrackId, FTlSelectionClipboard[i].SourceId,
-        FTlSelectionClipboard[i].Name, anchorSec + FTlSelectionClipboardRelStart[i],
-        FTlSelectionClipboard[i].SourceOffsetSeconds, FTlSelectionClipboard[i].LengthSeconds);
-      FCmds.Perform(addCmd);
-      c := tl.ClipById(addCmd.CreatedId);
-      if c <> nil then
-      begin
-        c.GainDb := FTlSelectionClipboard[i].GainDb;
-        c.FadeInSeconds := FTlSelectionClipboard[i].FadeInSeconds;
-        c.FadeOutSeconds := FTlSelectionClipboard[i].FadeOutSeconds;
-        c.FadeInShape := FTlSelectionClipboard[i].FadeInShape;
-        c.FadeOutShape := FTlSelectionClipboard[i].FadeOutShape;
-        c.Reversed := FTlSelectionClipboard[i].Reversed;
-        c.Muted := FTlSelectionClipboard[i].Muted;
-        c.Color := FTlSelectionClipboard[i].Color;
-      end;
+      destIdx := EnsureRange(activeIdx + FTlRangeClips[i].RelTrack, 0, tl.TrackCount - 1);
+      st := FTlRangeClips[i].State;
+      st.TrackId := tl.GetTrack(destIdx).Id;
+      st.StartSeconds := anchorSec + FTlRangeClips[i].RelStart;
+      TlRemapClipSources(st, FTlRangeSources);
+      FCmds.Perform(TAddTimelineClipStateCommand.Create(FProject, st));
     end;
+    for i := 0 to High(FTlRangeTitles) do
+    begin
+      destIdx := EnsureRange(activeIdx + FTlRangeTitles[i].RelTrack, 0, tl.TrackCount - 1);
+      TlMergeTrackTitle(tl.GetTrack(destIdx).Id, FTlRangeTitles[i].Title);
+    end;
+    for i := 0 to High(FTlRangeMarkers) do
+      FCmds.Perform(TAddTimelineMarkerCommand.Create(FProject, FTlRangeMarkers[i].Name,
+        anchorSec + FTlRangeMarkers[i].RelSeconds));
+    for i := 0 to High(FTlRangeRegions) do
+      FCmds.Perform(TAddTimelineRegionCommand.Create(FProject, FTlRangeRegions[i].Name,
+        anchorSec + FTlRangeRegions[i].RelStart, FTlRangeRegions[i].LengthSeconds,
+        FTlRangeRegions[i].Color));
+    memTimeline.Lines.Insert(0, Format(
+      'Pasted selection: %d clip(s), %d title(s), %d marker(s), %d region(s)',
+      [Length(FTlRangeClips), Length(FTlRangeTitles), Length(FTlRangeMarkers),
+       Length(FTlRangeRegions)]));
     RefreshTimelineTab;
   except
     on E: Exception do
+    begin
       memTimeline.Lines.Insert(0, 'Paste Selection FAILED: ' + E.Message);
+      RefreshTimelineTab;
+    end;
   end;
 end;
 
@@ -10266,39 +10661,53 @@ end;
 
 { Splits every clip that straddles either range boundary, on every track, so
   the piece of each clip inside the range becomes its own clip. Safe to call
-  with no clips actually crossing a boundary (a no-op then). Re-fetches each
-  clip after the first split since TSplitTimelineClipCommand shrinks the
-  original clip to the left piece and the boundary check must run against
-  its new bounds. }
+  with no clips actually crossing a boundary (a no-op then). }
 procedure TfrmMain.TlSplitAtRangeEdges;
 var
+  ids: TArray<Integer>;
+  i: Integer;
+begin
+  if FProject = nil then Exit;
+  ids := nil;
+  for i := 0 to FProject.Timeline.TrackCount - 1 do
+    ids := ids + [FProject.Timeline.GetTrack(i).Id];
+  TlSplitTracksAtRangeEdges(ids);
+end;
+
+{ TlSplitAtRangeEdges for the given tracks only. One pass per edge, each
+  re-reading the track's clip ids: a clip spanning the whole range is split
+  at the start into a new right-hand clip, and it is that new clip - not the
+  original id, now the left piece - that must then be split at the end.
+  Locked clips are never split. }
+procedure TfrmMain.TlSplitTracksAtRangeEdges(const ATrackIds: TArray<Integer>);
+var
   tl: TTimeline;
-  ti, j: Integer;
+  trackId, j, pass: Integer;
   trk: TTimelineTrack;
   ids: TArray<Integer>;
   id: Integer;
   c: TTimelineClip;
+  edge: Double;
 begin
   if FProject = nil then Exit;
   tl := FProject.Timeline;
-  for ti := 0 to tl.TrackCount - 1 do
-  begin
-    trk := tl.GetTrack(ti);
-    SetLength(ids, trk.ClipCount);
-    for j := 0 to trk.ClipCount - 1 do
-      ids[j] := trk.GetClip(j).Id;
-    for id in ids do
+  for trackId in ATrackIds do
+    for pass := 0 to 1 do
     begin
-      c := tl.ClipById(id);
-      if (c <> nil) and (FTlRangeStartSec > c.StartSeconds + TIMELINE_MIN_CLIP_SECONDS) and
-         (FTlRangeStartSec < c.EndSeconds - TIMELINE_MIN_CLIP_SECONDS) then
-        FCmds.Perform(TSplitTimelineClipCommand.Create(FProject, id, FTlRangeStartSec));
-      c := tl.ClipById(id);
-      if (c <> nil) and (FTlRangeEndSec > c.StartSeconds + TIMELINE_MIN_CLIP_SECONDS) and
-         (FTlRangeEndSec < c.EndSeconds - TIMELINE_MIN_CLIP_SECONDS) then
-        FCmds.Perform(TSplitTimelineClipCommand.Create(FProject, id, FTlRangeEndSec));
+      trk := tl.TrackById(trackId);
+      if trk = nil then Break;
+      if pass = 0 then edge := FTlRangeStartSec else edge := FTlRangeEndSec;
+      SetLength(ids, trk.ClipCount);
+      for j := 0 to trk.ClipCount - 1 do
+        ids[j] := trk.GetClip(j).Id;
+      for id in ids do
+      begin
+        c := tl.ClipById(id);
+        if (c <> nil) and not c.Locked and (edge > c.StartSeconds + TIMELINE_MIN_CLIP_SECONDS) and
+           (edge < c.EndSeconds - TIMELINE_MIN_CLIP_SECONDS) then
+          FCmds.Perform(TSplitTimelineClipCommand.Create(FProject, id, edge));
+      end;
     end;
-  end;
 end;
 
 procedure TfrmMain.btnTlSplitRangeClick(Sender: TObject);
@@ -11002,7 +11411,8 @@ begin
         c.EffectOffsetSeconds := Max(0, overlapStartSec - c.StartSeconds);
         c.EffectLengthSeconds := overlapEndSec - overlapStartSec;
         c.Color := TlEffectColor(AEffectName);
-        c.AddEffectRegion(AEffectName, c.EffectOffsetSeconds, c.EffectLengthSeconds, c.Color);
+        c.AddEffectRegion(AEffectName, c.EffectOffsetSeconds, c.EffectLengthSeconds, c.Color,
+          AKind, AParams);
         Inc(count);
         StageDone(4, 'timeline updated');
       end;
@@ -11174,10 +11584,12 @@ end;
   nothing is changed and a message says why the effect cannot be undone - a
   half-restored selection is never left behind. The audio swap is one undoable
   command per clip. }
-procedure TfrmMain.TlUndoEffectInRange;
+function TfrmMain.TlUndoEffectInRange: Boolean;
 const
   MAX_LISTED = 10;
 var
+  fromMaster: Boolean;
+  masterCount: Integer;
   tl: TTimeline;
   trk: TTimelineTrack;
   ids, planIds: TArray<Integer>;
@@ -11197,54 +11609,126 @@ var
   touched, hasFx, needAudio: Boolean;
   dlgType: TMsgDlgType;
 
-  { '' when the clip's original audio can be spliced back over
+  { Fallback when a clip has no usable original: the same stretch of time
+    taken from the Master track (TlMasterTrack). '' when a single plain audio
+    clip there covers [AFromSec, AToSec] in the same format as ADec; fills
+    AODec/AOrig so AODec frame (AOrig + f) lines up with clip frame f. }
+  function MasterSlice(AClip: TTimelineClip; AFromSec, AToSec: Double;
+    ADec: TDecodedSource; out AODec: TDecodedSource; out AOrig: Integer): string;
+  const
+    EPS = 0.0005;
+  var
+    mt: TTimelineTrack;
+    mc, found: TTimelineClip;
+    ms: TMediaSource;
+    k: Integer;
+  begin
+    AODec := nil;
+    AOrig := 0;
+    mt := TlMasterTrack;
+    if mt = nil then
+      Exit('there is no Master track to take the region from');
+    found := nil;
+    for k := 0 to mt.ClipCount - 1 do
+    begin
+      mc := mt.GetClip(k);
+      if mc.Id = AClip.Id then
+        Exit('the clip is on the Master track itself');
+      if mc.IsMidiClip or mc.Reversed or (mc.SourceBPM > 0) then Continue;
+      if (mc.StartSeconds <= AFromSec + EPS) and (mc.EndSeconds >= AToSec - EPS) then
+      begin
+        found := mc;
+        Break;
+      end;
+    end;
+    if found = nil then
+      Exit('the Master track has no single audio clip covering the whole region');
+    ms := tl.SourceById(found.SourceId);
+    if (ms = nil) or ((ms.Path <> '') and not FileExists(ms.Path)) then
+      Exit('the Master track''s audio file is missing');
+    AODec := player.GetDecodedSource(ms.Id);
+    if (AODec = nil) or AODec.Failed then
+      Exit('the Master track''s audio could not be read');
+    if (ADec.SampleRate <> AODec.SampleRate) or (ADec.Channels <> AODec.Channels) then
+      Exit('the Master track''s audio has a different sample rate or channel count');
+    AOrig := Round((found.SourceOffsetSeconds + AClip.StartSeconds - found.StartSeconds) *
+      ADec.SampleRate);
+    Result := '';
+  end;
+
+  { '' when the clip's original audio - or, failing that, the Master track's
+    audio for the same stretch of time - can be spliced back over
     [AFromSec, AToSec]; otherwise the reason it cannot. Fills the decoded
-    sources and frame positions the splice needs. }
+    sources and frame positions the splice needs; AMaster says which one. }
   function AudioSlice(AClip: TTimelineClip; AFromSec, AToSec: Double;
     out ADec, AODec: TDecodedSource;
-    out AStart, ACount, AFrom, ATo, AOrig: Integer): string;
+    out AStart, ACount, AFrom, ATo, AOrig: Integer; out AMaster: Boolean): string;
   var
     s, o: TMediaSource;
+    origWhy: string;
   begin
     Result := '';
     ADec := nil; AODec := nil;
     AStart := 0; ACount := 0; AFrom := 0; ATo := 0; AOrig := 0;
-    if not AClip.HasOrig then
-      Exit('no copy of the original audio was kept for it');
-    o := tl.SourceById(AClip.OrigSourceId);
-    if o = nil then
-      Exit('its original audio is no longer part of the project');
-    if (o.Path <> '') and not FileExists(o.Path) then
-      Exit('the original file is missing: ' + o.Path);
+    AMaster := False;
     s := tl.SourceById(AClip.SourceId);
     if s = nil then
       Exit('its current audio source is missing');
     if (s.Path <> '') and not FileExists(s.Path) then
       Exit('the rendered effect file is missing: ' + s.Path);
-    if s.Id = o.Id then Exit;   // already playing the original - nothing to splice
+    o := nil;
+    origWhy := '';
+    if not AClip.HasOrig then
+      origWhy := 'no copy of the original audio was kept for it'
+    else
+    begin
+      o := tl.SourceById(AClip.OrigSourceId);
+      if o = nil then
+        origWhy := 'its original audio is no longer part of the project'
+      else if (o.Path <> '') and not FileExists(o.Path) then
+        origWhy := 'the original file is missing: ' + o.Path
+      else if s.Id = o.Id then
+        Exit;   // already playing the original - nothing to splice
+    end;
     ADec := player.GetDecodedSource(s.Id);
-    AODec := player.GetDecodedSource(o.Id);
     if (ADec = nil) or ADec.Failed then
       Exit('the rendered effect audio could not be read');
-    if (AODec = nil) or AODec.Failed then
-      Exit('the original audio could not be read');
-    if (ADec.SampleRate <> AODec.SampleRate) or (ADec.Channels <> AODec.Channels) then
-      Exit('the original audio has a different sample rate or channel count');
     AStart := Max(0, Round(AClip.SourceOffsetSeconds * ADec.SampleRate));
     ACount := Round(AClip.LengthSeconds * ADec.SampleRate);
     if AStart + ACount > ADec.FrameCount then ACount := ADec.FrameCount - AStart;
     AFrom := Max(0, Round((AFromSec - AClip.StartSeconds) * ADec.SampleRate));
     ATo := Min(ACount, Round((AToSec - AClip.StartSeconds) * ADec.SampleRate));
-    AOrig := Round((AClip.SourceOffsetSeconds + AClip.OrigDelta) * ADec.SampleRate);
     if (ACount <= 0) or (ATo <= AFrom) then
       Exit('the selected range lies outside the clip''s audio');
-    if (AOrig + AFrom < 0) or (AOrig + ATo > AODec.FrameCount) then
-      Exit('the original audio does not cover the whole selected range');
+    if origWhy = '' then
+    begin
+      AODec := player.GetDecodedSource(o.Id);
+      if (AODec = nil) or AODec.Failed then
+        origWhy := 'the original audio could not be read'
+      else if (ADec.SampleRate <> AODec.SampleRate) or (ADec.Channels <> AODec.Channels) then
+        origWhy := 'the original audio has a different sample rate or channel count'
+      else
+      begin
+        AOrig := Round((AClip.SourceOffsetSeconds + AClip.OrigDelta) * ADec.SampleRate);
+        if (AOrig + AFrom < 0) or (AOrig + ATo > AODec.FrameCount) then
+          origWhy := 'the original audio does not cover the whole selected range';
+      end;
+    end;
+    if origWhy = '' then Exit;
+    { no usable original: take the region from the Master track instead }
+    Result := MasterSlice(AClip, AFromSec, AToSec, ADec, AODec, AOrig);
+    if (Result = '') and ((AOrig + AFrom < 0) or (AOrig + ATo > AODec.FrameCount)) then
+      Result := 'the Master track''s audio does not cover the whole region';
+    if Result <> '' then
+      Exit(origWhy + ', and ' + Result);
+    AMaster := True;
   end;
 
 begin
+  Result := False;
   if (FProject = nil) or not FTlRangeActive then Exit;
   count := 0;
+  masterCount := 0;
   done := 0;
   msg := '';
   dlgType := mtInformation;
@@ -11299,15 +11783,16 @@ begin
           hasFx := True;
           if SameText(r.Name, 'Warp') then
             why := '"Warp" changes the clip''s timing, so the original cannot be lined up with part of it (use Edit > Undo instead)'
-          else if not (SameText(r.Name, 'Fade In') or SameText(r.Name, 'Fade Out')) then
-            needAudio := True;   // a rendered effect - the audio itself must be restored
+          else if (r.Kind <> '') or
+                  not (SameText(r.Name, 'Fade In') or SameText(r.Name, 'Fade Out')) then
+            needAudio := True;   // a rendered effect (incl. a rendered range fade) - the audio itself must be restored
         end;
         if not hasFx then Continue;
         if (why = '') and c.Locked then
           why := 'the clip is locked';
         if (why = '') and needAudio then
           why := AudioSlice(c, overlapStartSec, overlapEndSec, dec, odec,
-            startFrame, frameCount, fxFrom, fxTo, origStart);
+            startFrame, frameCount, fxFrom, fxTo, origStart, fromMaster);
         if why <> '' then
           problems := problems + [Format('Clip %d (%.2f s - %.2f s): %s.',
             [c.Id, c.StartSeconds, c.EndSeconds, why])]
@@ -11352,11 +11837,12 @@ begin
           if planAudio[p] then
           begin
             why := AudioSlice(c, overlapStartSec, overlapEndSec, dec, odec,
-              startFrame, frameCount, fxFrom, fxTo, origStart);
+              startFrame, frameCount, fxFrom, fxTo, origStart, fromMaster);
             if why <> '' then
               raise Exception.CreateFmt('clip %d: %s', [c.Id, why]);
             if dec <> nil then   // nil = already on the original source
             begin
+              if fromMaster then Inc(masterCount);
               sr := dec.SampleRate;
               ch := dec.Channels;
               EnsurePlanar(outPlanar, ch, frameCount);
@@ -11392,9 +11878,9 @@ begin
               Continue;
             end;
             touched := True;
-            if SameText(r.Name, 'Fade In') and (a >= relS - TIMELINE_MIN_CLIP_SECONDS) then
+            if (r.Kind = '') and SameText(r.Name, 'Fade In') and (a >= relS - TIMELINE_MIN_CLIP_SECONDS) then
               FCmds.Perform(TSetTimelineClipFadeCommand.Create(FProject, c.Id, ceStart, 0));
-            if SameText(r.Name, 'Fade Out') and (b <= relE + TIMELINE_MIN_CLIP_SECONDS) then
+            if (r.Kind = '') and SameText(r.Name, 'Fade Out') and (b <= relE + TIMELINE_MIN_CLIP_SECONDS) then
               FCmds.Perform(TSetTimelineClipFadeCommand.Create(FProject, c.Id, ceEnd, 0));
             if a < relS - TIMELINE_MIN_CLIP_SECONDS then     // part left of the range stays
             begin
@@ -11432,6 +11918,10 @@ begin
           end;
         end;
         memTimeline.Lines.Insert(0, Format('Undo Effect: original sound restored on %d clip(s).', [count]));
+        if masterCount > 0 then
+          memTimeline.Lines.Insert(0, Format('Undo Effect: %d clip(s) had no kept original - ' +
+            'the region was taken from the Master track instead.', [masterCount]));
+        Result := count > 0;
       end;
     finally
       player.Free;
@@ -11512,6 +12002,98 @@ end;
 procedure TfrmMain.TlUndoEffectClick(Sender: TObject);
 begin
   TlUndoEffectInRange;
+end;
+
+{ The channel "Undo Effect" falls back to when a clip kept no original: a
+  track of kind Master, else one named "Master". nil when there is none. }
+function TfrmMain.TlMasterTrack: TTimelineTrack;
+var
+  tl: TTimeline;
+  i: Integer;
+begin
+  Result := nil;
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  for i := 0 to tl.TrackCount - 1 do
+    if tl.GetTrack(i).Kind = tkMaster then Exit(tl.GetTrack(i));
+  for i := 0 to tl.TrackCount - 1 do
+    if SameText(Trim(tl.GetTrack(i).Name), 'Master') then Exit(tl.GetTrack(i));
+end;
+
+{ pmTlEffect is only ever shown for a pressed effect name (FTlEffCtx), so its
+  title names that effect and Edit is offered only when it has settings. }
+procedure TfrmMain.pmTlEffectPopup(Sender: TObject);
+var
+  kind, params, nm: string;
+begin
+  nm := FTlEffCtx.Name;
+  if Copy(nm, 1, 4) = '??? ' then Delete(nm, 1, 4);
+  pmTlEffTitle.Caption := nm;
+  kind := FTlEffCtx.Kind;
+  if kind = '' then
+    TlFxPresetByName(nm, kind, params);
+  pmTlEffEdit.Enabled := (kind <> '') and (kind <> '@fadein') and (kind <> '@fadeout');
+  pmTlEffUndo.Enabled := FTlRangeActive;
+end;
+
+{ Edit Effect: shows the settings the pressed effect region was rendered with
+  (or its defaults, for a region saved before settings were kept), then puts
+  the original sound back over that region (the same checks as Undo Effect -
+  nothing changes if it can't) and renders the effect again with the edited
+  settings. Both steps are ordinary undo steps. }
+procedure TfrmMain.pmTlEffEditClick(Sender: TObject);
+var
+  nm, kind, params, txt: string;
+
+  { value of AKey in a "k=v;k=v" settings string, ADefault when absent }
+  function ParamValue(const AText, AKey: string; const ADefault: string = ''): string;
+  var
+    part: string;
+    p: Integer;
+  begin
+    Result := ADefault;
+    for part in AText.Split([';']) do
+    begin
+      p := Pos('=', part);
+      if (p > 0) and SameText(Trim(Copy(part, 1, p - 1)), AKey) then
+        Exit(Copy(part, p + 1, MaxInt));
+    end;
+  end;
+
+begin
+  if (FProject = nil) or not FTlRangeActive then Exit;
+  nm := FTlEffCtx.Name;
+  if Copy(nm, 1, 4) = '??? ' then Delete(nm, 1, 4);
+  kind := FTlEffCtx.Kind;
+  params := FTlEffCtx.Params;
+  if kind = '' then
+    if not TlFxPresetByName(nm, kind, params) then
+    begin
+      MessageDlg(Format('"%s" has no settings that can be edited. Use Undo Effect to remove it.', [nm]),
+        mtInformation, [mbOK], 0);
+      Exit;
+    end;
+  if (kind = '@fadein') or (kind = '@fadeout') then
+  begin
+    MessageDlg(Format('"%s" has no settings that can be edited. Use Undo Effect to remove it.', [nm]),
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  if kind = '@convolve' then
+  begin
+    { the impulse response is a file - let the user pick it again }
+    dlgOpenWav.FileName := ParamValue(params, 'ir');
+    if not dlgOpenWav.Execute then Exit;
+    params := 'ir=' + dlgOpenWav.FileName + ';mix=' + ParamValue(params, 'mix', '0.3');
+  end;
+  txt := params;
+  if not PromptValueBelow('Edit Effect - ' + nm,
+    'Settings for this effect, as name=value pairs separated by ";":', txt) then Exit;
+  txt := Trim(txt);
+  if txt = params then
+    if FTlEffCtx.Kind <> '' then Exit;   // unchanged settings - nothing to re-render
+  if not TlUndoEffectInRange then Exit;  // it explained why, and nothing changed
+  TlApplyEffectToRange(kind, txt, nm);
 end;
 
 { Shared OnClick for every mnuTlFx.../pmTlFx... item - Sender.Tag picks the
@@ -11868,6 +12450,74 @@ begin
   TlApplyEffectToRange('@fadeout', '', 'Fade Out');
 end;
 
+{ The fixed-setting Timeline effects, by menu Tag (the same presets the
+  Mixer tab's insert palette offers). Effects that ask for a value first
+  (Amplify, Balance, Pitch Shift, ...) are handled in TlFxMenuClick. }
+function TfrmMain.TlFxPreset(ATag: Integer; out AKind, AParams, AName: string): Boolean;
+begin
+  Result := True;
+  case ATag of
+    1: begin AKind := 'compressor'; AParams := 'type=compressor;thresh=-18;ratio=3;knee=6;attack=10;release=120;makeup=0'; AName := 'Compressor'; end;
+    2: begin AKind := 'reverb'; AParams := 'size=0.7;damp=0.4;width=1;mix=0.3;predelay=15'; AName := 'Reverb'; end;
+    3: begin AKind := 'modulation'; AParams := 'type=chorus;rate=0.6;depth=0.6;mix=0.4;stereo=90'; AName := 'Chorus'; end;
+    4: begin AKind := 'modulation'; AParams := 'type=flanger;rate=0.25;depth=0.7;mix=0.5;fb=0.4;stereo=90'; AName := 'Flanger'; end;
+    5: begin AKind := 'modulation'; AParams := 'type=phaser;rate=0.4;depth=0.8;mix=0.5;fb=0.3;stages=6;stereo=90'; AName := 'Phaser'; end;
+    6: begin AKind := 'modulation'; AParams := 'type=tremolo;rate=4;depth=0.6;mix=1'; AName := 'Tremolo'; end;
+    7: begin AKind := 'modulation'; AParams := 'type=autopan;rate=0.5;depth=1;mix=1'; AName := 'Auto-Pan'; end;
+    8: begin AKind := 'distortion'; AParams := 'type=saturation;drive=3;trim=0;mix=1'; AName := 'Saturation'; end;
+    9: begin AKind := 'distortion'; AParams := 'type=bitcrush;bits=8;down=4;mix=1'; AName := 'Bit Crusher'; end;
+    10: begin AKind := 'graphiceq'; AParams := 'bands=10;gains=0,0,1,2,3,3,2,1,0,0'; AName := 'Brighten EQ'; end;
+    13: begin AKind := 'compressor'; AParams := 'type=deesser;thresh=-24;ratio=4;knee=3;attack=1;release=80;makeup=0'; AName := 'De-Esser'; end;
+    14: begin AKind := 'delay'; AParams := 'ms=250;fb=0.3;mix=0.3;pingpong=0'; AName := 'Delay'; end;
+    15: begin AKind := 'compressor'; AParams := 'type=expander;thresh=-30;ratio=2;knee=6;attack=5;release=100;makeup=0'; AName := 'Expander'; end;
+    16: begin AKind := 'distortion'; AParams := 'type=foldback;drive=3;trim=0;mix=1'; AName := 'Foldback'; end;
+    17: begin AKind := 'compressor'; AParams := 'type=gate;thresh=-40;ratio=6;knee=2;attack=1;release=60;makeup=0;hold=15;range=-60'; AName := 'Gate'; end;
+    18: begin AKind := 'distortion'; AParams := 'type=hardclip;drive=3;trim=0;mix=1'; AName := 'Hard Clip'; end;
+    19: begin AKind := 'lookaheadlimiter'; AParams := 'ceiling=-0.3;release=100;lookahead=5'; AName := 'Limiter'; end;
+    20: begin AKind := 'delay'; AParams := 'ms=250;fb=0.35;mix=0.35;pingpong=1'; AName := 'Ping-Pong Delay'; end;
+    22: begin AKind := 'biquad'; AParams := 'type=lowshelf;freq=100;q=0.707;gaindb=6'; AName := 'Bass Enhance'; end;
+    23: begin AKind := 'dcblock'; AParams := 'hz=20'; AName := 'DC Offset Remover'; end;
+    24: begin AKind := 'exciter'; AParams := 'freq=3000;drive=4;mix=0.25'; AName := 'Exciter'; end;
+    25: begin AKind := 'biquad'; AParams := 'type=highpass;freq=80;q=0.707;gaindb=0'; AName := 'High-Pass Filter'; end;
+    26: begin AKind := 'biquad'; AParams := 'type=lowpass;freq=8000;q=0.707;gaindb=0'; AName := 'Low-Pass Filter'; end;
+    27: begin AKind := 'stereowidth'; AParams := 'width=0'; AName := 'Make Mono'; end;
+    28: begin AKind := 'multibandcomp'; AParams := ''; AName := 'Multiband Compressor'; end;
+    29: begin AKind := 'biquad'; AParams := 'type=notch;freq=60;q=8;gaindb=0'; AName := 'Notch Filter'; end;
+    31: begin AKind := 'biquad'; AParams := 'type=peaking;freq=3000;q=1;gaindb=4'; AName := 'Presence Boost'; end;
+    32: begin AKind := 'stereowidth'; AParams := 'width=1.5'; AName := 'Stereo Widener'; end;
+    33: begin AKind := 'transientshaper'; AParams := 'attack=6;sustain=0'; AName := 'Transient Shaper'; end;
+    34: begin AKind := 'biquad'; AParams := 'type=highshelf;freq=8000;q=0.707;gaindb=6'; AName := 'Treble Boost'; end;
+  else
+    AKind := ''; AParams := ''; AName := '';
+    Result := False;
+  end;
+end;
+
+{ Kind + starting settings for a Timeline effect by its display name - used
+  by "Edit Effect" when a region was saved before its settings were kept.
+  Value-prompt effects start from the prompt's own default. }
+function TfrmMain.TlFxPresetByName(const AName: string; out AKind, AParams: string): Boolean;
+var
+  tag: Integer;
+  n: string;
+begin
+  Result := True;
+  for tag := 1 to 40 do
+    if TlFxPreset(tag, AKind, AParams, n) and SameText(n, AName) then Exit;
+  AKind := '';
+  AParams := '';
+  if SameText(AName, 'Amplify') then begin AKind := 'gain'; AParams := 'db=6'; end
+  else if SameText(AName, 'Balance') then begin AKind := 'pan'; AParams := 'pos=0'; end
+  else if SameText(AName, 'Pitch Shift') then begin AKind := 'pitchshift'; AParams := 'semitones=2'; end
+  else if SameText(AName, 'Noise Reduction') then begin AKind := '@denoise'; AParams := 'reduce=12'; end
+  else if SameText(AName, 'Auto-Tune') then begin AKind := '@autotune'; AParams := 'scale=C major;strength=1'; end
+  else if SameText(AName, 'Convolution Reverb') then begin AKind := '@convolve'; AParams := 'ir=;mix=0.3'; end
+  else if SameText(AName, 'Fade In') then begin AKind := '@fadein'; AParams := ''; end
+  else if SameText(AName, 'Fade Out') then begin AKind := '@fadeout'; AParams := ''; end
+  else
+    Result := False;
+end;
+
 procedure TfrmMain.TlFxMenuClick(Sender: TObject);
 var
   kind, params, name, gainText: string;
@@ -11879,16 +12529,6 @@ begin
     Exit;
   end;
   case TMenuItem(Sender).Tag of
-    1: begin kind := 'compressor'; params := 'type=compressor;thresh=-18;ratio=3;knee=6;attack=10;release=120;makeup=0'; name := 'Compressor'; end;
-    2: begin kind := 'reverb';     params := 'size=0.7;damp=0.4;width=1;mix=0.3;predelay=15'; name := 'Reverb'; end;
-    3: begin kind := 'modulation'; params := 'type=chorus;rate=0.6;depth=0.6;mix=0.4;stereo=90'; name := 'Chorus'; end;
-    4: begin kind := 'modulation'; params := 'type=flanger;rate=0.25;depth=0.7;mix=0.5;fb=0.4;stereo=90'; name := 'Flanger'; end;
-    5: begin kind := 'modulation'; params := 'type=phaser;rate=0.4;depth=0.8;mix=0.5;fb=0.3;stages=6;stereo=90'; name := 'Phaser'; end;
-    6: begin kind := 'modulation'; params := 'type=tremolo;rate=4;depth=0.6;mix=1'; name := 'Tremolo'; end;
-    7: begin kind := 'modulation'; params := 'type=autopan;rate=0.5;depth=1;mix=1'; name := 'Auto-Pan'; end;
-    8: begin kind := 'distortion'; params := 'type=saturation;drive=3;trim=0;mix=1'; name := 'Saturation'; end;
-    9: begin kind := 'distortion'; params := 'type=bitcrush;bits=8;down=4;mix=1'; name := 'Bit Crusher'; end;
-    10: begin kind := 'graphiceq'; params := 'bands=10;gains=0,0,1,2,3,3,2,1,0,0'; name := 'Brighten EQ'; end;
     12: begin
           { Amplify: plain gain in dB, positive to boost and negative to cut }
           gainText := '6';
@@ -11901,14 +12541,6 @@ begin
           params := 'db=' + FloatToStr(EnsureRange(gainDb, -60, 60), TFormatSettings.Invariant);
           name := 'Amplify';
         end;
-    13: begin kind := 'compressor'; params := 'type=deesser;thresh=-24;ratio=4;knee=3;attack=1;release=80;makeup=0'; name := 'De-Esser'; end;
-    14: begin kind := 'delay';      params := 'ms=250;fb=0.3;mix=0.3;pingpong=0'; name := 'Delay'; end;
-    15: begin kind := 'compressor'; params := 'type=expander;thresh=-30;ratio=2;knee=6;attack=5;release=100;makeup=0'; name := 'Expander'; end;
-    16: begin kind := 'distortion'; params := 'type=foldback;drive=3;trim=0;mix=1'; name := 'Foldback'; end;
-    17: begin kind := 'compressor'; params := 'type=gate;thresh=-40;ratio=6;knee=2;attack=1;release=60;makeup=0;hold=15;range=-60'; name := 'Gate'; end;
-    18: begin kind := 'distortion'; params := 'type=hardclip;drive=3;trim=0;mix=1'; name := 'Hard Clip'; end;
-    19: begin kind := 'lookaheadlimiter'; params := 'ceiling=-0.3;release=100;lookahead=5'; name := 'Limiter'; end;
-    20: begin kind := 'delay';      params := 'ms=250;fb=0.35;mix=0.35;pingpong=1'; name := 'Ping-Pong Delay'; end;
     21: begin
           { Balance: -100 = full left, 0 = centre, 100 = full right (constant-power pan law) }
           gainText := '0';
@@ -11920,14 +12552,6 @@ begin
           params := 'pos=' + FloatToStr(EnsureRange(gainDb, -100, 100) / 100, TFormatSettings.Invariant);
           name := 'Balance';
         end;
-    22: begin kind := 'biquad'; params := 'type=lowshelf;freq=100;q=0.707;gaindb=6'; name := 'Bass Enhance'; end;
-    23: begin kind := 'dcblock'; params := 'hz=20'; name := 'DC Offset Remover'; end;
-    24: begin kind := 'exciter'; params := 'freq=3000;drive=4;mix=0.25'; name := 'Exciter'; end;
-    25: begin kind := 'biquad'; params := 'type=highpass;freq=80;q=0.707;gaindb=0'; name := 'High-Pass Filter'; end;
-    26: begin kind := 'biquad'; params := 'type=lowpass;freq=8000;q=0.707;gaindb=0'; name := 'Low-Pass Filter'; end;
-    27: begin kind := 'stereowidth'; params := 'width=0'; name := 'Make Mono'; end;
-    28: begin kind := 'multibandcomp'; params := ''; name := 'Multiband Compressor'; end;
-    29: begin kind := 'biquad'; params := 'type=notch;freq=60;q=8;gaindb=0'; name := 'Notch Filter'; end;
     30: begin
           { Pitch Shift: semitones, positive up, negative down }
           gainText := '2';
@@ -11940,10 +12564,6 @@ begin
           params := 'semitones=' + FloatToStr(EnsureRange(gainDb, -24, 24), TFormatSettings.Invariant);
           name := 'Pitch Shift';
         end;
-    31: begin kind := 'biquad'; params := 'type=peaking;freq=3000;q=1;gaindb=4'; name := 'Presence Boost'; end;
-    32: begin kind := 'stereowidth'; params := 'width=1.5'; name := 'Stereo Widener'; end;
-    33: begin kind := 'transientshaper'; params := 'attack=6;sustain=0'; name := 'Transient Shaper'; end;
-    34: begin kind := 'biquad'; params := 'type=highshelf;freq=8000;q=0.707;gaindb=6'; name := 'Treble Boost'; end;
     35: begin
           gainText := '12';
           if not PromptValueBelow('Noise Reduction',
@@ -11973,7 +12593,7 @@ begin
     38: begin TlSplitStemsSelected; Exit; end;
     39: begin TlAudioToMidiSelected; Exit; end;
   else
-    Exit;
+    if not TlFxPreset(TMenuItem(Sender).Tag, kind, params, name) then Exit;
   end;
   TlApplyEffectToRange(kind, params, name);
 end;
@@ -12206,13 +12826,15 @@ begin
     Exit;
   end;
 
-  { clicking an effect's name in a channel's title band selects exactly the
-    section that effect covers, on that channel only, as the range - so the
-    range menu (Effects > Undo Effect etc.) acts on just that section. A
-    right-click opens that menu straight away (pbTimelineMouseUp). }
+  { pressing an effect's name in a channel's title band highlights exactly the
+    section that effect covers, on that channel only, as the range, and on
+    release (pbTimelineMouseUp) pops up pmTlEffect - Edit / Undo for just that
+    effect region. }
+  FTlEffCtxActive := False;
   if ((Button = mbLeft) or (Button = mbRight)) and (X >= FTlView.HeaderWidth) and
-     TlEffectLabelAtPoint(X, Y, ti, rngStart, rngEnd) then
+     TlEffectLabelAtPoint(X, Y, ti, rngStart, rngEnd, FTlEffCtx) then
   begin
+    FTlEffCtxActive := True;
     FTlRulerCtxActive := False;
     FTlExtraTrackIds := nil;
     FTlSelectedTrackId := ti;
@@ -12336,8 +12958,13 @@ begin
   end;
   multi := ssShift in Shift;
   c := TlClipAtPoint(X, Y);
+  FTlPressX := X;
+  FTlPressY := Y;
+  FTlPressMoved := False;
+  FTlPressClipId := -1;
   if c <> nil then
   begin
+    FTlPressClipId := c.Id;
     if multi then
       TlToggleSelection(c.Id)
     else if not TlIsClipSelected(c.Id) then
@@ -12422,6 +13049,11 @@ begin
   RefreshTimelineTab;
 end;
 
+const
+  { pixels a left press on a clip must travel before it becomes a move/trim/
+    fade drag (the range-move drag uses the same 3px dead zone) }
+  TL_DRAG_THRESHOLD = 3;
+
 procedure TfrmMain.pbTimelineMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
 var
   delta, newStart, sec, newFade, rawSec: Double;
@@ -12472,6 +13104,16 @@ begin
     FTlRangeActive := (FTlRangeEndSec - FTlRangeStartSec) > 0.0005;
     RefreshTimelineTab;
     Exit;
+  end;
+
+  { a clip move/trim/fade only begins once the mouse has really travelled -
+    otherwise the (snapped) move would run on the very first mouse-move of a
+    plain click and jump an off-grid clip, edge or fade to the grid }
+  if (FTlDragging or FTlTrimming or FTlFadeDragging) and not FTlPressMoved then
+  begin
+    if (Abs(X - FTlPressX) <= TL_DRAG_THRESHOLD) and (Abs(Y - FTlPressY) <= TL_DRAG_THRESHOLD) then
+      Exit;
+    FTlPressMoved := True;
   end;
 
   if FTlFadeDragging and (FTlFadeClipId >= 0) then
@@ -12588,15 +13230,56 @@ begin
   RefreshTimelineTab;
 end;
 
+{ Pops up pmTlEffect (Edit / Undo) for FTlEffCtx at a pbTimeline point.
+  Shown manually for the same menu-loop reason as pmTimeline in
+  pbTimelineMouseUp. }
+procedure TfrmMain.TlShowEffectMenu(AX, AY: Integer);
+var
+  pt: TPoint;
+begin
+  pt := pbTimeline.ClientToScreen(Point(AX, AY));
+  FMenuLoopActive := True;
+  try
+    pmTlEffect.Popup(pt.X, pt.Y);
+  finally
+    FMenuLoopActive := False;
+  end;
+end;
+
 procedure TfrmMain.pbTimelineMouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
   pt: TPoint;
+  plainClick: Boolean;
+  c: TTimelineClip;
+  trk: TTimelineTrack;
+  rngStart, rngEnd: Double;
 begin
+  { a plain left click on a clip body (pressed, never dragged, no modifier) }
+  plainClick := (Button = mbLeft) and FTlDragging and not FTlPressMoved and
+    (FTlPressClipId >= 0) and ([ssShift, ssCtrl, ssAlt] * Shift = []);
   FTlDragging := False;
   FTlTrimming := False;
   FTlFadeDragging := False;
   FTlRangeDragging := False;
+  if plainClick and (FProject <> nil) then
+  begin
+    { clicking inside an applied effect's region highlights exactly that
+      region, on that channel only, and offers Edit / Undo for it }
+    c := FProject.Timeline.ClipById(FTlPressClipId, trk);
+    if (c <> nil) and (trk <> nil) and
+       TlClipRegionAtSec(c, FTlView.XToSeconds(X), rngStart, rngEnd, FTlEffCtx) then
+    begin
+      FTlExtraTrackIds := nil;
+      FTlSelectedTrackId := trk.Id;
+      FTlRangeActive := True;
+      FTlRangeStartSec := rngStart;
+      FTlRangeEndSec := rngEnd;
+      RefreshTimelineTab;
+      TlShowEffectMenu(X, Y);
+      Exit;
+    end;
+  end;
   if FTlRangeMoving then
   begin
     FTlRangeMoving := False;
@@ -12622,6 +13305,14 @@ begin
   begin
     FTlRubberSelecting := False;
     RefreshTimelineTab;
+  end;
+  if FTlEffCtxActive and ((Button = mbLeft) or (Button = mbRight)) then
+  begin
+    { an effect name was pressed (pbTimelineMouseDown already highlighted its
+      region): offer Edit / Undo for that region only }
+    FTlEffCtxActive := False;
+    TlShowEffectMenu(X, Y);
+    Exit;
   end;
   if Button = mbRight then
   begin

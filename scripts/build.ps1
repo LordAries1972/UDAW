@@ -2,8 +2,8 @@
   build.ps1 - compile the UDAW Windows (Delphi 12) executable.
 
   Usage:
-    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-Config Release]
-    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Help
+    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-Config Debug|Release] [-OutputDir <path>] [-Clean]
+    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Help   (or -h: lists every use case)
 
   Requires Delphi 12 (Studio 23.0). The script locates the command-line
   compiler via $env:BDS, then the default install path.
@@ -11,7 +11,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Debug', 'Release')]
-    [string]$Config = 'Debug',
+    [string]$Config = 'Release',
     [string]$OutputDir = 'build\bin',
     # Wipes build\bin/build\dcu before compiling, so a stale .dcu can never
     # make a real source change look like it didn't take (see
@@ -20,6 +20,7 @@ param(
     [switch]$Clean,
     # Prints full usage and exits without touching anything (no BDS lookup,
     # no build-number bump, no compile) - safe to run to check syntax/options.
+    [Alias('h')]
     [switch]$Help
 )
 
@@ -28,46 +29,101 @@ if ($Help) {
 build.ps1 - compile the UDAW Windows (Delphi 12) executable
 
 USAGE
-    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [options]
+    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-Config <Debug|Release>]
+        [-OutputDir <path>] [-Clean] [-Help | -h]
 
 OPTIONS
     -Config <Debug|Release>
-        Which configuration to compile. Default: Debug.
-        Release turns on optimization (`-`$O+) and defines RELEASE instead of
-        DEBUG; Debug compiles unoptimized (`-`$O-) with DEBUG defined.
+        Which configuration to compile. Default: Release.
+        Release: optimized (`-`$O+), RELEASE defined - includes the automatic
+                 install of newer published builds and the tamper check, and
+                 is packaged as an over-the-air update afterwards.
+        Debug:   unoptimized (`-`$O-), DEBUG defined - for local debugging
+                 only. NEVER packaged: Debug compiles out the automatic
+                 update install, so an install running it cannot update itself.
 
     -OutputDir <path>
         Where UDAW.exe / UDAWUpdater.exe and their support files land.
-        Default: build\bin (relative to the repo root).
+        Default: build\bin (relative to the repo root). A Release build is
+        packaged from this same folder.
 
     -Clean
-        Runs scripts\clean.ps1 first, wiping build\bin and build\dcu
-        before compiling. Off by default, because it also discards dcc64's
-        incremental-compile cache, turning every build into a full rebuild.
-        Use it when a stale .dcu might be masking a real source change.
+        Runs scripts\clean.ps1 first, wiping build\bin and build\dcu (always
+        those two - not a custom -OutputDir) before compiling. Off by default,
+        because it also discards dcc64's incremental-compile cache, turning
+        every build into a full rebuild.
 
-    -Help
-        Shows this usage text and exits immediately - no BDS lookup, no
+    -Help, -h
+        Shows this text and exits immediately - no BDS lookup, no
         build-number bump, no compile, no packaging.
+
+USE CASES
+    1. Normal build + publish an update (the everyday case)
+         scripts\build.ps1
+       Release build into build\bin, incremental, then packaged into
+       F:\Projects\Web\EffectualDesigns (cgi-bin\udaw-update-win64.zip +
+       udaw-version-win64.json). Upload both by FTP for installs to update.
+
+    2. Clean Release build + publish
+         scripts\build.ps1 -Clean
+       Same as 1 after wiping build\bin and build\dcu. Use when a change
+       doesn't seem to "take" (a stale .dcu), or before a release you want
+       to be sure of.
+
+    3. Explicit Release (same as 1, for scripts that spell it out)
+         scripts\build.ps1 -Config Release
+         scripts\build.ps1 -Config Release -Clean
+
+    4. Debug build for local debugging - not published
+         scripts\build.ps1 -Config Debug
+         scripts\build.ps1 -Config Debug -Clean
+       Unoptimized with DEBUG defined; prints "Debug build: NOT packaged".
+       Don't copy it onto a test install: that install then can't
+       auto-update (use Settings > Registration > Check for updates >
+       Download & install update to get it back onto a Release build).
+
+    5. Build into a separate folder (keep build\bin untouched)
+         scripts\build.ps1 -OutputDir build\bin-test
+         scripts\build.ps1 -Config Debug -OutputDir build\bin-debug
+       Note a Release build here is still packaged, from that folder.
+
+    6. Use a Delphi 12 installed somewhere non-standard
+         `$env:BDS = 'D:\Embarcadero\Studio\23.0'; scripts\build.ps1
+
+    7. Keep UDAW's runtime files (config/logs/cache/scratch) elsewhere
+         `$env:UDAW_HOME = 'F:\udaw-home'; scripts\build.ps1
+       Default is .udaw-home under the repo root.
+
+    8. Show this help
+         scripts\build.ps1 -Help
+         scripts\build.ps1 -h
+
+    RELATED SCRIPTS (not options of build.ps1)
+         scripts\clean.ps1            wipe build\bin and build\dcu only
+         scripts\package-release.ps1  re-package the Release build already in
+                                      build\bin without recompiling (refuses
+                                      a Debug exe)
+         scripts\test-windows.ps1     run the test suite
 
 WHAT THIS SCRIPT DOES, IN ORDER
     1. Locates Delphi 12 (Studio 23.0) via `$env:BDS, else the default
        Program Files install path; throws if dcc64.exe isn't found there.
     2. Bumps the build number embedded in resources\UDAW.rc and the
        fallback constant in src\common\UDAW.Version.pas (version scheme
-       1.0.<build>.<ddmmyyyy>). The bump is only kept if the compile below
-       actually succeeds - a failed build restores both files untouched.
+       1.0.<build>.<ddmmyyyy>) - for Debug and Release alike. The bump is
+       only kept if the compile below succeeds - a failed build restores
+       both files untouched.
     3. Compiles the version resource (brcc32) and then UDAW.exe and
        UDAWUpdater.exe (dcc64) for the requested -Config.
     4. Copies VCL style resources (resources\styles\*.vsf) and the app icon
        into -OutputDir.
     5. Best-effort stamps the in-app help page's Version/Built banner
-       (F:\Projects\Web\EffectualDesigns\about-udaw.dat) if that separate web
-       project happens to be checked out on this machine; never fails the
-       build if it isn't, or if the edit fails.
-    6. Packages the successful build as an over-the-air update by running
+       (F:\Projects\Web\EffectualDesigns\about-udaw.dat) if that web project
+       is on this machine; never fails the build if it isn't, or if the edit
+       fails.
+    6. Release only: packages the build as an over-the-air update by running
        scripts\package-release.ps1 -BinDir <OutputDir>. A packaging failure
-       DOES fail this script.
+       DOES fail this script. Nothing is uploaded - that is still a manual FTP.
 
 ENVIRONMENT
     BDS        Path to the Delphi 12 (Studio 23.0) install root. If unset,
@@ -77,19 +133,6 @@ ENVIRONMENT
                this script runs. Defaults to .udaw-home under the repo root
                if not already set, so nothing lands on C:\ under %APPDATA%
                or %TEMP% by default.
-
-EXAMPLES
-    scripts\build.ps1
-        Debug build into build\bin, incremental (no clean).
-
-    scripts\build.ps1 -Config Release
-        Fully optimized release build, still packaged afterwards.
-
-    scripts\build.ps1 -Config Release -Clean
-        Wipe build\bin/build\dcu first, then a clean release build.
-
-    scripts\build.ps1 -OutputDir build\bin-test
-        Build into an alternate output directory.
 "@ | Write-Host
     exit 0
 }
@@ -225,6 +268,12 @@ Write-Host "==> OK: $OutputDir\UDAW.exe"
 # ---- Package the successful build as an over-the-air update -------------
 # Runs scripts\package-release.ps1 (zip + signed manifest into the local web
 # root). A packaging failure fails the script so it is never missed.
-Write-Host "==> Packaging release (package-release.ps1)"
-& (Join-Path $PSScriptRoot 'package-release.ps1') -BinDir $OutputDir
-if ($LASTEXITCODE -ne 0) { throw "package-release.ps1 failed ($LASTEXITCODE)" }
+# Release only: a published Debug build strands every install that takes it,
+# since Debug compiles out the automatic install of newer builds.
+if ($Config -eq 'Release') {
+    Write-Host "==> Packaging release (package-release.ps1)"
+    & (Join-Path $PSScriptRoot 'package-release.ps1') -BinDir $OutputDir
+    if ($LASTEXITCODE -ne 0) { throw "package-release.ps1 failed ($LASTEXITCODE)" }
+} else {
+    Write-Host "==> Debug build: NOT packaged (only Release builds are published as updates)"
+}

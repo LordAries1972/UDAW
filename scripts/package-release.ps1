@@ -36,6 +36,18 @@ foreach ($f in 'UDAW.exe', 'UDAWUpdater.exe') {
     if (-not (Test-Path (Join-Path $BinDir $f))) { throw "$f not found in $BinDir - build first." }
 }
 
+# Refuse to publish anything but a Release build. Debug compiles out the
+# {$IFDEF RELEASE} block in UDAW.dpr that installs a newer published build and
+# restarts, so an install that took a Debug package could never auto-update
+# again. 'Re-checking for updates...' is a string literal that only exists
+# inside that block, so its presence proves RELEASE was defined.
+$exeBytes = [IO.File]::ReadAllBytes((Join-Path $BinDir 'UDAW.exe'))
+$marker = [Text.Encoding]::Unicode.GetBytes('Re-checking for updates...')
+$exeText = [BitConverter]::ToString($exeBytes)
+if (-not $exeText.Contains([BitConverter]::ToString($marker))) {
+    throw "UDAW.exe in $BinDir is not a Release build (RELEASE not defined) - rebuild with scriptsuild.ps1 -Config Release. Publishing it would stop installs from auto-updating."
+}
+
 $rc = Get-Content -Raw 'resources\UDAW.rc'
 $m = [regex]::Match($rc, 'FILEVERSION\s+(\d+),(\d+),(\d+),(\d+)')
 if (-not $m.Success) { throw 'Could not read FILEVERSION from resources\UDAW.rc' }
