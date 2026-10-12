@@ -141,11 +141,19 @@ begin
 end;
 
 { --- 1024 --- }
-function SwbLong_96_88_64: TArray<Integer>;   // index 0,1,2  (num_swb = 41)
+function SwbLong_96_88: TArray<Integer>;      // index 0,1  (num_swb = 41)
 begin
   Result := MakeArr([
-    0,4,8,12,16,20,24,28,32,36,40,48,56,64,72,80,88,96,108,120,132,144,156,
-    172,188,212,240,276,320,384,448,512,576,640,704,768,832,896,960,1024]);
+    0,4,8,12,16,20,24,28,32,36,40,44,48,52,56,64,72,80,88,96,108,120,132,144,
+    156,172,188,212,240,276,320,384,448,512,576,640,704,768,832,896,960,1024]);
+end;
+
+function SwbLong_64: TArray<Integer>;         // index 2  (num_swb = 47)
+begin
+  Result := MakeArr([
+    0,4,8,12,16,20,24,28,32,36,40,44,48,52,56,64,72,80,88,100,112,124,140,156,
+    172,192,216,240,268,304,344,384,424,464,504,544,584,624,664,704,744,784,
+    824,864,904,944,984,1024]);
 end;
 
 function SwbLong_48_44: TArray<Integer>;      // index 3,4  (num_swb = 49)
@@ -217,7 +225,8 @@ end;
 function SwbOffsetLong(ASampleRateIndex: Integer): TArray<Integer>;
 begin
   case ASampleRateIndex of
-    0, 1, 2:      Result := SwbLong_96_88_64;
+    0, 1:         Result := SwbLong_96_88;
+    2:            Result := SwbLong_64;
     3, 4:         Result := SwbLong_48_44;
     5:            Result := SwbLong_32;
     6, 7:         Result := SwbLong_24_22;
@@ -412,16 +421,22 @@ procedure BuildLongStartWindow(const AWinLong, AWinShort: TArray<Double>;
 var
   i: Integer;
 begin
-  { long_window[n]                      n in [0, N/2)          - normal rising half
-    1.0                                 n in [N/2, N - Ns/2)    - flat pass-through
-    short_window[n - N + Ns]            n in [N - Ns/2, N)      - short window's falling half }
+  { ISO/IEC 14496-3 4.6.11.3.  The short run is centred in the second half,
+    so the 8 short windows start (N/2 - Ns)/2 samples into the next frame:
+    long_window[n]                n in [0, N/2)                  - rising half
+    1.0                           n in [N/2, 3N/4 - Ns/4)        - flat
+    short_window[n - 3N/4 + Ns/4 + Ns/2]
+                                  n in [3N/4 - Ns/4, 3N/4 + Ns/4) - short falling half
+    0.0                           n in [3N/4 + Ns/4, N)          - silent }
   SetLength(AWin, N);
   for i := 0 to N div 2 - 1 do
     AWin[i] := AWinLong[i];
-  for i := N div 2 to N - Ns div 2 - 1 do
+  for i := N div 2 to 3 * N div 4 - Ns div 4 - 1 do
     AWin[i] := 1.0;
-  for i := N - Ns div 2 to N - 1 do
-    AWin[i] := AWinShort[i - N + Ns];
+  for i := 3 * N div 4 - Ns div 4 to 3 * N div 4 + Ns div 4 - 1 do
+    AWin[i] := AWinShort[Ns div 2 + i - (3 * N div 4 - Ns div 4)];
+  for i := 3 * N div 4 + Ns div 4 to N - 1 do
+    AWin[i] := 0.0;
 end;
 
 procedure BuildLongStopWindow(const AWinLong, AWinShort: TArray<Double>;

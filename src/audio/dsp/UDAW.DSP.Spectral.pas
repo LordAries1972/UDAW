@@ -448,8 +448,9 @@ var
   seg: TArray<Single>;
   shifted: TArray<Single>;
   mono: TAudioSampleArray;
-  pos, i, n, cand, best, midiNear: Integer;
-  hz, midi, target, semis, w, bestDist, dist: Double;
+  pos, i, n, cand, best, midiNear, d, bestD, maxD, j, L, a, si: Integer;
+  hz, midi, target, semis, w, bestDist, dist, score, bestScore, energy: Double;
+  shiftedWin: Boolean;
 begin
   n := Length(AIn);
   SetLength(AOut, n);
@@ -483,19 +484,61 @@ begin
         target := best;
         semis := (target - midi) * EnsureRange(Strength, 0.0, 1.0);
       end;
-      if Abs(semis) > 0.02 then
+      shiftedWin := Abs(semis) > 0.02;
+      if shiftedWin then
       begin
         shifter.Process(seg, semis, ASampleRate, shifted);
         if Length(shifted) < WIN then SetLength(shifted, WIN);
       end
       else
         shifted := Copy(seg);
+      { Phase alignment. Each window is shifted on its own, so its phase at the
+        window start is the INPUT's phase; dropped in as is, neighbouring
+        windows disagree and the overlap-add drifts back to the input's
+        frequency (the correction cancels out over time). Slide the window by
+        up to one pitch period to the lag where it best continues the output
+        already built (waveform-similarity alignment), so the shifted pitch
+        carries on across window boundaries. Smallest |lag| wins ties, so an
+        untouched passage stays an exact copy. }
+      d := 0;
+      if (hz > 50.0) and (pos > 0) then
+      begin
+        maxD := Min(Round(ASampleRate / hz), (WIN - HOP) div 2);
+        L := Min(HOP, WIN - 2 * maxD);
+        bestScore := -1.0E30;
+        bestD := 0;
+        for j := 0 to 2 * maxD do
+        begin
+          if j = 0 then d := 0
+          else if j and 1 = 1 then d := (j + 1) div 2
+          else d := -(j div 2);
+          score := 0;
+          energy := 1.0E-9;
+          for i := 0 to L - 1 do
+          begin
+            a := pos + maxD + i;
+            si := maxD + i - d;
+            if (a >= 0) and (a < n) and (wsum[a] > 1.0E-6) and (si >= 0) and (si < WIN) then
+            begin
+              score := score + (acc[a] / wsum[a]) * shifted[si];
+              energy := energy + Double(shifted[si]) * shifted[si];
+            end;
+          end;
+          score := score / Sqrt(energy);
+          if score > bestScore + 1.0E-9 then
+          begin
+            bestScore := score;
+            bestD := d;
+          end;
+        end;
+        d := bestD;
+      end;
       for i := 0 to WIN - 1 do
-        if (pos + i >= 0) and (pos + i < n) then
+        if (pos + d + i >= 0) and (pos + d + i < n) then
         begin
           w := 0.5 - 0.5 * Cos(2.0 * Pi * i / WIN);
-          acc[pos + i] := acc[pos + i] + shifted[i] * w;
-          wsum[pos + i] := wsum[pos + i] + w;
+          acc[pos + d + i] := acc[pos + d + i] + shifted[i] * w;
+          wsum[pos + d + i] := wsum[pos + d + i] + w;
         end;
       Inc(pos, HOP);
     end;

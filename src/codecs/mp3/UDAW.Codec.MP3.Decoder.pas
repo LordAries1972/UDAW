@@ -1051,7 +1051,7 @@ var
   frame: TAudioPlanar;
   ch, i, produced: Integer;
   outPos, capacity: Int64;
-  delay, pad: Integer;
+  delay, pad, skip: Integer;
 begin
   FillChar(ARes, SizeOf(ARes), 0);
 
@@ -1107,14 +1107,19 @@ begin
   if delay < 0 then delay := 0;
   { the decoder's own filterbank latency (one granule + 32-tap synthesis) that
     every MP3 decoder must skip, on top of the encoder's reported delay }
-  if delay > 0 then delay := delay + 528;
-
   if delay + pad >= outPos then
   begin
     delay := 0; pad := 0;
   end;
-
-  ARes.Frames := outPos - delay - pad;
+  { Gapless playback as LAME / mpg123 define it: the start skips the encoder
+    delay PLUS the decoder latency, but the program length is the decoded total
+    minus the tag's delay and padding only (the latency is already inside the
+    tag's padding). Subtracting the latency from the length as well - as an
+    earlier version did - lost the last 528 samples of every file. }
+  skip := delay;
+  if skip > 0 then skip := skip + 528;
+  ARes.Frames := Integer(Min(outPos - delay - pad, outPos - skip));
+  delay := skip;
   if ARes.Frames < 0 then ARes.Frames := 0;
   for ch := 0 to ARes.Channels - 1 do
   begin

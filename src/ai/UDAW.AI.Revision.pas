@@ -157,6 +157,10 @@ begin
     Exit;
   end;
 
+  { The session guarantees Locked / out-of-scope content is untouched whatever
+    the provider returned (a real provider also merges; this is idempotent). }
+  MergeLockedAndOutOfScope(FDoc.SongSpec, revisedSpec, AScopeTrackIds, AScopeSectionIds);
+
   FPendingChanges := DiffSongSpecs(FDoc.SongSpec, revisedSpec);
   FPendingEntry := FHistory.Add(AInstruction, FPendingChanges, FProvider.ProviderId, '');
 

@@ -123,7 +123,7 @@ end;
 procedure Test_Multiband_TransparentSumsFlat;
 var
   mb: TMultibandCompressor;
-  b, i, frames: Integer;
+  b, frames: Integer;
   inp, outp: TArray<Single>;
   inPtr, outPtr: array[0..0] of PSingle;
   rmsIn, rmsOut: Double;

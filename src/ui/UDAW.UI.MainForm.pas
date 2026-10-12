@@ -57,7 +57,8 @@ uses
   UDAW.Mixer.Model, UDAW.Mixer.Serialization, UDAW.Mixer.Engine, UDAW.Mixer.Commands,
   UDAW.Mixer.Automation, UDAW.Mixer.VST2, UDAW.Mixer.CLAP, UDAW.Mixer.VST3,
   UDAW.Mixer.Modulation, UDAW.Timeline.SpectralFx, UDAW.DSP.AudioToMidi,
-  UDAW.Sequencer.Patterns, UDAW.Timeline.Warp, UDAW.UI.VST2Editor,
+  UDAW.Sequencer.Patterns, UDAW.Timeline.Warp, UDAW.Timeline.VideoPlayer, UDAW.UI.VST2Editor,
+  UDAW.Timeline.VideoExport, UDAW.Video.Effects, UDAW.Timeline.VideoFxCache,
   UDAW.UI.MixInsertParams, System.NetEncoding,
   UDAW.Tracker.Types, UDAW.Tracker.Instrument, UDAW.Tracker.Pattern,
   UDAW.Tracker.Player, UDAW.Tracker.Commands,
@@ -90,6 +91,7 @@ const
     for the duration of tracker playback only. }
   TRK_UI_IDLE_INTERVAL_MS = 500;
   TRK_UI_PLAY_INTERVAL_MS = 33;   // ~30 fps
+  DEFAULT_TL_REFRESH_HZ = 20;     // Timeline redraws per second while playing (Settings > General)
 
 type
   { TPaintBox (TGraphicControl) does not publish OnMouseWheel, so the DFM/LFM
@@ -456,6 +458,8 @@ type
     chkSetHints: TCheckBox;
     lblSetLogLevel: TLabel;
     cboSetLogLevel: TComboBox;
+    cboSetTlRefresh: TComboBox;
+    lblSetTlRefresh: TLabel;
     lblSetLocale: TLabel;
     edSetLocale: TEdit;
     lblSetTheme: TLabel;
@@ -581,10 +585,33 @@ type
     pmTlClipTempo: TMenuItem;
     mnuTlEditSep4: TMenuItem;
     mnuTlEffects: TMenuItem;
+    mnuTlVideoEffects, mnuTlVfxGrpDissolve, mnuTlVfxCrossfade, mnuTlVfxDipblack, mnuTlVfxDipwhite, mnuTlVfxBlurdissolve: TMenuItem;
+    mnuTlVfxPixeldissolve, mnuTlVfxGrpWipe, mnuTlVfxWipeleft, mnuTlVfxWiperight, mnuTlVfxWipeup, mnuTlVfxWipedown: TMenuItem;
+    mnuTlVfxClock, mnuTlVfxBarndoor, mnuTlVfxCircleopen, mnuTlVfxCircleclose, mnuTlVfxGrpSlideandZoom, mnuTlVfxSlideleft: TMenuItem;
+    mnuTlVfxSlideright, mnuTlVfxSlideup, mnuTlVfxSlidedown, mnuTlVfxZoomin, mnuTlVfxZoomout, mnuTlVfxGlitchtrans: TMenuItem;
+    mnuTlVfxGrpFade, mnuTlVfxFadein, mnuTlVfxFadeout, mnuTlVfxFlash, mnuTlVfxGrpBlurandSharpen, mnuTlVfxBlur: TMenuItem;
+    mnuTlVfxSharpen, mnuTlVfxPixelate, mnuTlVfxGrpColour, mnuTlVfxBw, mnuTlVfxSepia, mnuTlVfxInvert: TMenuItem;
+    mnuTlVfxDuotone, mnuTlVfxTint, mnuTlVfxWarm, mnuTlVfxCool, mnuTlVfxBrighten, mnuTlVfxDarken: TMenuItem;
+    mnuTlVfxContrast, mnuTlVfxVivid, mnuTlVfxDesaturate, mnuTlVfxPosterize, mnuTlVfxGrpStyle, mnuTlVfxVignette: TMenuItem;
+    mnuTlVfxGrain, mnuTlVfxScanlines, mnuTlVfxSketch, mnuTlVfxEmboss, mnuTlVfxGrpDistort, mnuTlVfxGlitch: TMenuItem;
+    mnuTlVfxRgbsplit, mnuTlVfxMirror, mnuTlVfxFlipv, mnuTlVfxGrpMotion, mnuTlVfxShake, mnuTlVfxSlowzoom: TMenuItem;
+    mnuTlVfxSpin, mnuTlVfxPulse, mnuTlVfxSep, mnuTlVfxRemove: TMenuItem;
+    pmTlVideoEffects, pmTlVfxGrpDissolve, pmTlVfxCrossfade, pmTlVfxDipblack, pmTlVfxDipwhite, pmTlVfxBlurdissolve: TMenuItem;
+    pmTlVfxPixeldissolve, pmTlVfxGrpWipe, pmTlVfxWipeleft, pmTlVfxWiperight, pmTlVfxWipeup, pmTlVfxWipedown: TMenuItem;
+    pmTlVfxClock, pmTlVfxBarndoor, pmTlVfxCircleopen, pmTlVfxCircleclose, pmTlVfxGrpSlideandZoom, pmTlVfxSlideleft: TMenuItem;
+    pmTlVfxSlideright, pmTlVfxSlideup, pmTlVfxSlidedown, pmTlVfxZoomin, pmTlVfxZoomout, pmTlVfxGlitchtrans: TMenuItem;
+    pmTlVfxGrpFade, pmTlVfxFadein, pmTlVfxFadeout, pmTlVfxFlash, pmTlVfxGrpBlurandSharpen, pmTlVfxBlur: TMenuItem;
+    pmTlVfxSharpen, pmTlVfxPixelate, pmTlVfxGrpColour, pmTlVfxBw, pmTlVfxSepia, pmTlVfxInvert: TMenuItem;
+    pmTlVfxDuotone, pmTlVfxTint, pmTlVfxWarm, pmTlVfxCool, pmTlVfxBrighten, pmTlVfxDarken: TMenuItem;
+    pmTlVfxContrast, pmTlVfxVivid, pmTlVfxDesaturate, pmTlVfxPosterize, pmTlVfxGrpStyle, pmTlVfxVignette: TMenuItem;
+    pmTlVfxGrain, pmTlVfxScanlines, pmTlVfxSketch, pmTlVfxEmboss, pmTlVfxGrpDistort, pmTlVfxGlitch: TMenuItem;
+    pmTlVfxRgbsplit, pmTlVfxMirror, pmTlVfxFlipv, pmTlVfxGrpMotion, pmTlVfxShake, pmTlVfxSlowzoom: TMenuItem;
+    pmTlVfxSpin, pmTlVfxPulse, pmTlVfxSep, pmTlVfxRemove: TMenuItem;
     mnuTlFxFadeIn, mnuTlFxFadeOut, pmTlFxFadeIn, pmTlFxFadeOut: TMenuItem;
     mnuTlFxBalance, mnuTlFxBassEnhance, mnuTlFxDCOffsetRemover, mnuTlFxExciter, mnuTlFxHighPassFilter, mnuTlFxLowPassFilter, mnuTlFxMakeMono, mnuTlFxMultibandCompressor, mnuTlFxNotchFilter, mnuTlFxPitchShift, mnuTlFxPresenceBoost, mnuTlFxStereoWidener, mnuTlFxTransientShaper, mnuTlFxTrebleBoost, pmTlFxBalance, pmTlFxBassEnhance, pmTlFxDCOffsetRemover, pmTlFxExciter, pmTlFxHighPassFilter, pmTlFxLowPassFilter, pmTlFxMakeMono, pmTlFxMultibandCompressor, pmTlFxNotchFilter, pmTlFxPitchShift, pmTlFxPresenceBoost, pmTlFxStereoWidener, pmTlFxTransientShaper, pmTlFxTrebleBoost: TMenuItem;
     mnuTlFxAmplify, mnuTlFxDeEsser, mnuTlFxDelay, mnuTlFxExpander, mnuTlFxFoldback, mnuTlFxGate, mnuTlFxHardClip, mnuTlFxLimiter, mnuTlFxPingPongDelay, pmTlFxAmplify, pmTlFxDeEsser, pmTlFxDelay, pmTlFxExpander, pmTlFxFoldback, pmTlFxGate, pmTlFxHardClip, pmTlFxLimiter, pmTlFxPingPongDelay: TMenuItem;
     mnuTlFxNoiseReduction, mnuTlFxAutoTune, mnuTlFxConvolutionReverb, mnuTlFxSplitStems, mnuTlFxAudioToMidi, pmTlFxNoiseReduction, pmTlFxAutoTune, pmTlFxConvolutionReverb, pmTlFxSplitStems, pmTlFxAudioToMidi: TMenuItem;
+    mnuTlFxTube, mnuTlFxSoftClip, pmTlFxTube, pmTlFxSoftClip: TMenuItem;
     mnuTlFxCompressor: TMenuItem;
     mnuTlFxReverb: TMenuItem;
     mnuTlFxChorus: TMenuItem;
@@ -624,6 +651,7 @@ type
     mnuTlExportWav: TMenuItem;
     mnuTlExportMp3: TMenuItem;
     mnuTlExportMp4: TMenuItem;
+    mnuTlExportMkv: TMenuItem;
     mnuTlExportFlac: TMenuItem;
     mnuTlExportSep: TMenuItem;
     pmTlEffect: TPopupMenu;
@@ -712,6 +740,7 @@ type
     pmTlExportWav: TMenuItem;
     pmTlExportMp3: TMenuItem;
     pmTlExportMp4: TMenuItem;
+    pmTlExportMkv: TMenuItem;
     pmTlExportFlac: TMenuItem;
     pmTlExportSep: TMenuItem;
     pmTimelineRuler: TPopupMenu;
@@ -750,6 +779,9 @@ type
     sbTlVert: TScrollBar;
     pbTimeline: TWheelPaintBox;
     pbTlMeters: TPaintBox;
+    pnlTlVideo: TPanel;
+    pnlTlVideoFx: TPanel;        // shows the effect-processed picture over the video pane while the playhead is inside an effect
+    pbTlVideoFx: TPaintBox;
     tabRecording: TTabSheet;
     pnlRecTop: TPanel;
     lblRecChannels: TLabel;
@@ -1299,6 +1331,8 @@ type
     procedure TlFxMenuClick(Sender: TObject);
     procedure TlUndoEffectClick(Sender: TObject);
     procedure pmTlEffectPopup(Sender: TObject);
+    procedure TlVideoFxMenuClick(Sender: TObject);
+    procedure TlVideoFxRemoveClick(Sender: TObject);
     procedure pmTlEffEditClick(Sender: TObject);
     procedure TlFxFadeInClick(Sender: TObject);
     procedure TlFxFadeOutClick(Sender: TObject);
@@ -1320,6 +1354,7 @@ type
     procedure pmTlExportWavClick(Sender: TObject);
     procedure pmTlExportMp3Click(Sender: TObject);
     procedure pmTlExportMp4Click(Sender: TObject);
+    procedure pmTlExportMkvClick(Sender: TObject);
     procedure pmTlExportFlacClick(Sender: TObject);
     procedure RunTimelineExport(AFilterIndex: Integer);
     procedure StartTimelineExportJob(const ADest: string;
@@ -1327,6 +1362,8 @@ type
     procedure TlSaveSelectionClick(Sender: TObject);
     procedure FinishTimelineExport;
     procedure FinishTimelinePrepare;
+    procedure TlStartVideoFxRender;
+    procedure TlCollectVideoFx;
     procedure BeginTimelineAudio;
     procedure ParkTimelineCache;
     procedure TrackTimelineExportStage;
@@ -1364,7 +1401,12 @@ type
     procedure sbTlHorzChange(Sender: TObject);
     procedure sbTlVertChange(Sender: TObject);
     procedure pbTimelinePaint(Sender: TObject);
+    procedure pbTimelineMouseLeave(Sender: TObject);
+    procedure TlThumbReady;
+    procedure TlUpdateVideoHover(AX, AY: Integer);
     procedure pbTlMetersPaint(Sender: TObject);
+    procedure pnlTlVideoResize(Sender: TObject);
+    procedure pbTlVideoFxPaint(Sender: TObject);
     procedure DrawTimelineSpectrum(ACanvas: TCanvas; const ARect: TRect);
     procedure UpdateTimelineMeterChannel(var AMeter: Single; APeak: Single);
     procedure pbTimelineMouseDown(Sender: TObject; Button: TMouseButton;
@@ -1561,6 +1603,7 @@ type
     procedure cboSetMidiInDeviceChange(Sender: TObject);
     procedure cboSetMidiOutDeviceChange(Sender: TObject);
     procedure btnSetMidiRefreshClick(Sender: TObject);
+    procedure cboSetTlRefreshChange(Sender: TObject);
     procedure btnSetMidiPanicClick(Sender: TObject);
     procedure lbColorSwatchesClick(Sender: TObject);
     procedure pbColorPreviewPaint(Sender: TObject);
@@ -1612,6 +1655,9 @@ type
     FTimelineExportJob: TTimelineExportJob;
     FTlPrepJob: TTimelinePrepareJob;    // background decode/stretch before Play (see FinishTimelinePrepare)
     FTlPrepCancelled: Boolean;
+    FTlFxJob: TVideoFxRenderJob;        // video-effects pre-render, runs beside FTlPrepJob
+    FTlFxPlan: TVideoFxPlan;
+    FTlFxWaiting: Boolean;              // Play is waiting for FTlFxJob (with or without FTlPrepJob)
     FTlCacheHolder: TTimelinePlayer;    // spare player holding decoded/stretched caches between Plays
     FTlExportLastStage: string;   // last 'Stage n/6' prefix already echoed to the Timeline log
     FSunoTrackId: Integer;
@@ -1634,10 +1680,20 @@ type
     FTlScrollGuard: Boolean;
     FTlVolGuard: Boolean;
     FTlPlayer: TTimelinePlayer;
+    FTlVideo: TTimelineVideoPlayer;     // shows the video channels in pnlTlVideo, following the playhead
+    FTlThumbnailer: TVideoThumbnailer;  // decodes the hover-preview frames off the UI thread
+    FTlFxThumbA, FTlFxThumbB: TVideoThumbnailer;  // frames for the video-effect preview (outgoing / incoming side)
+    FTlFxBmp: TBitmap;                  // the effect-processed preview picture
+    FTlThumbBmp: TBitmap;               // the frame currently shown under the mouse
+    FTlThumbActive: Boolean;            // the mouse rests on a video clip
+    FTlThumbPath: string;
+    FTlThumbSec: Double;                // source time of the frame under the mouse
+    FTlThumbX, FTlThumbY: Integer;
     FWarpClipId: Integer;
     FWarpMarkers: TWarpMarkers;
     FTlMixerProc: TMixerProcessor;   // owned; feeds any track a Mixer strip's InputSourceId names
     FTlPlaying: Boolean;
+    FTlRefreshHz: Integer;       // Timeline redraws/second while playing (Settings; 5..40, default 20)
     { True for the duration of a synchronous ShowStatusProgress/
       HideStatusProgress-bracketed operation - tells RefreshJobs (tmrUITimer,
       500ms) not to stomp stbMain/prgStatus with the background-jobs summary
@@ -1912,9 +1968,7 @@ type
     procedure TlTempoUnknownClick;
     function TlTrackTitleRect(ATop, AWidth: Integer): TRect;
     function TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
-      out AStartSec, AEndSec: Double): Boolean; overload;
-    function TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
-      out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean; overload;
+      out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean;
     function TlClipRegionAtSec(AClip: TTimelineClip; ASec: Double;
       out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean;
     procedure TlShowEffectMenu(AX, AY: Integer);
@@ -1972,6 +2026,17 @@ type
     function TlNewAudioTrackId: Integer;
     function TlNewVideoTrackId: Integer;
     function TlHasVideo: Boolean;
+    { ---- video effects ---- }
+    function TlContextTrack: TTimelineTrack;
+    procedure SyncEffectMenus;
+    function TlSplitTrackAt(ATrk: TTimelineTrack; ASeconds: Double): Double;
+    procedure TlApplyVideoEffect(const AInfo: TVideoFxInfo);
+    procedure TlPaintVideoFx(ACv: TCanvas; ATrk: TTimelineTrack; ATop, ALaneH, AW: Integer);
+    procedure TlUpdateVideoFxPreview;
+    procedure TlFxThumbReady;
+    function TlFxClipFrame(AClip: TTimelineClip; AT: Double; AThumb: TVideoThumbnailer;
+      ABmp: TBitmap): Boolean;
+    function TlPlayIntervalMs: Integer;
     function ExecuteTimelineExportDialog(AFilterIndex: Integer; out ADest: string): Boolean;
     function TlTrackIndexById(ATrackId: Integer): Integer;
     function TlDropTargetTrackId(AX, AY: Integer): Integer;
@@ -2146,6 +2211,14 @@ procedure TfrmMain.FormCreate(Sender: TObject);
 var
   i: Integer;
 begin
+  FTlVideo := TTimelineVideoPlayer.Create(pnlTlVideo);
+  FTlThumbBmp := TBitmap.Create;
+  FTlThumbnailer := TVideoThumbnailer.Create(TlThumbReady);
+  FTlFxThumbA := TVideoThumbnailer.Create(TlFxThumbReady);
+  FTlFxThumbB := TVideoThumbnailer.Create(TlFxThumbReady);
+  FTlFxThumbA.Configure(480, 100);
+  FTlFxThumbB.Configure(480, 100);
+  FTlFxBmp := TBitmap.Create;
   FTlRubberBandMods := [ssShift];
   Caption := Format('UDAW - by Ultimanium Designs (C) 2026 - %s', [UDAWDisplayVersionString]);
   lblHeader.Caption := 'Ultimanium Audio Studio  -  system diagnostics (platform, audio engine, graph, project, PCM/WAV, timeline, recording)';
@@ -2428,6 +2501,8 @@ begin
   cboMixInsertKind.Items.Add('Pitch Shift');
   cboMixInsertKind.Items.Add('Multiband Compressor');
   cboMixInsertKind.Items.Add('Mastering Chain');
+  cboMixInsertKind.Items.Add('Tube Saturation');
+  cboMixInsertKind.Items.Add('Soft Clip');
   cboMixInsertKind.ItemIndex := 3;
 
   cboMixAutoParam.Items.Add('Fader');
@@ -2788,6 +2863,12 @@ begin
   FTrkPlaying := False;
   FreeAndNil(FTrkPlayer);
   FTlPlaying := False;
+  FreeAndNil(FTlVideo);
+  FreeAndNil(FTlThumbnailer);
+  FreeAndNil(FTlFxThumbA);
+  FreeAndNil(FTlFxThumbB);
+  FreeAndNil(FTlFxBmp);
+  FreeAndNil(FTlThumbBmp);
   FreeAndNil(FTlPlayer);
   FreeAndNil(FTlCacheHolder);
   FTlWaveformWarned.Free;
@@ -3257,7 +3338,8 @@ begin
       it.SubItems.Add(job.Title);
       it.SubItems.Add(JobStatusName(job.Status));
       it.SubItems.Add(Format('%.0f%%  %s', [job.Progress * 100, job.Note]));
-      if (runningJob = nil) and (job.Status = jsRunning) then
+      { the video-effects render is the long one: it owns the status bar }
+      if (job.Status = jsRunning) and ((runningJob = nil) or (job is TVideoFxRenderJob)) then
         runningJob := job;
     end;
   finally
@@ -7554,14 +7636,6 @@ begin
 end;
 
 function TfrmMain.TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
-  out AStartSec, AEndSec: Double): Boolean;
-var
-  reg: TClipEffectRegion;
-begin
-  Result := TlEffectLabelAtPoint(AX, AY, ATrackId, AStartSec, AEndSec, reg);
-end;
-
-function TfrmMain.TlEffectLabelAtPoint(AX, AY: Integer; out ATrackId: Integer;
   out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean;
 var
   tl: TTimeline;
@@ -8941,8 +9015,7 @@ begin
   pmTlNormalizeRange.Enabled := FTlRangeActive;
   mnuTlReverseRange.Enabled := FTlRangeActive;
   pmTlReverseRange.Enabled := FTlRangeActive;
-  mnuTlEffects.Enabled := FTlRangeActive;
-  pmTlEffects.Enabled := FTlRangeActive;
+  SyncEffectMenus;
 
   mnuTlUndo.Enabled := FCmds.CanUndo;
   pmTlUndo.Enabled := FCmds.CanUndo;
@@ -9169,6 +9242,9 @@ begin
   if FProject = nil then Exit;
   TlHealMissingEffectSources;
   tl := FProject.Timeline;
+  { The video pane only takes space while a video channel holds a clip. }
+  pnlTlVideo.Visible := TlHasVideo;
+  TlUpdateVideoFxPreview;
 
   { same TProjectDocument.TempoBPM the Project tab edits (TSetTempoCommand,
     undo-tracked) - not a separate value, so both tabs converge on the next
@@ -9437,18 +9513,24 @@ end;
 
 procedure TfrmMain.StopTimelinePlayback;
 begin
-  if FTlPrepJob <> nil then
+  if (FTlPrepJob <> nil) or FTlFxWaiting then
   begin
     { still preparing: cancel; FinishTimelinePrepare frees the player once the
-      worker has actually stopped touching it }
+      workers have actually stopped touching it }
     FTlPrepCancelled := True;
-    FTlPrepJob.Cancel;
+    if FTlPrepJob <> nil then FTlPrepJob.Cancel;
+    if FTlFxJob <> nil then FTlFxJob.Cancel;
     Exit;
   end;
   if not FTlPlaying then Exit;
   if (App <> nil) and (App.Audio <> nil) then
     App.Audio.ClearSource;
   FTlPlaying := False;
+  if FTlVideo <> nil then
+  begin
+    FTlVideo.Stop;
+    FTlVideo.SetRendered('', 0, 0);   // back to the live clips (and the effect overlay) while stopped
+  end;
   FTlMeterL := 0;
   FTlMeterR := 0;
   pbTlMeters.Invalidate;
@@ -9472,7 +9554,7 @@ end;
 procedure TfrmMain.StartTimelinePlayback(AFromBeginning, AReverse, APingPong: Boolean);
 begin
   if (FProject = nil) or (App = nil) or (App.Audio = nil) then Exit;
-  if FTlPrepJob <> nil then Exit;   // already preparing a previous Play
+  if (FTlPrepJob <> nil) or FTlFxWaiting then Exit;   // already preparing a previous Play
 
   FGraphPlaying := False;
   FWavPlaying := False;
@@ -9526,8 +9608,18 @@ begin
   { Decoded sources and stretched copies are cached between Plays; they are
     only redone for a source/clip whose tempo actually changed. With a warm
     cache there is nothing to prepare, so skip the job and start immediately. }
+  TlStartVideoFxRender;
   if not FTlPlayer.NeedsPrepare then
   begin
+    if FTlFxJob <> nil then
+    begin
+      { only the video render is outstanding: wait for it, then start }
+      FTlFxWaiting := True;
+      FTlPrepCancelled := False;
+      pbTimeline.Enabled := False;
+      tmrUI.Interval := TRK_UI_PLAY_INTERVAL_MS;
+      Exit;
+    end;
     memTimeline.Lines.Insert(0, 'Playback: decoded and tempo-stretched audio reused from cache - nothing to prepare.');
     BeginTimelineAudio;
     Exit;
@@ -9547,6 +9639,7 @@ begin
     raise;
   end;
   FTlPrepCancelled := False;
+  FTlFxWaiting := FTlFxJob <> nil;
   pbTimeline.Enabled := False;
   tmrUI.Interval := TRK_UI_PLAY_INTERVAL_MS;   // poll the job quickly
   memTimeline.Lines.Insert(0, 'Preparing timeline playback in the background - see status bar.');
@@ -9557,14 +9650,23 @@ end;
 procedure TfrmMain.FinishTimelinePrepare;
 var
   job: TTimelinePrepareJob;
+  note: string;
 begin
-  if (FTlPrepJob = nil) or not FTlPrepJob.IsTerminal then Exit;
+  { Playback starts once BOTH background jobs are done: the audio decode /
+    stretch and the video-effects pre-render (they run side by side). }
+  if FTlPrepJob <> nil then
+  begin
+    if not FTlPrepJob.IsTerminal then Exit;
+  end
+  else if not FTlFxWaiting then Exit;
+  if (FTlFxJob <> nil) and not FTlFxJob.IsTerminal then Exit;
   job := FTlPrepJob;
   FTlPrepJob := nil;   // tracked jobs own the finished job until shutdown
+  FTlFxWaiting := False;
   pbTimeline.Enabled := True;
-  if FTlPrepCancelled or (job.Status <> jsSucceeded) then
+  if FTlPrepCancelled or ((job <> nil) and (job.Status <> jsSucceeded)) then
   begin
-    if job.Status = jsFailed then
+    if (job <> nil) and (job.Status = jsFailed) then
       MessageDlg('Preparing timeline playback failed: ' + job.ErrorMessage, mtError, [mbOK], 0);
     ParkTimelineCache;
     FreeAndNil(FTlPlayer);
@@ -9572,13 +9674,73 @@ begin
     tmrUI.Interval := TRK_UI_IDLE_INTERVAL_MS;
     Exit;
   end;
-  memTimeline.Lines.Insert(0, 'Playback ready: ' + job.Note);
+  TlCollectVideoFx;
+  if job <> nil then note := job.Note else note := 'audio reused from cache';
+  memTimeline.Lines.Insert(0, 'Playback ready: ' + note);
   BeginTimelineAudio;
+end;
+
+{ Starts the video-effects pre-render for the coming Play, unless the picture
+  has no effects or the same picture is already cached - then the cached file
+  is used at once and nothing is rendered. The render runs as a job beside the
+  audio preparation. }
+procedure TfrmMain.TlStartVideoFxRender;
+var
+  dir: string;
+begin
+  FTlFxJob := nil;
+  if FTlVideo <> nil then FTlVideo.SetRendered('', 0, 0);
+  if (FTlVideo = nil) or (FProject = nil) or not pnlTlVideo.Visible then Exit;
+  dir := IncludeTrailingPathDelimiter(App.Paths.Cache) + 'video-fx';
+  FTlFxPlan := PlanVideoFxRender(FProject.Timeline, FProject.TempoBPM, dir);
+  if not FTlFxPlan.Needed then Exit;
+  if VideoFxCacheHit(FTlFxPlan) then
+  begin
+    FileSetDate(FTlFxPlan.CachePath, DateTimeToFileDate(Now));   // keep the file in use out of the pruning
+    PruneVideoFxCache(dir, 6);
+    FTlVideo.SetRendered(FTlFxPlan.CachePath, FTlFxPlan.Start, FTlFxPlan.Duration);
+    memTimeline.Lines.Insert(0, 'Video effects: unchanged since the last render - using the cached picture.');
+    Exit;
+  end;
+  PruneVideoFxCache(dir, 6);
+  FTlFxJob := TVideoFxRenderJob.Create(FProject.Timeline, FTlFxPlan, FProject.TempoBPM);
+  try
+    FTrackedJobs.Add(FTlFxJob);
+    App.Jobs.Submit(FTlFxJob, False);
+  except
+    FTrackedJobs.Remove(FTlFxJob);
+    FreeAndNil(FTlFxJob);
+    raise;
+  end;
+  memTimeline.Lines.Insert(0, 'Pre-rendering video effects before playback - see status bar.');
+end;
+
+{ Called once the pre-render job is terminal: plays the rendered picture when
+  it succeeded, otherwise says why and plays the clips without effects. }
+procedure TfrmMain.TlCollectVideoFx;
+begin
+  if FTlFxJob = nil then Exit;
+  if (FTlFxJob.Status = jsSucceeded) and (FTlVideo <> nil) then
+  begin
+    FTlVideo.SetRendered(FTlFxPlan.CachePath, FTlFxPlan.Start, FTlFxPlan.Duration);
+    memTimeline.Lines.Insert(0, 'Video effects rendered and cached.');
+  end
+  else if FTlFxJob.Status = jsFailed then
+    memTimeline.Lines.Insert(0, 'Video effects could not be pre-rendered (' + FTlFxJob.ErrorMessage +
+      ') - playing the video without them.');
+  FTlFxJob := nil;
 end;
 
 { Hands the prepared player to the audio engine and starts the transport UI. }
 procedure TfrmMain.BeginTimelineAudio;
 begin
+  { Open + position the video first: opening a file is slow and must not stall
+    the UI after the audio is already running. }
+  if (FTlVideo <> nil) and pnlTlVideo.Visible then
+  begin
+    FTlVideo.StretchBPM := FProject.TempoBPM;
+    FTlVideo.Prepare(FProject.Timeline, FProject.Timeline.PlayheadSeconds);
+  end;
   App.Audio.SetSource(FTlPlayer.AsSource);
   if (FTlMixerProc.LastError <> '') and not FTlMixerProc.IsPrepared then
     Logger.Warn('ui', 'Mixer routing is invalid (' + FTlMixerProc.LastError +
@@ -9590,7 +9752,7 @@ begin
     already uses (see TRK_UI_PLAY_INTERVAL_MS) so RefreshTimelineTab's
     per-tick pbTimeline.Invalidate actually tracks the transport smoothly;
     StopTimelinePlayback restores the idle rate. }
-  tmrUI.Interval := TRK_UI_PLAY_INTERVAL_MS;
+  tmrUI.Interval := TlPlayIntervalMs;
   RefreshTimelineTab;
 end;
 
@@ -9632,6 +9794,433 @@ end;
 { True when the timeline holds at least one video clip. Video changes what an
   export can be: only a video container (MP4 / MKV) can carry it, so the
   export dialog offers just those two formats while video is present. }
+{ UI timer period while the Timeline plays, from the user's refresh rate. }
+function TfrmMain.TlPlayIntervalMs: Integer;
+begin
+  if (FTlRefreshHz < 5) or (FTlRefreshHz > 40) then FTlRefreshHz := DEFAULT_TL_REFRESH_HZ;
+  Result := 1000 div FTlRefreshHz;
+end;
+
+{ ============================ video effects ============================ }
+
+{ The channel a Timeline menu command acts on: the one last right-clicked, else
+  the selected channel, else the channel of the selected clip. }
+function TfrmMain.TlContextTrack: TTimelineTrack;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+begin
+  Result := nil;
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  if FTlCtxTrackId >= 0 then Result := tl.TrackById(FTlCtxTrackId);
+  if (Result = nil) and (FTlSelectedTrackId >= 0) then Result := tl.TrackById(FTlSelectedTrackId);
+  if (Result = nil) and (FTlSelClipId >= 0) then
+    if tl.ClipById(FTlSelClipId, trk) <> nil then Result := trk;
+end;
+
+{ Audio Effects work on sound only and Video Effects on pictures only: each
+  menu is available just for its own kind of channel. }
+procedure TfrmMain.SyncEffectMenus;
+var
+  trk: TTimelineTrack;
+  isVideo: Boolean;
+begin
+  trk := TlContextTrack;
+  isVideo := (trk <> nil) and (trk.Kind = tkVideo);
+  mnuTlEffects.Enabled := FTlRangeActive and not isVideo;
+  pmTlEffects.Enabled := mnuTlEffects.Enabled;
+  mnuTlVideoEffects.Enabled := isVideo;
+  pmTlVideoEffects.Enabled := isVideo;
+end;
+
+{ Makes sure a cut exists at ASeconds on a video channel: an edge within 50 ms
+  is taken as the cut, otherwise the clip underneath is split there. Returns the
+  cut's time. }
+function TfrmMain.TlSplitTrackAt(ATrk: TTimelineTrack; ASeconds: Double): Double;
+const
+  TOL = 0.05;
+var
+  i: Integer;
+  c: TTimelineClip;
+begin
+  Result := ASeconds;
+  for i := 0 to ATrk.ClipCount - 1 do
+  begin
+    c := ATrk.GetClip(i);
+    if Abs(c.StartSeconds - ASeconds) <= TOL then Exit(c.StartSeconds);
+    if Abs(c.EndSeconds - ASeconds) <= TOL then Exit(c.EndSeconds);
+  end;
+  c := ATrk.ClipAtSeconds(ASeconds);
+  if (c <> nil) and not c.Locked then
+    FCmds.Perform(TSplitTimelineClipCommand.Create(FProject, c.Id, ASeconds));
+end;
+
+{ Lays a video effect on the right-clicked video channel.
+  Marked range: the video is split at both edges of the range and the effect
+  fills it (a transition pivots on the playhead when it is inside the range,
+  else on the range start - a cut is made there).
+  No range: a transition goes on the cut at the playhead (the clip is split
+  there when it is not on one yet), one second wide; a filter covers the clip
+  under the playhead.  The status bar shows each stage. }
+procedure TfrmMain.TlApplyVideoEffect(const AInfo: TVideoFxInfo);
+const
+  TRANSITION_SECONDS = 1.0;
+  MIN_SPAN = 0.05;
+  TOL = 0.05;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  c, outC, inC: TTimelineClip;
+  pivot, half, leftHalf, rightHalf, rs, rl: Double;
+  isTrans: Boolean;
+  i: Integer;
+  what: string;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  trk := TlContextTrack;
+  if (trk = nil) or (trk.Kind <> tkVideo) then
+  begin
+    memTimeline.Lines.Insert(0, 'Video Effects: right-click a video channel first.');
+    Exit;
+  end;
+  what := 'Video effect "' + AInfo.Name + '" - ';
+  isTrans := AInfo.Cls = vfTransition;
+  ShowStatusProgress(what + 'preparing...', 100);
+  try
+  try
+    UpdateStatusProgress(10, what + 'checking the selection...');
+    if FTlRangeActive and (FTlRangeEndSec - FTlRangeStartSec >= MIN_SPAN) then
+    begin
+      UpdateStatusProgress(25, what + 'splitting the video at the selection edges...');
+      TlSplitTracksAtRangeEdges([trk.Id]);
+      rs := FTlRangeStartSec;
+      rl := FTlRangeEndSec - FTlRangeStartSec;
+      pivot := rs;
+      if isTrans then
+      begin
+        UpdateStatusProgress(40, what + 'cutting at the transition point...');
+        if (tl.PlayheadSeconds > rs + MIN_SPAN) and (tl.PlayheadSeconds < rs + rl - MIN_SPAN) then
+          pivot := tl.PlayheadSeconds;
+        pivot := TlSplitTrackAt(trk, pivot);
+      end;
+    end
+    else if isTrans then
+    begin
+      UpdateStatusProgress(25, what + 'finding the cut at the playhead...');
+      pivot := TlSplitTrackAt(trk, tl.PlayheadSeconds);
+      outC := nil;
+      inC := nil;
+      for i := 0 to trk.ClipCount - 1 do
+      begin
+        c := trk.GetClip(i);
+        if Abs(c.EndSeconds - pivot) <= TOL then outC := c;
+        if Abs(c.StartSeconds - pivot) <= TOL then inC := c;
+      end;
+      if (outC = nil) and (inC = nil) then
+      begin
+        memTimeline.Lines.Insert(0, 'Video Effects: put the playhead on a video clip first.');
+        Exit;
+      end;
+      half := TRANSITION_SECONDS / 2;
+      leftHalf := 0;
+      rightHalf := 0;
+      if outC <> nil then leftHalf := Min(half, outC.LengthSeconds);
+      if inC <> nil then rightHalf := Min(half, inC.LengthSeconds);
+      rs := pivot - leftHalf;
+      rl := leftHalf + rightHalf;
+    end
+    else
+    begin
+      c := trk.ClipAtSeconds(tl.PlayheadSeconds);
+      if c = nil then
+      begin
+        memTimeline.Lines.Insert(0, 'Video Effects: put the playhead on a video clip, or mark a range first.');
+        Exit;
+      end;
+      rs := c.StartSeconds;
+      rl := c.LengthSeconds;
+      pivot := rs;
+    end;
+    UpdateStatusProgress(65, what + 'adding the effect...');
+    FCmds.Perform(TAddVideoEffectCommand.Create(FProject, trk.Id, AInfo.Id, AInfo.Name,
+      rs, rl, pivot, ''));
+    UpdateStatusProgress(85, what + 'refreshing the Timeline...');
+    RefreshTimelineTab;
+    UpdateStatusProgress(100, what + 'done');
+    memTimeline.Lines.Insert(0, Format('Video effect "%s" applied from %.2f s to %.2f s on %s.',
+      [AInfo.Name, rs, rs + rl, trk.Name]));
+  except
+    on E: Exception do
+      memTimeline.Lines.Insert(0, 'Video effect FAILED: ' + E.Message);
+  end;
+  finally
+    HideStatusProgress;
+  end;
+end;
+
+procedure TfrmMain.TlVideoFxMenuClick(Sender: TObject);
+var
+  idx: Integer;
+begin
+  idx := TMenuItem(Sender).Tag;
+  if (idx < 0) or (idx >= VideoFxCount) then Exit;
+  TlApplyVideoEffect(VideoFxInfoAt(idx));
+end;
+
+{ Removes the video effects under the playhead (or touching the marked range)
+  on the right-clicked video channel. }
+procedure TfrmMain.TlVideoFxRemoveClick(Sender: TObject);
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  r: TVideoEffectRegion;
+  ids: TArray<Integer>;
+  i, n: Integer;
+  t: Double;
+  hit: Boolean;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  trk := TlContextTrack;
+  t := tl.PlayheadSeconds;
+  ids := nil;
+  for i := 0 to tl.VideoEffectCount - 1 do
+  begin
+    r := tl.GetVideoEffect(i);
+    if (trk <> nil) and (r.TrackId <> trk.Id) then Continue;
+    if FTlRangeActive then
+      hit := (r.StartSeconds < FTlRangeEndSec) and (r.EndSeconds > FTlRangeStartSec)
+    else
+      hit := (t >= r.StartSeconds) and (t <= r.EndSeconds);
+    if hit then ids := ids + [r.Id];
+  end;
+  if Length(ids) = 0 then
+  begin
+    memTimeline.Lines.Insert(0, 'Video Effects: no video effect at the playhead or in the marked range.');
+    Exit;
+  end;
+  ShowStatusProgress('Removing video effects...', Length(ids));
+  try
+    for n := 0 to High(ids) do
+    begin
+      UpdateStatusProgress(n, Format('Removing video effect %d of %d...', [n + 1, Length(ids)]));
+      FCmds.Perform(TRemoveVideoEffectCommand.Create(FProject, ids[n]));
+    end;
+    UpdateStatusProgress(Length(ids), 'Video effects removed');
+    RefreshTimelineTab;
+  finally
+    HideStatusProgress;
+  end;
+end;
+
+{ Draws the effect / transition regions of one video channel along the bottom
+  of its lane: orange = transition, purple = effect. }
+procedure TfrmMain.TlPaintVideoFx(ACv: TCanvas; ATrk: TTimelineTrack; ATop, ALaneH, AW: Integer);
+var
+  j, x, x2, yTop, yBot, px: Integer;
+  r: TVideoEffectRegion;
+  tr: Boolean;
+  col, edgeCol: TColor;
+  leftSec, rightSec: Double;
+begin
+  if (FProject = nil) or (ATrk.Kind <> tkVideo) then Exit;
+  leftSec := FTlView.XToSeconds(FTlView.HeaderWidth);
+  rightSec := FTlView.XToSeconds(AW);
+  yTop := ATop + ALaneH - 20;
+  yBot := ATop + ALaneH - 4;
+  for j := 0 to FProject.Timeline.VideoEffectCount - 1 do
+  begin
+    r := FProject.Timeline.GetVideoEffect(j);
+    if r.TrackId <> ATrk.Id then Continue;
+    if (r.EndSeconds < leftSec) or (r.StartSeconds > rightSec) then Continue;
+    tr := VideoFxIsTransition(r.Kind);
+    if tr then col := $0030A0F0 else col := $00C070A0;
+    if tr then edgeCol := $00104878 else edgeCol := $00703060;
+    x := Round(FTlView.SecondsToX(Max(r.StartSeconds, leftSec - 1)));
+    x2 := Round(FTlView.SecondsToX(Min(r.EndSeconds, rightSec + 1)));
+    if x < FTlView.HeaderWidth then x := FTlView.HeaderWidth;
+    if x2 > AW then x2 := AW;
+    if x2 - x < 3 then x2 := x + 3;
+    ACv.Brush.Style := bsSolid;
+    ACv.Brush.Color := col;
+    ACv.Pen.Color := edgeCol;
+    ACv.RoundRect(x, yTop, x2, yBot, 4, 4);
+    if tr and (r.PivotSeconds > r.StartSeconds) and (r.PivotSeconds < r.EndSeconds) then
+    begin
+      px := Round(FTlView.SecondsToX(r.PivotSeconds));
+      if (px > x) and (px < x2) then
+      begin
+        ACv.Pen.Color := clWhite;
+        ACv.MoveTo(px, yTop);
+        ACv.LineTo(px, yBot);
+      end;
+    end;
+    if x2 - x > 30 then
+    begin
+      ACv.Brush.Style := bsClear;
+      ACv.Font.Color := clBlack;
+      ACv.TextRect(Rect(x + 2, yTop, x2 - 2, yBot), x + 4, yTop + 1, r.Name);
+      ACv.Brush.Style := bsSolid;
+    end;
+  end;
+end;
+
+{ A decoded effect-preview frame arrived (queued from a thumbnailer thread). }
+procedure TfrmMain.TlFxThumbReady;
+begin
+  TlUpdateVideoFxPreview;
+end;
+
+{ The picture of AClip at timeline time AT (held on its first / last picture
+  outside the clip, as the export does) from the preview grabber; False until
+  the grabber has decoded it. }
+function TfrmMain.TlFxClipFrame(AClip: TTimelineClip; AT: Double; AThumb: TVideoThumbnailer;
+  ABmp: TBitmap): Boolean;
+var
+  src: TMediaSource;
+  tt, secs: Double;
+begin
+  Result := False;
+  if (AClip = nil) or (FProject = nil) then Exit;
+  src := FProject.Timeline.SourceById(AClip.SourceId);
+  if (src = nil) or (src.Kind <> mkVideoFile) or (src.Path = '') or not FileExists(src.Path) then Exit;
+  tt := EnsureRange(AT, AClip.StartSeconds, Max(AClip.StartSeconds, AClip.EndSeconds - 0.04));
+  secs := AClip.VideoSourceSecondsAt(tt, FProject.TempoBPM);
+  AThumb.Request(src.Path, secs);
+  Result := AThumb.TryGet(src.Path, secs, ABmp);
+end;
+
+{ While the playhead is inside a video effect, the video pane shows the
+  effect-processed picture (decoded by two frame grabbers, about ten pictures a
+  second) over the live video; outside every effect the pane shows the video
+  itself. }
+procedure TfrmMain.TlUpdateVideoFxPreview;
+var
+  tl: TTimeline;
+  reg: TVideoEffectRegion;
+  trk: TTimelineTrack;
+  outC, inC, baseC: TTimelineClip;
+  bmpA, bmpB, tmp: TBitmap;
+  bufA, bufB, bufO: TBytes;
+  t, p: Double;
+  w, h, y: Integer;
+  isTrans, haveA, haveB: Boolean;
+
+  procedure Black(ABmp: TBitmap; AW, AH: Integer);
+  begin
+    ABmp.PixelFormat := pf24bit;
+    ABmp.SetSize(AW, AH);
+    ABmp.Canvas.Brush.Color := clBlack;
+    ABmp.Canvas.FillRect(Rect(0, 0, AW, AH));
+  end;
+
+begin
+  if (FProject = nil) or (FTlFxThumbA = nil) or (FTlFxBmp = nil) then Exit;
+  tl := FProject.Timeline;
+  t := tl.PlayheadSeconds;
+  reg := nil;
+  { while the pre-rendered picture plays it already carries the effects }
+  if pnlTlVideo.Visible and not ((FTlVideo <> nil) and FTlVideo.RenderedActive) then
+    reg := VideoFxRegionAt(tl, t);
+  if reg = nil then
+  begin
+    if pnlTlVideoFx.Visible then pnlTlVideoFx.Visible := False;
+    Exit;
+  end;
+  p := VideoFxProgressAt(reg, t);
+  isTrans := VideoFxIsTransition(reg.Kind);
+  bmpA := TBitmap.Create;
+  bmpB := TBitmap.Create;
+  try
+    if isTrans then
+    begin
+      VideoFxTransitionClips(tl, reg, outC, inC);
+      haveA := TlFxClipFrame(outC, t, FTlFxThumbA, bmpA);
+      haveB := TlFxClipFrame(inC, t, FTlFxThumbB, bmpB);
+      { a side with no clip is black: the transition becomes a fade from / to black }
+      if (outC = nil) and haveB then
+      begin
+        Black(bmpA, bmpB.Width, bmpB.Height);
+        haveA := True;
+      end;
+      if (inC = nil) and haveA then
+      begin
+        Black(bmpB, bmpA.Width, bmpA.Height);
+        haveB := True;
+      end;
+    end
+    else
+    begin
+      trk := tl.TrackById(reg.TrackId);
+      baseC := nil;
+      if trk <> nil then baseC := trk.ClipAtSeconds(t);
+      haveA := TlFxClipFrame(baseC, t, FTlFxThumbA, bmpA);
+      haveB := True;
+    end;
+    if not (haveA and haveB) then Exit;     // grabbers still decoding: keep what is on screen
+
+    w := bmpA.Width;
+    h := bmpA.Height;
+    if isTrans and ((bmpB.Width <> w) or (bmpB.Height <> h)) then
+    begin
+      tmp := TBitmap.Create;
+      try
+        tmp.PixelFormat := pf24bit;
+        tmp.SetSize(w, h);
+        tmp.Canvas.StretchDraw(Rect(0, 0, w, h), bmpB);
+        bmpB.Assign(tmp);
+      finally
+        tmp.Free;
+      end;
+    end;
+    bmpA.PixelFormat := pf32bit;
+    SetLength(bufA, w * h * 4);
+    SetLength(bufO, w * h * 4);
+    for y := 0 to h - 1 do
+      Move(bmpA.ScanLine[y]^, bufA[y * w * 4], w * 4);
+    if isTrans then
+    begin
+      bmpB.PixelFormat := pf32bit;
+      SetLength(bufB, w * h * 4);
+      for y := 0 to h - 1 do
+        Move(bmpB.ScanLine[y]^, bufB[y * w * 4], w * 4);
+      VideoFxRenderTransition(reg.Kind, reg.Params, p, @bufA[0], @bufB[0], @bufO[0], w, h,
+        Round(t * 30));
+    end
+    else
+      VideoFxRenderFilter(reg.Kind, reg.Params, p, @bufA[0], @bufO[0], w, h, Round(t * 30));
+    FTlFxBmp.PixelFormat := pf32bit;
+    FTlFxBmp.SetSize(w, h);
+    for y := 0 to h - 1 do
+      Move(bufO[y * w * 4], FTlFxBmp.ScanLine[y]^, w * 4);
+    if not pnlTlVideoFx.Visible then pnlTlVideoFx.Visible := True;
+    pbTlVideoFx.Invalidate;
+  finally
+    bmpB.Free;
+    bmpA.Free;
+  end;
+end;
+
+procedure TfrmMain.pbTlVideoFxPaint(Sender: TObject);
+var
+  s: Double;
+  tw, th: Integer;
+begin
+  with pbTlVideoFx.Canvas do
+  begin
+    Brush.Color := clBlack;
+    FillRect(Rect(0, 0, pbTlVideoFx.Width, pbTlVideoFx.Height));
+    if (FTlFxBmp = nil) or FTlFxBmp.Empty then Exit;
+    s := Min(pbTlVideoFx.Width / FTlFxBmp.Width, pbTlVideoFx.Height / FTlFxBmp.Height);
+    tw := Max(1, Round(FTlFxBmp.Width * s));
+    th := Max(1, Round(FTlFxBmp.Height * s));
+    StretchDraw(Rect((pbTlVideoFx.Width - tw) div 2, (pbTlVideoFx.Height - th) div 2,
+      (pbTlVideoFx.Width - tw) div 2 + tw, (pbTlVideoFx.Height - th) div 2 + th), FTlFxBmp);
+  end;
+end;
+
 function TfrmMain.TlHasVideo: Boolean;
 var
   i: Integer;
@@ -9648,7 +10237,7 @@ end;
   on the timeline. Returns the chosen path with a default extension applied. }
 function TfrmMain.ExecuteTimelineExportDialog(AFilterIndex: Integer; out ADest: string): Boolean;
 const
-  Extensions: array[1..6] of string = ('.wav', '.mp3', '.mp4', '.m4a', '.pcm', '.flac');
+  Extensions: array[1..7] of string = ('.wav', '.mp3', '.mp4', '.m4a', '.pcm', '.flac', '.mkv');
   VideoExtensions: array[1..2] of string = ('.mp4', '.mkv');
 var
   audioFilter: string;
@@ -9656,11 +10245,18 @@ var
 begin
   audioFilter := dlgTimelineExport.Filter;
   videoMode := TlHasVideo;
+  if (AFilterIndex = 7) and not videoMode then
+  begin
+    MessageDlg('MKV export carries the Timeline video. Add a video clip first, or export the audio as WAV, MP3, MP4 or FLAC.',
+      mtInformation, [mbOK], 0);
+    Exit(False);
+  end;
   try
     if videoMode then
     begin
-      dlgTimelineExport.Filter := 'MP4 - video with AAC audio|*.mp4|MKV - video with audio|*.mkv';
-      dlgTimelineExport.FilterIndex := 1;
+      dlgTimelineExport.Filter := 'MP4 - video with AAC audio|*.mp4|MKV - video with AAC audio|*.mkv';
+      if AFilterIndex = 7 then dlgTimelineExport.FilterIndex := 2
+      else dlgTimelineExport.FilterIndex := 1;
     end
     else
       dlgTimelineExport.FilterIndex := AFilterIndex;
@@ -9711,6 +10307,11 @@ begin
   RunTimelineExport(3);
 end;
 
+procedure TfrmMain.pmTlExportMkvClick(Sender: TObject);
+begin
+  RunTimelineExport(7);
+end;
+
 procedure TfrmMain.pmTlExportFlacClick(Sender: TObject);
 begin
   RunTimelineExport(6);
@@ -9735,16 +10336,6 @@ end;
 procedure TfrmMain.StartTimelineExportJob(const ADest: string;
   ARangeStart, ARangeEnd: Double);
 begin
-  { Video needs a video muxer (MP4/MKV writer that carries the video clips
-    plus the mixed audio). That writer is not built yet; exporting through
-    the audio-only path would silently drop the video, so refuse plainly. }
-  if TlHasVideo then
-  begin
-    MessageDlg('This timeline contains video. Video export (MP4 / MKV) needs the video muxer, ' +
-      'which is not available yet. Remove the video channel to export the audio mix, ' +
-      'or keep working - your video clips are saved with the project.', mtInformation, [mbOK], 0);
-    Exit;
-  end;
   try
     if ARangeEnd > ARangeStart then
       FTimelineExportJob := TTimelineExportJob.Create(FProject, ADest, ARangeStart, ARangeEnd)
@@ -10370,6 +10961,8 @@ begin
   else if SameText(AEffectName, 'Tremolo') then Result := theme.FxTremolo
   else if SameText(AEffectName, 'Auto-Pan') then Result := theme.FxAutoPan
   else if SameText(AEffectName, 'Saturation') then Result := theme.FxSaturation
+  else if SameText(AEffectName, 'Tube Saturation') then Result := theme.FxSaturation
+  else if SameText(AEffectName, 'Soft Clip') then Result := theme.FxHardClip
   else if SameText(AEffectName, 'Bit Crusher') then Result := theme.FxBitCrusher
   else if SameText(AEffectName, 'Brighten EQ') then Result := theme.FxBrightenEQ
   else if SameText(AEffectName, 'Silence') then Result := theme.FxSilence
@@ -10575,6 +11168,13 @@ begin
     Render, the real-time path - see UDAW.Timeline.Playback's header). }
   if FTlPlayer <> nil then
     FTlPlayer.EnsureSourcesLoaded;
+  { The audio engine owns the clock; the picture just follows the playhead. }
+  if (FTlVideo <> nil) and pnlTlVideo.Visible and (FTlPlayer <> nil) then
+  begin
+    FTlVideo.StretchBPM := FProject.TempoBPM;
+    FTlVideo.Sync(FProject.Timeline, FProject.Timeline.PlayheadSeconds, True, FTlPlayer.Direction);
+    TlUpdateVideoFxPreview;
+  end;
 end;
 
 procedure TfrmMain.btnTlAddTrackClick(Sender: TObject);
@@ -12487,6 +13087,8 @@ begin
     32: begin AKind := 'stereowidth'; AParams := 'width=1.5'; AName := 'Stereo Widener'; end;
     33: begin AKind := 'transientshaper'; AParams := 'attack=6;sustain=0'; AName := 'Transient Shaper'; end;
     34: begin AKind := 'biquad'; AParams := 'type=highshelf;freq=8000;q=0.707;gaindb=6'; AName := 'Treble Boost'; end;
+    40: begin AKind := 'distortion'; AParams := 'type=tube;drive=3;trim=0;mix=1'; AName := 'Tube Saturation'; end;
+    41: begin AKind := 'distortion'; AParams := 'type=softclip;drive=2;trim=0;mix=1'; AName := 'Soft Clip'; end;
   else
     AKind := ''; AParams := ''; AName := '';
     Result := False;
@@ -12502,7 +13104,7 @@ var
   n: string;
 begin
   Result := True;
-  for tag := 1 to 40 do
+  for tag := 1 to 50 do
     if TlFxPreset(tag, AKind, AParams, n) and SameText(n, AName) then Exit;
   AKind := '';
   AParams := '';
@@ -12661,7 +13263,7 @@ const
       env := Exp(-3.0 * (i / SR) / ASeconds);
       if ANoise then
       begin
-        rnd := rnd * 1664525 + 1013904223;
+        rnd := Cardinal((UInt64(rnd) * 1664525 + 1013904223) and $FFFFFFFF);
         ph := (Integer(rnd shr 8) / 8388608.0) - 1.0;
         planar[0][i] := AAmp * env * ph;
         planar[1][i] := AAmp * env * ph * 0.9;
@@ -13054,6 +13656,54 @@ const
     fade drag (the range-move drag uses the same 3px dead zone) }
   TL_DRAG_THRESHOLD = 3;
 
+{ A decoded preview frame arrived (queued from the thumbnailer's thread). }
+procedure TfrmMain.TlThumbReady;
+begin
+  if FTlThumbActive then pbTimeline.Invalidate;
+end;
+
+procedure TfrmMain.pbTimelineMouseLeave(Sender: TObject);
+begin
+  if FTlThumbActive then
+  begin
+    FTlThumbActive := False;
+    pbTimeline.Invalidate;
+  end;
+end;
+
+{ Hover preview: while the mouse rests on a video clip, ask for the frame of the
+  source at that point; pbTimelinePaint draws it next to the pointer. }
+procedure TfrmMain.TlUpdateVideoHover(AX, AY: Integer);
+var
+  c: TTimelineClip;
+  src: TMediaSource;
+  sec: Double;
+  wasActive: Boolean;
+begin
+  wasActive := FTlThumbActive;
+  FTlThumbActive := False;
+  if (FProject <> nil) and (FTlThumbnailer <> nil) and (AX >= FTlView.HeaderWidth) then
+  begin
+    c := TlClipAtPoint(AX, AY);
+    if (c <> nil) and (c.SourceId >= 0) and not c.IsMidiClip then
+    begin
+      src := FProject.Timeline.SourceById(c.SourceId);
+      if (src <> nil) and (src.Kind = mkVideoFile) and (src.Path <> '') and FileExists(src.Path) then
+      begin
+        sec := EnsureRange(FTlView.XToSeconds(AX), c.StartSeconds, c.EndSeconds);
+        FTlThumbPath := src.Path;
+        FTlThumbSec := c.VideoSourceSecondsAt(sec, FProject.TempoBPM);
+        FTlThumbX := AX;
+        FTlThumbY := AY;
+        FTlThumbActive := True;
+        FTlThumbnailer.Request(FTlThumbPath, FTlThumbSec);
+      end;
+    end;
+  end;
+  { while the transport runs the per-tick refresh repaints anyway }
+  if (FTlThumbActive or wasActive) and not FTlPlaying then pbTimeline.Invalidate;
+end;
+
 procedure TfrmMain.pbTimelineMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
 var
   delta, newStart, sec, newFade, rawSec: Double;
@@ -13182,6 +13832,7 @@ begin
       pbTimeline.Cursor := crSizeWE
     else
       pbTimeline.Cursor := crDefault;
+    TlUpdateVideoHover(X, Y);
     Exit;
   end;
 
@@ -13837,16 +14488,27 @@ begin
         cv.Brush.Color := Mix($00401818, clBlack, 0.3);
         cv.FillRect(Rect(x + 2, bodyTop + 1, x2 - 2, top + laneH - 3));
         cv.Brush.Color := $00A0A0A0;
-        var holeX := x + 6;
+        { Phase the sprockets from the clip's true start, not the clamped
+          viewport edge x: once the clip's left side has scrolled out of view x
+          stays pinned at HeaderWidth, so holes anchored to it never moved
+          while the audio lanes scrolled past. }
+        var holeX := Round(FTlView.SecondsToX(clip.StartSeconds)) + 6;
+        if holeX < x + 2 then
+          Inc(holeX, ((x + 2 - holeX + 13) div 14) * 14);
         while holeX < x2 - 8 do
         begin
           cv.FillRect(Rect(holeX, bodyTop + 3, holeX + 5, bodyTop + 8));
           cv.FillRect(Rect(holeX, top + laneH - 11, holeX + 5, top + laneH - 6));
           Inc(holeX, 14);
         end;
+        { The tag sits at the clip's true start so it scrolls with the clip (and
+          with the audio lanes during playback); TextRect clips it to the
+          visible part of the clip body. }
         cv.Brush.Style := bsClear;
         cv.Font.Color := $00E0C080;
-        if cw > 60 then cv.TextOut(x + 8, bodyTop + (top + laneH - bodyTop) div 2 - 7, 'VIDEO');
+        var tagX := Round(FTlView.SecondsToX(clip.StartSeconds)) + 8;
+        var tagY := bodyTop + (top + laneH - bodyTop) div 2 - 7;
+        cv.TextRect(Rect(x + 2, bodyTop + 1, x2 - 2, top + laneH - 3), tagX, tagY, 'VIDEO');
         cv.Brush.Style := bsSolid;
       end;
       if (src <> nil) and (src.Waveform = nil) and (src.Kind <> mkVideoFile) then
@@ -13962,6 +14624,7 @@ begin
       VLine(x + 2, top + 3, top + laneH - 3, theme.Border);
       VLine(x2 - 2, top + 3, top + laneH - 3, theme.Border);
     end;
+    TlPaintVideoFx(cv, trk, top, laneH, w);
     end;
   finally
     RestoreDC(cv.Handle, clipSave);
@@ -14008,6 +14671,29 @@ begin
     cv.Pen.Style := psSolid;
     cv.Brush.Style := bsSolid;
   end;
+
+  { ---- hover preview: the video frame under the mouse, with its source time ---- }
+  if FTlThumbActive and (FTlThumbnailer <> nil) and
+     FTlThumbnailer.TryGet(FTlThumbPath, FTlThumbSec, FTlThumbBmp) then
+  begin
+    var thumbCap := FormatTimecode(FTlThumbSec);
+    var thumbW := FTlThumbBmp.Width + 6;
+    var thumbH := FTlThumbBmp.Height + cv.TextHeight(thumbCap) + 10;
+    var thumbL := FTlThumbX + 14;
+    var thumbT := FTlThumbY + 18;
+    if thumbL + thumbW > w then thumbL := FTlThumbX - 14 - thumbW;
+    if thumbT + thumbH > h then thumbT := FTlThumbY - 12 - thumbH;
+    thumbL := Max(thumbL, FTlView.HeaderWidth);
+    thumbT := Max(thumbT, 0);
+    cv.Brush.Color := theme.PanelBackground;
+    cv.Pen.Color := theme.Border;
+    cv.Rectangle(thumbL, thumbT, thumbL + thumbW, thumbT + thumbH);
+    cv.Draw(thumbL + 3, thumbT + 3, FTlThumbBmp);
+    cv.Brush.Style := bsClear;
+    cv.Font.Color := theme.Text;
+    cv.TextOut(thumbL + 4, thumbT + FTlThumbBmp.Height + 5, thumbCap);
+    cv.Brush.Style := bsSolid;
+  end;
   end;
 
   pbTimeline.Canvas.Draw(0, 0, FTlBuffer);
@@ -14032,6 +14718,11 @@ end;
   into FTlMeterBuffer and blitted in one shot - the same double-buffer +
   csOpaque trick pbTimelinePaint/pbMixerPaint use - so the 30fps invalidate
   during playback never flickers. }
+procedure TfrmMain.pnlTlVideoResize(Sender: TObject);
+begin
+  if FTlVideo <> nil then FTlVideo.HostResized;
+end;
+
 procedure TfrmMain.pbTlMetersPaint(Sender: TObject);
 const
   LABEL_W = 16;
@@ -15419,6 +16110,8 @@ begin
     23: begin kind := 'pitchshift'; params := 'semitones=0'; end;
     24: begin kind := 'multibandcomp'; params := ''; end;   // TMultibandCompNode fills in its own 3-band defaults
     25: begin kind := 'mastering'; params := ''; end;       // TMasteringNode fills in its own defaults
+    26: begin kind := 'distortion'; params := 'type=tube;drive=3;trim=0;mix=1'; end;
+    27: begin kind := 'distortion'; params := 'type=softclip;drive=2;trim=0;mix=1'; end;
   else
     kind := 'gain'; params := 'db=0';
   end;
@@ -18424,8 +19117,8 @@ end;
 procedure TfrmMain.btnMp4ToTimelineClick(Sender: TObject);
 var
   tl: TTimeline;
-  trackId: Integer;
   cmd: TImportMp4Command;
+  i: Integer;
 begin
   if FProject = nil then
   begin
@@ -18440,20 +19133,39 @@ begin
       Exit;
     end;
     tl := FProject.Timeline;
-    trackId := TlNewAudioTrackId;
 
-    cmd := TImportMp4Command.Create(FProject, trackId, dlgOpenMp4.FileName,
+    { Sound and picture land on separate channels at the same start time: an
+      audio channel for the sound, a video channel for the picture. Only the
+      channels the file actually needs are created. }
+    cmd := TImportMp4Command.Create(FProject, -1, dlgOpenMp4.FileName,
       FTlView.Snap(tl.PlayheadSeconds), 0);
+    try
+      cmd.Resolve;
+    except
+      cmd.Free;
+      raise;
+    end;
+    { every sound stream of the file gets its own track, decoded into the cache }
+    for i := 0 to cmd.AudioStreamCount - 1 do
+      cmd.SetStreamTrack(i, TlNewAudioTrackId);
+    if cmd.HasVideo then cmd.VideoTrackId := TlNewVideoTrackId;
     FCmds.Perform(cmd);
-    WarmClipWaveform(cmd.SourceId);
+    for i := 0 to cmd.AudioStreamCount - 1 do
+      WarmClipWaveform(cmd.AudioStreams[i].SourceId);
     FMp4Path := dlgOpenMp4.FileName;
-    memMp4.Lines.Text := Format(
-      'imported onto timeline: %s'#13#10 +
-      '  %s, %d Hz, %d ch, %.3f s  (clip id %d)',
-      [dlgOpenMp4.FileName, cmd.ImportedCodecName, cmd.ImportedSampleRate,
-       cmd.ImportedChannels, cmd.ImportedLengthSeconds, cmd.CreatedClipId]);
+    memMp4.Lines.Text := 'imported onto timeline: ' + dlgOpenMp4.FileName;
+    for i := 0 to cmd.AudioStreamCount - 1 do
+      with cmd.AudioStreams[i] do
+        memMp4.Lines.Add(Format('  sound %d: %s, %d Hz, %d ch, %.3f s  (clip id %d, cached)',
+          [i + 1, CodecName, SampleRate, Channels, LenSeconds, ClipId]));
+    if cmd.AudioSkipNote <> '' then
+      memMp4.Lines.Add('  ' + cmd.AudioSkipNote);
+    if cmd.HasVideo then
+      memMp4.Lines.Add(Format('  video: %s, %dx%d, %.3f s  (clip id %d)',
+        [cmd.ImportedVideoCodecName, cmd.ImportedVideoWidth, cmd.ImportedVideoHeight,
+         cmd.ImportedVideoLengthSeconds, cmd.CreatedVideoClipId]));
     Logger.Info('ui', 'MP4 imported to timeline: ' + dlgOpenMp4.FileName);
-    ApplyBaselineTempoOnImport(cmd.CreatedClipId);
+    if cmd.HasAudio then ApplyBaselineTempoOnImport(cmd.CreatedClipId);
     RefreshTimelineTab;
   except
     on E: Exception do
@@ -19457,7 +20169,7 @@ end;
   system-wide setting (Settings > Show hints), not per project. }
 procedure TfrmMain.InstallControlHints;
 const
-  TABLE: array[0..52] of array[0..2] of string = (
+  TABLE: array[0..53] of array[0..2] of string = (
     ('edtProjectName', 'Project name', 'Shown in the title bar and used for the saved project file.'),
     ('edtProjectTempo', 'Tempo (BPM)', 'Project tempo. Drives the Timeline grid, tracker/MIDI timing and tempo-stretched clips.'),
     ('cboProjectSampleRate', 'Project sample rate', 'Internal rate for rendering and export. Clips at other rates are resampled.'),
@@ -19491,6 +20203,7 @@ const
     ('chkSetExclusive', 'Exclusive mode', 'Take exclusive control of the device for the lowest latency. Other apps lose audio.'),
     ('chkSetCapture', 'Audio input', 'Enable audio capture; required for recording and voice control.'),
     ('cboSetInDevice', 'Input device', 'Microphone / line input used for recording.'),
+    ('cboSetTlRefresh', 'Timeline refresh', 'How many times a second the Timeline redraws while playing. Lower values use less CPU and leave more for audio and video; higher values look smoother.'),
     ('cboSetLogLevel', 'Log level', 'Minimum severity written to the log.'),
     ('chkSetTempoAuto', 'Auto-detect BPM', 'The first audio track you import sets the Timeline BPM.'),
     ('chkSetTempoResample', 'Resample tempo', 'Conform tempo by resampling (pitch follows) instead of the phase vocoder (pitch preserved).'),
@@ -19756,6 +20469,14 @@ begin
   cboSetLogLevel.Items.Add('critical');
   SelOrAddCombo(cboSetLogLevel, cfg.GetString(CFG_SEC_LOGGING, CFG_LOG_LEVEL, 'info'));
 
+  cboSetTlRefresh.Items.Clear;
+  for v := 1 to 8 do
+    cboSetTlRefresh.Items.Add(IntToStr(v * 5));
+  FTlRefreshHz := cfg.GetInt(CFG_SEC_GENERAL, CFG_GEN_TL_REFRESH_HZ, DEFAULT_TL_REFRESH_HZ);
+  if (FTlRefreshHz < 5) or (FTlRefreshHz > 40) then FTlRefreshHz := DEFAULT_TL_REFRESH_HZ;
+  cboSetTlRefresh.ItemIndex := (FTlRefreshHz div 5) - 1;
+  if FTlPlaying then tmrUI.Interval := TlPlayIntervalMs;
+
   edSetLocale.Text := cfg.GetString(CFG_SEC_GENERAL, CFG_GEN_LOCALE, 'en');
   chkSetTempoAuto.Checked := cfg.GetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_AUTO, True);
   chkSetTempoResample.Checked := cfg.GetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_RESAMPLE, False);
@@ -19844,6 +20565,10 @@ begin
      (cboSetLogLevel.ItemIndex <= Ord(High(TLogLevel))) then
     Logger.SetMinLevel(TLogLevel(cboSetLogLevel.ItemIndex));
 
+  if cboSetTlRefresh.ItemIndex >= 0 then
+    FTlRefreshHz := (cboSetTlRefresh.ItemIndex + 1) * 5;
+  cfg.SetInt(CFG_SEC_GENERAL, CFG_GEN_TL_REFRESH_HZ, FTlRefreshHz);
+  if FTlPlaying then tmrUI.Interval := TlPlayIntervalMs;
   cfg.SetString(CFG_SEC_GENERAL, CFG_GEN_LOCALE, Trim(edSetLocale.Text));
   cfg.SetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_AUTO, chkSetTempoAuto.Checked);
   cfg.SetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_RESAMPLE, chkSetTempoResample.Checked);
@@ -19908,6 +20633,18 @@ begin
     Exit;
   end;
   SaveSettingsTab;
+end;
+
+{ Timeline refresh takes effect and is written to the global config at once,
+  so it is remembered on every startup without pressing Save. }
+procedure TfrmMain.cboSetTlRefreshChange(Sender: TObject);
+begin
+  if cboSetTlRefresh.ItemIndex < 0 then Exit;
+  FTlRefreshHz := (cboSetTlRefresh.ItemIndex + 1) * 5;
+  if FTlPlaying then tmrUI.Interval := TlPlayIntervalMs;
+  if App = nil then Exit;
+  App.Config.SetInt(CFG_SEC_GENERAL, CFG_GEN_TL_REFRESH_HZ, FTlRefreshHz);
+  if not App.Config.Save then Logger.Warn('ui', 'Could not persist timeline refresh rate');
 end;
 
 procedure TfrmMain.btnSettingsReloadClick(Sender: TObject);
@@ -20233,7 +20970,8 @@ const
 function TfrmMain.BrowserIsAudioExt(const AExt: string): Boolean;
 begin
   Result := (AExt = '.wav') or (AExt = '.flac') or (AExt = '.mp3') or
-    (AExt = '.mp4') or (AExt = '.m4a');
+    (AExt = '.mp4') or (AExt = '.m4a') or (AExt = '.m4v') or (AExt = '.mov') or
+    (AExt = '.mkv') or (AExt = '.webm');
 end;
 
 function TfrmMain.BrowserNodePath(ANode: TTreeNode): string;
@@ -20498,8 +21236,11 @@ var
   flacCmd: TImportFlacCommand;
   mp3Cmd: TImportMp3Command;
   mp4Cmd: TImportMp4Command;
+  hasSound: Boolean;
+  streamNo: Integer;
 begin
   Result := False;
+  hasSound := True;
   if FProject = nil then Exit;
   ext := LowerCase(ExtractFileExt(APath));
   ShowStatusProgress('Importing ' + ExtractFileName(APath) + '...', 100);
@@ -20536,20 +21277,45 @@ begin
       UpdateStatusProgress(30, 'Adding MP3 clip to Timeline...');
       WarmClipWaveform(mp3Cmd.SourceId, 30, 70, False);
     end
-      else if (ext = '.mp4') or (ext = '.m4a') then
+      else if (ext = '.mp4') or (ext = '.m4a') or (ext = '.m4v') or (ext = '.mov') or
+        (ext = '.mkv') or (ext = '.webm') then
     begin
       if not Mp4SniffFile(APath) then Exit;
+      { Sound goes to the track it was dropped on (a video file's picture gets
+        its own new video channel); a file with no sound needs no audio track. }
       mp4Cmd := TImportMp4Command.Create(FProject, ATrackId, APath, AStartSeconds, 0);
+      try
+        mp4Cmd.Resolve;
+      except
+        mp4Cmd.Free;
+        raise;
+      end;
+      { further sound streams (other languages, commentary) each get a new track;
+        all of them are decoded into the cache folder first }
+      for streamNo := 1 to mp4Cmd.AudioStreamCount - 1 do
+        mp4Cmd.SetStreamTrack(streamNo, TlNewAudioTrackId);
+      if mp4Cmd.HasVideo then mp4Cmd.VideoTrackId := TlNewVideoTrackId;
+      hasSound := mp4Cmd.HasAudio;
       FCmds.Perform(mp4Cmd);
-      FTlSelClipId := mp4Cmd.CreatedClipId;
-      UpdateStatusProgress(30, 'Adding MP4/AAC clip to Timeline...');
-      WarmClipWaveform(mp4Cmd.SourceId, 30, 70, False);
+      if hasSound then
+      begin
+        FTlSelClipId := mp4Cmd.CreatedClipId;
+        UpdateStatusProgress(30, 'Adding MP4/AAC clip to Timeline...');
+        for streamNo := 0 to mp4Cmd.AudioStreamCount - 1 do
+          WarmClipWaveform(mp4Cmd.AudioStreams[streamNo].SourceId, 30, 70, False);
+      end
+      else
+      begin
+        FTlSelClipId := mp4Cmd.CreatedVideoClipId;
+        UpdateStatusProgress(30, 'Adding video clip to Timeline...');
+      end;
     end
       else
         Exit;
       UpdateStatusProgress(100, 'Import complete: ' + ExtractFileName(APath));
       Result := True;
-      ApplyBaselineTempoOnImport(FTlSelClipId);
+      if hasSound then
+        ApplyBaselineTempoOnImport(FTlSelClipId);
       RefreshTimelineTab;
     except
       on E: Exception do

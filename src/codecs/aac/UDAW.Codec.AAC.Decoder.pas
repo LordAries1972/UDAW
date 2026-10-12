@@ -91,6 +91,7 @@ type
     FPulsePresent: array[0..1] of Boolean;
     FPulse: array[0..1] of TAacPulseData;
     FNoiseState: Cardinal;
+    FSbrSeen: Boolean;
 
     procedure ResetChannelState;
     function NextNoise: Double;
@@ -125,6 +126,9 @@ type
     property FrameLength: Integer read FFrameLen;
     property Config: TAacAudioConfig read FCfg;
     property HaveTables: Boolean read FHaveTables;
+    { an SBR extension payload was met in a fill element: the stream carries
+      high-band data this decoder does not reconstruct }
+    property SbrSeen: Boolean read FSbrSeen;
   end;
 
 implementation
@@ -211,14 +215,20 @@ end;
 
 { ============================ helpers ========================== }
 
+{ The generator's arithmetic wraps modulo 2^32 on purpose - overflow checking
+  would turn that into an exception (and the frame into silence). }
+{$IFOPT Q+}{$DEFINE UDAW_AAC_RESTORE_Q}{$Q-}{$ENDIF}
+{$IFOPT R+}{$DEFINE UDAW_AAC_RESTORE_R}{$R-}{$ENDIF}
 function TAACDecoder.NextNoise: Double;
 begin
-  { xorshift32, mapped to roughly unit-variance white }
-  FNoiseState := FNoiseState xor (FNoiseState shl 13);
-  FNoiseState := FNoiseState xor (FNoiseState shr 17);
-  FNoiseState := FNoiseState xor (FNoiseState shl 5);
-  Result := (Integer(FNoiseState) / 2147483648.0);
+  { 32-bit linear congruential generator (the sequence is not normative; this
+    one is the common reference choice, so output can be compared sample for
+    sample with reference decoders) }
+  FNoiseState := FNoiseState * 1664525 + 1013904223;
+  Result := Integer(FNoiseState);
 end;
+{$IFDEF UDAW_AAC_RESTORE_Q}{$Q+}{$UNDEF UDAW_AAC_RESTORE_Q}{$ENDIF}
+{$IFDEF UDAW_AAC_RESTORE_R}{$R+}{$UNDEF UDAW_AAC_RESTORE_R}{$ENDIF}
 
 function TAACDecoder.SwbTable(c: Integer): TArray<Integer>;
 begin
@@ -352,17 +362,12 @@ begin
             end
             else
               ne := ne + (AacHCB[0].Decode(ABr) - 60);
-            { same 0..255 bound as the ordinary scalefactor path below - ne
-              was never clamped here, so any drift (real content, or a
-              residual bitstream desync) fed an unbounded exponent straight
-              into GainScale2 = 2^(0.25*e), i.e. an uncapped gain rather than
-              a merely-wrong one. That is a far more likely source of a
-              large, localised amplitude spike than a subtle windowing
-              issue. }
-            if ne < 0 then ne := 0;
+            { The noise energy exponent has no 100-step bias (unlike a
+              scalefactor), so it sits 100 above the SCALE_CONST-relative
+              scalefactor exponent; stored as the band's total-energy gain. }
+            if ne < -255 then ne := -255;
             if ne > 255 then ne := 255;
-            { store the noise energy as a linear gain in FScf, tagged by cb }
-            FScf[c, g, sfb] := GainScale2(ne - SCALE_CONST);
+            FScf[c, g, sfb] := GainScale2(ne - SCALE_CONST + 100);
           end;
       else
         begin
@@ -397,7 +402,8 @@ end;
 procedure TAACDecoder.ReadTNSData(var ABr: TAacBitReader; c: Integer);
 var
   w, filt, o, nFiltBits, lenBits, ordBits, startBit, compress: Integer;
-  coefBits, nWin, k, raw: Integer;
+  coefBits, nWin, k, raw, resBits: Integer;
+  iqfac, iqfacM, pc: Double;
 begin
   FTns[c].Present := True;
   nWin := FNumWindows[c];
@@ -427,15 +433,21 @@ begin
       begin
         FTns[c].Dir[w, filt] := ABr.ReadBit;
         compress := ABr.ReadBit;
-        coefBits := 3 + FTns[c].CoefRes[w] - compress;
-        if coefBits < 2 then coefBits := 2;
+        resBits := 3 + FTns[c].CoefRes[w];
+        coefBits := resBits - compress;
         startBit := (1 shl (coefBits - 1));
+        { ISO 14496-3 4.6.9.3: the quantiser is asymmetric around zero (step
+          (2^(resBits-1) -/+ 0.5) / (pi/2)); a compressed coefficient is stored
+          one bit narrower and with its sign inverted. The stored value is the
+          reflection (PARCOR) coefficient itself. }
+        iqfac := ((1 shl (resBits - 1)) - 0.5) / (Pi / 2);
+        iqfacM := ((1 shl (resBits - 1)) + 0.5) / (Pi / 2);
         for k := 0 to o - 1 do
         begin
           raw := Integer(ABr.ReadBits(coefBits));
           if raw >= startBit then raw := raw - 2 * startBit;
-          { normalised quantised parcor coef in [-1,1) (step-up applies sin) }
-          FTns[c].Coef[w, filt, k] := raw / startBit;
+          if raw >= 0 then pc := Sin(raw / iqfac) else pc := Sin(raw / iqfacM);
+          FTns[c].Coef[w, filt, k] := pc;
         end;
       end;
       if ABr.Overrun then Exit;
@@ -678,7 +690,8 @@ begin
         end;
         if scale > 0 then
         begin
-          scale := energy / Sqrt(scale / Max(1, ce - cs));
+          { total band energy = gain^2 (4.6.13), not per-coefficient }
+          scale := energy / Sqrt(scale);
           for i := cs to ce - 1 do
           begin
             if FWinSeq[c] = WS_EIGHT_SHORT then
@@ -701,11 +714,9 @@ procedure TAACDecoder.ApplyTNS(c: Integer; AInverse: Boolean);
 var
   swb: TArray<Integer>;
   w, filt, o, i, m, start, stop, size, inc_, idx: Integer;
-  nWin, tnsMaxBands, coefBaseIdx: Integer;
-  lpc: array[0..31] of Double;
+  nWin, tnsMaxBands, coefBaseIdx, maxBand, numSwb, top, bottom: Integer;
   b, tmp: array[0..31] of Double;
-  y, boundVal: Double;
-  j: Integer;
+  y: Double;
 begin
   if not FTns[c].Present then Exit;
   swb := SwbTable(c);
@@ -720,62 +731,38 @@ begin
     tnsMaxBands := TnsMaxBandsLong(FSrIndex);
   end;
 
-  { One bound for the WHOLE call, from the true pre-TNS spectrum - not
-    recomputed per filter.  Multiple TNS filters are applied in cascade (one
-    feeding the next); a per-filter bound sees the PREVIOUS filter's already
-    -amplified output as its new "normal" baseline and lets each stage
-    re-multiply by the same margin, compounding rather than bounding
-    (measured: two cascaded filters each individually capped at 32x their
-    OWN already-amplified input still produced ~630x overall against the
-    true pre-TNS peak; one global 8x bound - loose enough that no normal
-    TNS use ever touches it - brought the worst measured real-world case
-    from a ~170x blowup down to a normal, unclipped level). }
-  boundVal := 0;
-  for j := 0 to 1023 do
-    if Abs(FSpec[c, j]) > boundVal then boundVal := Abs(FSpec[c, j]);
-  boundVal := Max(boundVal * 8.0, 1.0);
+  maxBand := Min(tnsMaxBands, FMaxSfb[c]);
+  numSwb := Length(swb) - 1;
 
   for w := 0 to nWin - 1 do
   begin
+    { filters stack downward from the top scalefactor band (4.6.9.3) }
+    bottom := numSwb;
     for filt := 0 to FTns[c].NFilt[w] - 1 do
     begin
       if filt > 2 then Break;
+      top := bottom;
+      bottom := Max(top - FTns[c].Len[w, filt], 0);
       o := FTns[c].Order[w, filt];
       if o = 0 then Continue;
       if o > 31 then o := 31;
 
-      { convert quantised parcor -> LPC (simple Levinson-style step-up) }
-      for i := 0 to o - 1 do
-        lpc[i] := Sin(FTns[c].Coef[w, filt, i] * (Pi / 2));   // parcor in [-1,1]
-      { step-up recursion to direct-form a[] }
+      { reflection coefficients -> direct-form LPC (step-up recursion) }
       FillChar(b, SizeOf(b), 0);
       b[0] := 1.0;
       for m := 1 to o do
       begin
         for i := 1 to m - 1 do
-          tmp[i] := b[i] + lpc[m - 1] * b[m - i];
+          tmp[i] := b[i] + FTns[c].Coef[w, filt, m - 1] * b[m - i];
         for i := 1 to m - 1 do
           b[i] := tmp[i];
-        b[m] := lpc[m - 1];
+        b[m] := FTns[c].Coef[w, filt, m - 1];
       end;
 
-      { region for this filter }
-      m := FTns[c].Len[w, filt];
-      if m > tnsMaxBands then m := tnsMaxBands;
-      if FWinSeq[c] = WS_EIGHT_SHORT then
-      begin
-        coefBaseIdx := w * FShortLen;
-        if m >= Length(swb) then m := Length(swb) - 1;
-        stop := swb[Min(m, Length(swb) - 1)];
-        start := 0;
-      end
-      else
-      begin
-        coefBaseIdx := 0;
-        if m >= Length(swb) then m := Length(swb) - 1;
-        stop := swb[m];
-        start := 0;
-      end;
+      if FWinSeq[c] = WS_EIGHT_SHORT then coefBaseIdx := w * FShortLen
+      else coefBaseIdx := 0;
+      start := swb[Min(bottom, maxBand)];
+      stop := swb[Min(top, maxBand)];
       size := stop - start;
       if size <= 0 then Continue;
 
@@ -788,34 +775,14 @@ begin
         inc_ := 1; idx := coefBaseIdx + start;
       end;
 
-      { all-pole (synthesis) filter over the region.  Reflection coefficients
-        right at the quantiser's boundary (+-1, which the bitstream can
-        legally send - real encoders do, for sharp transients) put a pole
-        exactly on the unit circle.  The step-up recursion above is
-        textbook-correct and such a filter IS technically BIBO-stable (poles
-        strictly inside, if only barely), but a filter that resonant, driven
-        continuously over a hundred-plus coefficients rather than hit with a
-        single impulse, can still ring up to an enormous peak gain -
-        measured: an 8th + 4th order cascade like this turned an
-        ~11-magnitude dequantised coefficient into ~80000, which then
-        poisoned the overlap-add carry into every following frame until it
-        decayed.  TNS is a time-domain *reshaping* tool - it is never
-        supposed to multiply total energy by orders of magnitude - so bound
-        its output against boundVal (the true pre-TNS spectrum's peak,
-        computed once above), exactly as any production LPC/TNS decoder
-        must: this only ever engages for a pathological filter, and is a
-        no-op for the overwhelming majority of frames where TNS behaves as
-        intended. }
+      { all-pole synthesis filter over the region; history starts at zero }
       for i := 0 to size - 1 do
       begin
         y := FSpec[c, idx];
         for m := 1 to o do
-          if ((i - m) >= 0) and (idx - inc_ * m >= 0) and (idx - inc_ * m < 1024) then
+          if i - m >= 0 then
             y := y - b[m] * FSpec[c, idx - inc_ * m];
-        if y > boundVal then y := boundVal
-        else if y < -boundVal then y := -boundVal;
-        if (idx >= 0) and (idx < 1024) then
-          FSpec[c, idx] := y;
+        FSpec[c, idx] := y;
         idx := idx + inc_;
       end;
     end;
@@ -842,7 +809,8 @@ begin
     begin
       if (FMsMask = 2) or ((FMsMask = 1) and FMsUsed[g, sfb]) then
       begin
-        if (FSfbCb[0, g, sfb] in [HCB_INTENSITY, HCB_INTENSITY2]) then Continue;
+        { M/S never touches a band either channel codes as noise or intensity }
+        if (FSfbCb[0, g, sfb] >= HCB_NOISE) or (FSfbCb[1, g, sfb] >= HCB_NOISE) then Continue;
         if sfb + 1 >= Length(swb) then Break;
         cs := swb[sfb]; ce := swb[sfb + 1];
         for win := 0 to gWinLen - 1 do
@@ -882,7 +850,8 @@ begin
       if sfb + 1 >= Length(swb) then Break;
       cs := swb[sfb]; ce := swb[sfb + 1];
       if cb = HCB_INTENSITY then sign := 1.0 else sign := -1.0;
-      if (FMsMask = 1) and FMsUsed[g, sfb] then sign := -sign;
+      { ms_mask_present 2 means every band is M/S: the phase flips there too }
+      if (FMsMask = 2) or ((FMsMask = 1) and FMsUsed[g, sfb]) then sign := -sign;
       scale := sign * Power(0.5, FIsPos[1, g, sfb] * 0.25);
       for win := 0 to gWinLen - 1 do
         for i := cs to ce - 1 do
@@ -1096,7 +1065,7 @@ begin
       timeLong[FFrameLen + i] := timeLong[FFrameLen + i] * winR[FFrameLen + i];
 
     for i := 0 to FFrameLen - 1 do
-      AOut[AOutChannel][i] := ClampSample(timeLong[i] + st^.Overlap[i]);
+      AOut[AOutChannel][i] := timeLong[i] + st^.Overlap[i];
     for i := 0 to FFrameLen - 1 do
       st^.Overlap[i] := timeLong[FFrameLen + i];
   end
@@ -1111,8 +1080,14 @@ begin
       for i := 0 to FShortLen - 1 do
         shortIn[i] := FSpec[c, w * FShortLen + i];
       IMDCT(shortIn, shortN, shortOut);
-      for i := 0 to FShortLen - 1 do
-        shortOut[i] := shortOut[i] * winL[i];
+      { only the first short window overlaps the previous frame's shape; the
+        others follow this frame's own previous short window (same shape) }
+      if w = 0 then
+        for i := 0 to FShortLen - 1 do
+          shortOut[i] := shortOut[i] * winL[i]
+      else
+        for i := 0 to FShortLen - 1 do
+          shortOut[i] := shortOut[i] * winR[i];
       for i := 0 to FShortLen - 1 do
         shortOut[FShortLen + i] := shortOut[FShortLen + i] * winR[FShortLen - 1 - i];
       base := (FFrameLen - FShortLen) div 2 + w * FShortLen;   // first short centred
@@ -1121,7 +1096,7 @@ begin
           acc[base + i] := acc[base + i] + shortOut[i];
     end;
     for i := 0 to FFrameLen - 1 do
-      AOut[AOutChannel][i] := ClampSample(acc[i] + st^.Overlap[i]);
+      AOut[AOutChannel][i] := acc[i] + st^.Overlap[i];
     for i := 0 to FFrameLen - 1 do
       st^.Overlap[i] := acc[FFrameLen + i];
   end;
@@ -1273,7 +1248,13 @@ begin
             cnt := cnt + Integer(ABr.ReadBits(8)) - 1;
           { extension_payload: for HE-AAC this carries the SBR data; the SBR
             pass consumes it separately.  Here we just skip. }
-          ABr.SkipBits(cnt * 8);
+          if cnt > 0 then
+          begin
+            { extension_type 13 / 14 = SBR data (without / with CRC) }
+            i := ABr.ReadBits(4);
+            if (i = 13) or (i = 14) then FSbrSeen := True;
+            ABr.SkipBits(cnt * 8 - 4);
+          end;
         end;
 
       ID_END:

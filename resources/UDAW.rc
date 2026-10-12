@@ -8,8 +8,8 @@ MAINICON ICON "udaw.ico"
 #define VFT_APP        0x00000001L
 
 1 VERSIONINFO
- FILEVERSION 1,0,0,309
- PRODUCTVERSION 1,0,0,309
+ FILEVERSION 1,0,0,328
+ PRODUCTVERSION 1,0,0,328
  FILEOS VOS__WINDOWS32
  FILETYPE VFT_APP
 BEGIN
@@ -19,11 +19,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName",      "Ultimanium\0"
       VALUE "FileDescription",  "Ultimanium Audio Studio (UDAW)\0"
-      VALUE "FileVersion",      "1.0.309\0"
+      VALUE "FileVersion",      "1.0.328\0"
       VALUE "InternalName",     "UDAW\0"
       VALUE "OriginalFilename", "UDAW.exe\0"
       VALUE "ProductName",      "Ultimanium Audio Studio\0"
-      VALUE "ProductVersion",   "1.0.309\0"
+      VALUE "ProductVersion",   "1.0.328\0"
     END
   END
   BLOCK "VarFileInfo"

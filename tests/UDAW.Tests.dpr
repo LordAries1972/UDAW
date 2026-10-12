@@ -159,6 +159,9 @@ uses
   Tests.Phase5 in 'Tests.Phase5.pas',
   Tests.Phase6 in 'Tests.Phase6.pas',
   Tests.TimelineExport in 'Tests.TimelineExport.pas',
+  Tests.VideoExport in 'Tests.VideoExport.pas',
+  Tests.VideoEffects in 'Tests.VideoEffects.pas',
+  Tests.MediaDecode in 'Tests.MediaDecode.pas',
   Tests.Phase7 in 'Tests.Phase7.pas',
   Tests.Phase8 in 'Tests.Phase8.pas',
   Tests.Phase9 in 'Tests.Phase9.pas',
@@ -205,6 +208,8 @@ begin
     RegisterPhase6Tests;
     RegisterPhase7Tests;
     RegisterTimelineExportTests;
+    RegisterVideoExportTests;
+    RegisterVideoEffectsTests;
     RegisterPhase8Tests;
     RegisterPhase9Tests;
     RegisterPhase10Tests;
@@ -216,6 +221,7 @@ begin
     RegisterPhaseFLACTests;
     RegisterPhase16Tests;
     RegisterPhase16bTests;
+    RegisterMediaDecodeTests;
     RegisterPhase17Tests;
     RegisterPhase18Tests;
     RegisterPhase19Tests;

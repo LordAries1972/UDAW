@@ -9,16 +9,24 @@ unit UDAW.DSP.Distortion;
   blends the shaped signal with the dry one (parallel / New-York style). A
   gentle DC-safe design: tanh and the folder are odd functions, hard-clip is
   symmetric, the crusher's quantiser is mid-rise. Per-channel, no allocation
-  after Configure. }
+  after Configure.
+
+  Quality: the smooth shapers (saturation, fold-back, tube, soft clip) run 2x
+  oversampled through 4th-order Butterworth anti-alias filters so the harmonics
+  they generate do not fold back as inharmonic aliasing. Tube is an
+  asymmetric (even-harmonic) curve with a DC blocker; soft clip is a smooth
+  cubic limiter. Hard clip and the bit-crusher stay un-oversampled on purpose
+  (hard clip must pin to the ceiling; the crusher's aliasing is its sound). }
 
 interface
 
 uses
   SysUtils, Math,
-  UDAW.Audio.Types, UDAW.DSP.Math;
+  UDAW.Audio.Types, UDAW.DSP.Math, UDAW.DSP.Filters;
 
 type
-  TDistMode = (distSaturation, distHardClip, distFoldback, distBitCrush);
+  TDistMode = (distSaturation, distHardClip, distFoldback, distBitCrush,
+    distTube, distSoftClip);
 
   TDistortionProcessor = class
   private
@@ -32,7 +40,13 @@ type
     FDownsample: Integer;    // crusher sample-and-hold factor (1..64)
     FHold: array of Double;  // [channel] last held sample
     FHoldCount: Integer;
+    FUp: array of array[0..1] of TBiquad;   // [channel] 2x anti-image filters
+    FDn: array of array[0..1] of TBiquad;   // [channel] 2x anti-alias filters
+    FDcX, FDcY: array of Double;            // [channel] DC blocker state
+    FDcR: Double;
     function Shape(AX: Double): Double;
+    function IsOversampled: Boolean;
+    function ShapeOversampled(ACh: Integer; AX: Double): Double;
   public
     constructor Create;
     procedure Configure(ASampleRate, AChannels: Integer);
@@ -54,6 +68,8 @@ begin
     distHardClip: Result := 'hardclip';
     distFoldback: Result := 'foldback';
     distBitCrush: Result := 'bitcrush';
+    distTube:     Result := 'tube';
+    distSoftClip: Result := 'softclip';
   else
     Result := 'saturation';
   end;
@@ -88,18 +104,45 @@ begin
 end;
 
 procedure TDistortionProcessor.Configure(ASampleRate, AChannels: Integer);
+var
+  ch, k: Integer;
 begin
   if ASampleRate > 0 then FSampleRate := ASampleRate;
   if AChannels > 0 then FChannels := AChannels;
   SetLength(FHold, FChannels);
+  SetLength(FUp, FChannels);
+  SetLength(FDn, FChannels);
+  SetLength(FDcX, FChannels);
+  SetLength(FDcY, FChannels);
+  FDcR := 1.0 - 2.0 * DSP_PI * 10.0 / FSampleRate;     // ~10 Hz high-pass
+  for ch := 0 to FChannels - 1 do
+    for k := 0 to 1 do
+    begin
+      FUp[ch][k].Init(FSampleRate * 2.0);
+      FDn[ch][k].Init(FSampleRate * 2.0);
+      { 4th-order Butterworth = two sections, Q 0.5412 and 1.3066 }
+      FUp[ch][k].SetParams(bqLowpass, FSampleRate * 0.45, IfThen(k = 0, 0.5412, 1.3066));
+      FDn[ch][k].SetParams(bqLowpass, FSampleRate * 0.45, IfThen(k = 0, 0.5412, 1.3066));
+    end;
   Reset;
 end;
 
 procedure TDistortionProcessor.Reset;
 var
-  ch: Integer;
+  ch, k: Integer;
 begin
   for ch := 0 to High(FHold) do FHold[ch] := 0;
+  for ch := 0 to High(FUp) do
+    for k := 0 to 1 do
+    begin
+      FUp[ch][k].Reset;
+      FDn[ch][k].Reset;
+    end;
+  for ch := 0 to High(FDcX) do
+  begin
+    FDcX[ch] := 0;
+    FDcY[ch] := 0;
+  end;
   FHoldCount := 0;
 end;
 
@@ -128,6 +171,18 @@ begin
         else if d < -1.0 then Result := -1.0
         else Result := d;
       end;
+    distTube:
+      begin
+        { asymmetric: full-range positive half, softer-ceiling negative half }
+        if d >= 0 then Result := Tanh(d)
+        else Result := 0.85 * Tanh(d / 0.85);
+      end;
+    distSoftClip:
+      begin
+        { smooth cubic limiter, slope 0 at the ceiling }
+        if d > 1.0 then d := 1.0 else if d < -1.0 then d := -1.0;
+        Result := 1.5 * (d - d * d * d / 3.0);
+      end;
     distFoldback:
       begin
         folded := d;
@@ -148,6 +203,24 @@ begin
   else
     Result := d;
   end;
+end;
+
+function TDistortionProcessor.IsOversampled: Boolean;
+begin
+  Result := FMode in [distSaturation, distFoldback, distTube, distSoftClip];
+end;
+
+{ 2x oversampled shaping: zero-stuff + anti-image, shape both samples,
+  anti-alias, keep the second (decimate). }
+function TDistortionProcessor.ShapeOversampled(ACh: Integer; AX: Double): Double;
+var
+  a, b: Double;
+begin
+  a := FUp[ACh][1].ProcessSample(FUp[ACh][0].ProcessSample(Single(2.0 * AX)));
+  b := FUp[ACh][1].ProcessSample(FUp[ACh][0].ProcessSample(0.0));
+  FDn[ACh][1].ProcessSample(FDn[ACh][0].ProcessSample(Single(Shape(a))));
+  Result := FDn[ACh][1].ProcessSample(FDn[ACh][0].ProcessSample(Single(Shape(b))));
+  if Result > 1.0 then Result := 1.0 else if Result < -1.0 then Result := -1.0;
 end;
 
 procedure TDistortionProcessor.ProcessBlock(const AIn, AOut: array of PSingle;
@@ -176,7 +249,17 @@ begin
     begin
       if refresh then
       begin
-        wetV := Shape(AIn[ch][i]) * FTrim;
+        if IsOversampled then wetV := ShapeOversampled(ch, AIn[ch][i])
+        else wetV := Shape(AIn[ch][i]);
+        if FMode = distTube then
+        begin
+          { remove the DC the asymmetric curve introduces }
+          s := wetV - FDcX[ch] + FDcR * FDcY[ch];
+          FDcX[ch] := wetV;
+          FDcY[ch] := FlushDenorm(Single(s));
+          wetV := s;
+        end;
+        wetV := wetV * FTrim;
         FHold[ch] := wetV;
       end
       else

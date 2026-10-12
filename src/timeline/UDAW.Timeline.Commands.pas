@@ -358,6 +358,37 @@ type
     function Description: string; override;
   end;
 
+  { Lays a video effect / transition over a span of a video track. }
+  TAddVideoEffectCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FTrackId: Integer;
+    FKind, FName, FParams: string;
+    FStart, FLength, FPivot: Double;
+    FCreatedId: Integer;
+  public
+    constructor Create(ADoc: TProjectDocument; ATrackId: Integer; const AKind, AName: string;
+      AStart, ALength, APivot: Double; const AParams: string);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Redo: Boolean; override;
+    function Description: string; override;
+    property CreatedId: Integer read FCreatedId;
+  end;
+
+  TRemoveVideoEffectCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FId, FTrackId: Integer;
+    FKind, FName, FParams: string;
+    FStart, FLength, FPivot: Double;
+  public
+    constructor Create(ADoc: TProjectDocument; AEffectId: Integer);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+  end;
+
   { Sets a track's title band text (TTimelineTrack.Title). }
   TSetTimelineTrackTitleCommand = class(TDAWCommand)
   private
@@ -1473,6 +1504,88 @@ end;
 function TRemoveTimelineRegionCommand.Description: string;
 begin
   Result := Format('Remove region "%s"', [FName]);
+end;
+
+{ ================= TAddVideoEffectCommand ================= }
+
+constructor TAddVideoEffectCommand.Create(ADoc: TProjectDocument; ATrackId: Integer;
+  const AKind, AName: string; AStart, ALength, APivot: Double; const AParams: string);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FTrackId := ATrackId;
+  FKind := AKind;
+  FName := AName;
+  FStart := AStart;
+  FLength := ALength;
+  FPivot := APivot;
+  FParams := AParams;
+  FCreatedId := -1;
+end;
+
+function TAddVideoEffectCommand.Execute: Boolean;
+begin
+  FCreatedId := FDoc.Timeline.AddVideoEffect(FTrackId, FKind, FName, FStart, FLength,
+    FPivot, FParams).Id;
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TAddVideoEffectCommand.Undo;
+begin
+  FDoc.Timeline.RemoveVideoEffect(FCreatedId);
+  FDoc.Touch;
+end;
+
+function TAddVideoEffectCommand.Redo: Boolean;
+begin
+  FDoc.Timeline.AddVideoEffectWithId(FCreatedId, FTrackId, FKind, FName, FStart, FLength,
+    FPivot, FParams);
+  FDoc.Touch;
+  Result := True;
+end;
+
+function TAddVideoEffectCommand.Description: string;
+begin
+  Result := Format('Add video effect "%s"', [FName]);
+end;
+
+{ ================= TRemoveVideoEffectCommand ================= }
+
+constructor TRemoveVideoEffectCommand.Create(ADoc: TProjectDocument; AEffectId: Integer);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FId := AEffectId;
+end;
+
+function TRemoveVideoEffectCommand.Execute: Boolean;
+var
+  r: TVideoEffectRegion;
+begin
+  r := FDoc.Timeline.VideoEffectById(FId);
+  Result := r <> nil;
+  if not Result then Exit;
+  FTrackId := r.TrackId;
+  FKind := r.Kind;
+  FName := r.Name;
+  FParams := r.Params;
+  FStart := r.StartSeconds;
+  FLength := r.LengthSeconds;
+  FPivot := r.PivotSeconds;
+  FDoc.Timeline.RemoveVideoEffect(FId);
+  FDoc.Touch;
+end;
+
+procedure TRemoveVideoEffectCommand.Undo;
+begin
+  FDoc.Timeline.AddVideoEffectWithId(FId, FTrackId, FKind, FName, FStart, FLength, FPivot, FParams);
+  FDoc.Touch;
+end;
+
+function TRemoveVideoEffectCommand.Description: string;
+begin
+  Result := Format('Remove video effect "%s"', [FName]);
 end;
 
 { ================= TSetTimelineTrackTitleCommand ================= }

@@ -75,7 +75,7 @@ implementation
 
 function NextRand(var ASeed: Cardinal): Double;
 begin
-  ASeed := ASeed * 1664525 + 1013904223;
+  ASeed := Cardinal((UInt64(ASeed) * 1664525 + 1013904223) and $FFFFFFFF);
   Result := (ASeed shr 8) / 16777216.0;
 end;
 

@@ -66,7 +66,7 @@ const
     compile. Used only as a fallback when the running binary has no readable
     version resource yet (e.g. a quick FPC/debug build without a compiled-in
     .res), so the splash screen never shows "build 0". }
-  UDAW_FALLBACK_BUILD_NUMBER = 309;
+  UDAW_FALLBACK_BUILD_NUMBER = 328;
 
 {$IFDEF UDAW_WINDOWS}
 

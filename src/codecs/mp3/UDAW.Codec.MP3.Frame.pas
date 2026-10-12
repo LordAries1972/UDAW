@@ -482,6 +482,15 @@ begin
   if ALength < 4 then Exit;
   p := PByte(@AData);
 
+  { A RIFF/WAVE container is never an MP3: its PCM payload (notably a 24-bit
+    fade-in starting from silence, runs of $FF/$00) can imitate two
+    consecutive MPEG sync words inside the 8 KB scan below, which sent a valid
+    effect-render WAV down the MP3 decoder and left its clip a flat line. }
+  if (ALength >= 12) and (p[0] = Ord('R')) and (p[1] = Ord('I')) and
+     (p[2] = Ord('F')) and (p[3] = Ord('F')) and (p[8] = Ord('W')) and
+     (p[9] = Ord('A')) and (p[10] = Ord('V')) and (p[11] = Ord('E')) then
+    Exit;
+
   { Leading ID3v2 tag? "ID3" + ver + flags + 4 syncsafe size bytes. }
   if (ALength >= 10) and (p[0] = Ord('I')) and (p[1] = Ord('D')) and (p[2] = Ord('3'))
      and (p[3] < $FF) and (p[4] < $FF)

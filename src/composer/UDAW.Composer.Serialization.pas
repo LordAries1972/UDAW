@@ -306,7 +306,7 @@ begin
         Tok(line); // 'CHAN'
         trk.MidiChannel := I32(Tok(line));
         if SameText(Tok(line), 'LOCKED') then
-          trk.Locked := I32(line) <> 0;
+          trk.Locked := I32(Tok(line)) <> 0;
         if SameText(Tok(line), 'REQMIDI') then
           trk.RequireMidi := I32(line) <> 0;
         spec.AddTrack(trk);

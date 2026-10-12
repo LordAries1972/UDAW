@@ -40,7 +40,7 @@ const
     simply lacks it and HeaderWidth reads back as its default.
     v4 adds the TRACK line's "title=" param (per-channel title-band text);
     an older file simply lacks it and Title reads back empty. }
-  TIMELINE_FILE_VERSION = 4;
+  TIMELINE_FILE_VERSION = 5;   // v5 adds VFX (video effect regions)
   TIMELINE_FILE_EXT     = '.udawtl';
 
 function TimelineToString(ATimeline: TTimeline): string;
@@ -305,6 +305,7 @@ var
   c: TTimelineClip;
   m: TTimelineMarker;
   rg: TTimelineRegion;
+  vfx: TVideoEffectRegion;
 begin
   sb := TStringBuilder.Create;
   try
@@ -368,6 +369,15 @@ begin
         .Append(QuoteStr(rg.Name)).AppendLine;
     end;
 
+    for i := 0 to ATimeline.VideoEffectCount - 1 do
+    begin
+      vfx := ATimeline.GetVideoEffect(i);
+      sb.Append('VFX ').Append(vfx.Id).Append(' ').Append(vfx.TrackId).Append(' ')
+        .Append(F(vfx.StartSeconds)).Append(' ').Append(F(vfx.LengthSeconds)).Append(' ')
+        .Append(F(vfx.PivotSeconds)).Append(' ').Append(QuoteStr(vfx.Kind)).Append(' ')
+        .Append(QuoteStr(vfx.Name)).Append(' ').Append(QuoteStr(vfx.Params)).AppendLine;
+    end;
+
     Result := sb.ToString;
   finally
     sb.Free;
@@ -398,6 +408,9 @@ var
   mSecs, rStart, rLen: Double;
   rColor: Integer;
   nm: string;
+  vId, vTrack: Integer;
+  vStart, vLen, vPivot: Double;
+  vKind, vName, vParams: string;
 begin
   ATimeline.Clear;
   lines := TStringList.Create;
@@ -523,6 +536,18 @@ begin
         rColor := IntTok(line, 'REGION color');
         nm := TakeQuoted(line);
         ATimeline.AddRegionWithId(rId, nm, rStart, rLen).Color := rColor;
+      end
+      else if SameText(tok, 'VFX') then
+      begin
+        vId := IntTok(line, 'VFX id');
+        vTrack := IntTok(line, 'VFX track');
+        vStart := FloatTok(line, 'VFX start');
+        vLen := FloatTok(line, 'VFX length');
+        vPivot := FloatTok(line, 'VFX pivot');
+        vKind := TakeQuoted(line);
+        vName := TakeQuoted(line);
+        vParams := TakeQuoted(line);
+        ATimeline.AddVideoEffectWithId(vId, vTrack, vKind, vName, vStart, vLen, vPivot, vParams);
       end
       else
         RaiseUDAWFmt(errConfig, SUBSYS, 'timeline parse: unexpected line "%s"', [raw]);

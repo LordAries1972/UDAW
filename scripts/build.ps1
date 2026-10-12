@@ -3,7 +3,7 @@
 
   Usage:
     powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-Config Debug|Release] [-OutputDir <path>] [-Clean]
-    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Help   (or -h: lists every use case)
+    powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Help   (or -h / --help: lists every use case)
 
   Requires Delphi 12 (Studio 23.0). The script locates the command-line
   compiler via $env:BDS, then the default install path.
@@ -30,7 +30,7 @@ build.ps1 - compile the UDAW Windows (Delphi 12) executable
 
 USAGE
     powershell -ExecutionPolicy Bypass -File scripts\build.ps1 [-Config <Debug|Release>]
-        [-OutputDir <path>] [-Clean] [-Help | -h]
+        [-OutputDir <path>] [-Clean] [-Help | -h | --help]
 
 OPTIONS
     -Config <Debug|Release>
@@ -53,7 +53,7 @@ OPTIONS
         because it also discards dcc64's incremental-compile cache, turning
         every build into a full rebuild.
 
-    -Help, -h
+    -Help, -h, --help
         Shows this text and exits immediately - no BDS lookup, no
         build-number bump, no compile, no packaging.
 
@@ -97,6 +97,7 @@ USE CASES
     8. Show this help
          scripts\build.ps1 -Help
          scripts\build.ps1 -h
+         scripts\build.ps1 --help
 
     RELATED SCRIPTS (not options of build.ps1)
          scripts\clean.ps1            wipe build\bin and build\dcu only

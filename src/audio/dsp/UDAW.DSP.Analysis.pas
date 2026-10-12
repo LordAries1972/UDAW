@@ -245,8 +245,9 @@ end;
 function DetectPitchHz(const AMono: TAudioSampleArray; ASampleRate: Integer): Double;
 var
   minLag, maxLag, lag, n, i, startPos: Integer;
-  acc, energy0, bestVal: Double;
+  acc, energy0, bestVal, y1, y2, y3, den, refined: Double;
   bestLag: Integer;
+  corr: TArray<Double>;
 begin
   Result := 0;
   n := 4096;
@@ -266,12 +267,14 @@ begin
   if energy0 <= 1.0E-12 then Exit;
 
   bestVal := 0; bestLag := 0;
+  SetLength(corr, maxLag + 2);
   for lag := minLag to maxLag do
   begin
     acc := 0;
     for i := 0 to n - lag - 1 do
       acc := acc + Double(AMono[startPos + i]) * Double(AMono[startPos + i + lag]);
     acc := acc / energy0;
+    corr[lag] := acc;
     if acc > bestVal then
     begin
       bestVal := acc;
@@ -280,7 +283,18 @@ begin
   end;
 
   if (bestLag > 0) and (bestVal >= PITCH_CONFIDENCE_THRESHOLD) then
-    Result := ASampleRate / bestLag;
+  begin
+    { parabolic interpolation of the autocorrelation peak: a whole-sample lag
+      is ~10 cents coarse at 440 Hz, which matters for pitch correction }
+    refined := bestLag;
+    if (bestLag > minLag) and (bestLag < maxLag) then
+    begin
+      y1 := corr[bestLag - 1]; y2 := corr[bestLag]; y3 := corr[bestLag + 1];
+      den := y1 - 2.0 * y2 + y3;
+      if den < -1.0E-12 then refined := bestLag + 0.5 * (y1 - y3) / den;
+    end;
+    Result := ASampleRate / refined;
+  end;
 end;
 
 { ---------------- BPM: cluster inter-onset intervals into a 60-180 BPM range --- }

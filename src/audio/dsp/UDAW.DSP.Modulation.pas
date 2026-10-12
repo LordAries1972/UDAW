@@ -13,6 +13,12 @@ unit UDAW.DSP.Modulation;
   constant-power pan position with the channels in anti-phase. A stereo LFO
   phase offset widens chorus / flanger / auto-pan.
 
+  Quality: delay taps use 4-point Hermite interpolation (no linear-interp
+  HF droop / zipper), chorus is a 3-voice ensemble with voices 120 degrees
+  apart and a wet high-cut for an analogue-style shimmer, the flanger feedback
+  path is damped, and the phaser sweeps its break frequency exponentially
+  (perceptually even) with an independent per-channel LFO phase.
+
   Delay lines are allocated once in Configure (ceiling MOD_MAX_DELAY_MS). All
   other state is value-type. }
 
@@ -25,6 +31,11 @@ uses
 const
   MOD_MAX_DELAY_MS = 60.0;
   MOD_PHASER_STAGES_MAX = 12;
+  MOD_CHORUS_VOICES = 3;
+  MOD_WET_CUT_HZ = 9000.0;     // chorus wet high-cut
+  MOD_FB_DAMP_HZ = 6000.0;     // flanger feedback damping
+  MOD_PHASER_FMIN = 200.0;
+  MOD_PHASER_RANGE = 20.0;     // fmax/fmin at full depth (200 Hz .. 4 kHz)
 
 type
   TModEffect = (modChorus, modFlanger, modPhaser, modTremolo, modAutoPan);
@@ -44,7 +55,11 @@ type
     FLen: Integer;
     FWrite: Integer;
     FPhase: Double;          // LFO phase, radians
-    FAllpassZ: array of array of Double;   // [channel][stage]
+    FAllpassZ: array of array of Double;   // [channel][stage]; last slot = feedback tap
+    FWetLP: array of Double;     // [channel] chorus wet high-cut state
+    FFbLP: array of Double;      // [channel] flanger feedback damping state
+    FWetCoef: Double;
+    FFbCoef: Double;
     procedure Recalc;
     function BaseDelayMs: Double;
     function SweepMs: Double;
@@ -63,6 +78,17 @@ function ModEffectId(AEffect: TModEffect): string;
 function ModEffectFromId(const AId: string; out AEffect: TModEffect): Boolean;
 
 implementation
+
+{ 4-point, 3rd-order Hermite (Catmull-Rom) interpolation between Y1 and Y2. }
+function Hermite4(AY0, AY1, AY2, AY3, AFrac: Double): Double; inline;
+var
+  c1, c2, c3: Double;
+begin
+  c1 := 0.5 * (AY2 - AY0);
+  c2 := AY0 - 2.5 * AY1 + 2.0 * AY2 - 0.5 * AY3;
+  c3 := 0.5 * (AY3 - AY0) + 1.5 * (AY1 - AY2);
+  Result := ((c3 * AFrac + c2) * AFrac + c1) * AFrac + AY1;
+end;
 
 function ModEffectId(AEffect: TModEffect): string;
 begin
@@ -121,7 +147,11 @@ begin
   end;
   SetLength(FAllpassZ, FChannels);
   for ch := 0 to FChannels - 1 do
-    SetLength(FAllpassZ[ch], MOD_PHASER_STAGES_MAX);
+    SetLength(FAllpassZ[ch], MOD_PHASER_STAGES_MAX + 1);
+  SetLength(FWetLP, FChannels);
+  SetLength(FFbLP, FChannels);
+  FWetCoef := 1.0 - Exp(-2.0 * DSP_PI * MOD_WET_CUT_HZ / FSampleRate);
+  FFbCoef := 1.0 - Exp(-2.0 * DSP_PI * MOD_FB_DAMP_HZ / FSampleRate);
   Recalc;
   Reset;
 end;
@@ -145,6 +175,8 @@ begin
   for ch := 0 to High(FAllpassZ) do
     for i := 0 to High(FAllpassZ[ch]) do
       FAllpassZ[ch][i] := 0;
+  for ch := 0 to High(FWetLP) do FWetLP[ch] := 0;
+  for ch := 0 to High(FFbLP) do FFbLP[ch] := 0;
   FWrite := 0;
   FPhase := 0;
 end;
@@ -175,10 +207,10 @@ end;
 procedure TModulationProcessor.ProcessBlock(const AIn, AOut: array of PSingle;
   AFrames: Integer);
 var
-  i, ch, nc, st, ri0, ri1: Integer;
-  incp, lfo, lfoCh, chOff, dry, wet: Double;
-  delSamp, frac, base, sweep, rd: Double;
-  x, y, ap, g, apf, panPos, gl, gr: Double;
+  i, ch, nc, st, v, nv, i0, i1, i2, i3: Integer;
+  incp, lfo, lfoCh, chOff, dry, wet, voiceOff: Double;
+  delSamp, frac, base, sweep, rd, acc, fHi: Double;
+  x, y, ap, g, apf, tn, panPos, gl, gr: Double;
   tl, tr: Single;
 begin
   nc := Length(AIn);
@@ -189,6 +221,8 @@ begin
   wet := FMix;
   base := BaseDelayMs * 0.001 * FSampleRate;
   sweep := SweepMs * 0.001 * FSampleRate * FDepth;
+  if FEffect = modChorus then nv := MOD_CHORUS_VOICES else nv := 1;
+  fHi := MOD_PHASER_FMIN * Power(MOD_PHASER_RANGE, FDepth);
 
   for i := 0 to AFrames - 1 do
   begin
@@ -219,40 +253,64 @@ begin
 
       modPhaser:
         begin
-          { swept all-pass cascade with feedback }
-          apf := 300.0 + (0.5 + 0.5 * lfo) * FDepth * 3000.0;   // 300 Hz .. ~3.3 kHz
-          g := (1.0 - Tan(DSP_PI * apf / FSampleRate)) / (1.0 + Tan(DSP_PI * apf / FSampleRate));
+          { all-pass cascade, exponential sweep, per-channel LFO phase }
           for ch := 0 to nc - 1 do
           begin
-            x := AIn[ch][i] + FFeedback * FAllpassZ[ch][MOD_PHASER_STAGES_MAX - 1];
+            if ch = 1 then lfoCh := Sin(FPhase + chOff) else lfoCh := lfo;
+            apf := MOD_PHASER_FMIN * Power(fHi / MOD_PHASER_FMIN, 0.5 + 0.5 * lfoCh);
+            if apf > 0.45 * FSampleRate then apf := 0.45 * FSampleRate;
+            tn := Tan(DSP_PI * apf / FSampleRate);
+            g := (1.0 - tn) / (1.0 + tn);
+            x := AIn[ch][i] + FFeedback * FAllpassZ[ch][MOD_PHASER_STAGES_MAX];
             for st := 0 to FStages - 1 do
             begin
               ap := -g * x + FAllpassZ[ch][st];
-              FAllpassZ[ch][st] := Single(FlushDenorm(Single(x + g * ap)));
+              FAllpassZ[ch][st] := FlushDenorm(Single(x + g * ap));
               x := ap;
             end;
-            FAllpassZ[ch][MOD_PHASER_STAGES_MAX - 1] := x;   // feedback tap
+            FAllpassZ[ch][MOD_PHASER_STAGES_MAX] := FlushDenorm(Single(x));   // feedback tap
             AOut[ch][i] := Single(dry * AIn[ch][i] + wet * x);
           end;
         end;
 
     else
-      { chorus / flanger: modulated fractional delay per channel }
+      { chorus (3-voice) / flanger (1-voice): Hermite-interpolated modulated delay }
       begin
         for ch := 0 to nc - 1 do
         begin
-          if (ch = 1) then lfoCh := Sin(FPhase + chOff) else lfoCh := lfo;
-          rd := base + sweep * (0.5 + 0.5 * lfoCh);
-          if rd < 1 then rd := 1;
-          if rd > FLen - 2 then rd := FLen - 2;
-          delSamp := FWrite - rd;
-          while delSamp < 0 do delSamp := delSamp + FLen;
-          ri0 := Trunc(delSamp);
-          frac := delSamp - ri0;
-          ri1 := ri0 + 1;
-          if ri1 >= FLen then ri1 := ri1 - FLen;
-          y := FLine[ch][ri0] * (1.0 - frac) + FLine[ch][ri1] * frac;
-          FLine[ch][FWrite] := Single(FlushDenorm(Single(AIn[ch][i] + FFeedback * y)));
+          acc := 0;
+          for v := 0 to nv - 1 do
+          begin
+            voiceOff := v * 2.0 * DSP_PI / nv;
+            if ch = 1 then lfoCh := Sin(FPhase + chOff + voiceOff)
+            else lfoCh := Sin(FPhase + voiceOff);
+            rd := base * (1.0 + 0.12 * v) + sweep * (0.5 + 0.5 * lfoCh);
+            if rd < 3 then rd := 3;
+            if rd > FLen - 4 then rd := FLen - 4;
+            delSamp := FWrite - rd;
+            while delSamp < 0 do delSamp := delSamp + FLen;
+            i1 := Trunc(delSamp);
+            frac := delSamp - i1;
+            i0 := i1 - 1; if i0 < 0 then i0 := i0 + FLen;
+            i2 := i1 + 1; if i2 >= FLen then i2 := i2 - FLen;
+            i3 := i2 + 1; if i3 >= FLen then i3 := i3 - FLen;
+            acc := acc + Hermite4(FLine[ch][i0], FLine[ch][i1], FLine[ch][i2],
+              FLine[ch][i3], frac);
+          end;
+          y := acc / nv;
+          if FEffect = modFlanger then
+          begin
+            { damped feedback: one-pole low-pass in the loop }
+            FFbLP[ch] := FlushDenorm(Single(FFbLP[ch] + FFbCoef * (y - FFbLP[ch])));
+            FLine[ch][FWrite] := Single(FlushDenorm(Single(AIn[ch][i] + FFeedback * FFbLP[ch])));
+          end
+          else
+          begin
+            FLine[ch][FWrite] := AIn[ch][i];
+            { analogue-style wet high-cut }
+            FWetLP[ch] := FlushDenorm(Single(FWetLP[ch] + FWetCoef * (y - FWetLP[ch])));
+            y := FWetLP[ch];
+          end;
           AOut[ch][i] := Single(dry * AIn[ch][i] + wet * y);
         end;
         Inc(FWrite);

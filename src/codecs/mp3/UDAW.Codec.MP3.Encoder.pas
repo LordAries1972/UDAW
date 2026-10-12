@@ -870,9 +870,14 @@ begin
     initialized here only to satisfy the compiler's flow analysis }
   brIdx := 0; frameLen := 0; padding := 0; granuleBudget := 0;
 
-  { pad the input up to a whole number of frames }
-  totalFrames := (srcFrames + FRAME_SAMPLES - 1) div FRAME_SAMPLES;
-  totalPad := totalFrames * FRAME_SAMPLES - srcFrames;
+  { Pad the input to whole frames, with room for the codec delay: the signal
+    comes back out of any decoder delayed by the encoder's 576 samples plus the
+    decoder's 529, so the stream needs that many extra samples after the
+    program or the end of the audio would be cut off. totalPad is the LAME tag's
+    "padding" - samples after the program, counted from the end of the
+    encoder delay. }
+  totalFrames := (srcFrames + 576 + 529 + FRAME_SAMPLES - 1) div FRAME_SAMPLES;
+  totalPad := totalFrames * FRAME_SAMPLES - 576 - srcFrames;
   for ch := 0 to nch - 1 do
   begin
     SetLength(chSamples[ch], totalFrames * FRAME_SAMPLES);

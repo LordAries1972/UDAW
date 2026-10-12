@@ -59,7 +59,7 @@ object frmSplash: TfrmSplash
     end
     object lblStatus: TLabel
       Left = 56
-      Top = 374
+      Top = 366
       Width = 344
       Height = 15
       Caption = 'Starting...'

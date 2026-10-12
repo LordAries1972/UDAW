@@ -248,7 +248,8 @@ begin
                 maxMag := Max(maxMag, mag[i]);
             end;
             { candidate peaks strongest-first }
-            SetLength(used, bins);
+            SetLength(used, 0);
+            SetLength(used, bins);   // reset every frame (SetLength alone keeps old flags)
             for m := 1 to Max(AOpts.MaxVoices, 1) do
             begin
               peakBin := -1;

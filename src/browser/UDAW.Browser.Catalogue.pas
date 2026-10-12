@@ -159,7 +159,7 @@ begin
   begin
     b := utf[i];
     Result := Result xor b;
-    Result := Result * 16777619;
+    Result := Cardinal((UInt64(Result) * 16777619) and $FFFFFFFF);   // 32-bit wrap by design
   end;
 end;
 
@@ -392,8 +392,9 @@ var
   full: string;
   ext: string;
 const
-  KNOWN_EXTS: array[0..8] of string = (
-    '.wav', '.flac', '.mp3', '.mp4', '.m4a', '.ogg', '.sf2', '.sfz', '.dll');
+  KNOWN_EXTS: array[0..12] of string = (
+    '.wav', '.flac', '.mp3', '.mp4', '.m4a', '.m4v', '.mov', '.mkv', '.webm', '.ogg', '.sf2',
+    '.sfz', '.dll');
   KNOWN_EXTS_EXTRA: array[0..0] of string = ('.vst3');
 var
   i: Integer;

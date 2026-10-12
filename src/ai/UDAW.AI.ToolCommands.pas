@@ -831,7 +831,8 @@ const
 function ToolIsAudioExt(const AExt: string): Boolean;
 begin
   Result := (AExt = '.wav') or (AExt = '.flac') or (AExt = '.mp3') or
-    (AExt = '.mp4') or (AExt = '.m4a');
+    (AExt = '.mp4') or (AExt = '.m4a') or (AExt = '.m4v') or (AExt = '.mov') or
+    (AExt = '.mkv') or (AExt = '.webm');
 end;
 
 function SplitCriteriaKeywords(const ACriteria: string): TArray<string>;
@@ -1076,6 +1077,8 @@ var
   flacCmd: TImportFlacCommand;
   mp3Cmd: TImportMp3Command;
   mp4Cmd: TImportMp4Command;
+  extraTrack: TAddTimelineTrackCommand;
+  streamNo: Integer;
   startSec: Double;
 begin
   Result := False;
@@ -1126,11 +1129,32 @@ begin
       if not FCommands.Perform(mp3Cmd) then
       begin AResultText := 'could not add clip'; Exit; end;
     end
-    else if (ext = '.mp4') or (ext = '.m4a') then
+    else if (ext = '.mp4') or (ext = '.m4a') or (ext = '.m4v') or (ext = '.mov') or
+      (ext = '.mkv') or (ext = '.webm') then
     begin
       if not Mp4SniffFile(fullPath) then
       begin AResultText := 'not a valid MP4/M4A file: ' + fullPath; Exit; end;
       mp4Cmd := TImportMp4Command.Create(FDoc, track.Id, fullPath, startSec, 0);
+      try
+        mp4Cmd.Resolve;
+      except
+        mp4Cmd.Free;
+        raise;
+      end;
+      { every further sound stream shows on a track of its own; the user removes
+        what they do not want }
+      for streamNo := 1 to mp4Cmd.AudioStreamCount - 1 do
+      begin
+        extraTrack := TAddTimelineTrackCommand.Create(FDoc, tkAudio,
+          Format('%s (audio %d)', [track.Name, streamNo + 1]));
+        if not FCommands.Perform(extraTrack) then
+        begin
+          mp4Cmd.Free;
+          AResultText := 'could not add a track for an extra sound stream';
+          Exit;
+        end;
+        mp4Cmd.SetStreamTrack(streamNo, extraTrack.CreatedId);
+      end;
       if not FCommands.Perform(mp4Cmd) then
       begin AResultText := 'could not add clip'; Exit; end;
     end

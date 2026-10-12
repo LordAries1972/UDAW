@@ -45,7 +45,7 @@ end;
 
 function TDitherer.Rand: Double;
 begin
-  FSeed := FSeed * 1664525 + 1013904223;
+  FSeed := Cardinal((UInt64(FSeed) * 1664525 + 1013904223) and $FFFFFFFF);   // wraps by design (no overflow trap)
   Result := (FSeed shr 8) / 16777216.0;
 end;
 

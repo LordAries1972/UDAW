@@ -173,7 +173,7 @@ begin
   seed := 12345;
   for i := 0 to n - 1 do
   begin
-    seed := seed * 1664525 + 1013904223;
+    seed := Cardinal((UInt64(seed) * 1664525 + 1013904223) and $FFFFFFFF);
     x[i] := Single(((seed shr 8) / 16777216.0 - 0.5) * 0.1);
     if i > SR then x[i] := x[i] + Single(0.4 * Sin(2 * Pi * 1000 * i / SR));
   end;
@@ -284,6 +284,7 @@ begin
     syn.Patch := TSynthPatch.Default;
     syn.Patch.CutoffHz := 8000;
     syn.Patch.FilterEnvAmount := 0;
+    syn.Patch.Osc2Detune := 0;   { a detuned 2nd oscillator makes zero-crossing counts meaningless }
     SetLength(notes, 1);
     notes[0].Beat := 0; notes[0].Length := 2.0; notes[0].Key := 69; notes[0].Velocity := 110;
     syn.Render(notes, 120, 0.2, l, r);

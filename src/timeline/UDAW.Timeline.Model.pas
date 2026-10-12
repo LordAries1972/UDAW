@@ -154,6 +154,14 @@ type
     { Where in the source, in seconds, timeline position ASeconds reads from -
       honouring Reversed. Undefined outside [StartSeconds, EndSeconds]. }
     function SourceSecondsAt(ASeconds: Double): Double;
+    { Tempo conform factor (output length / input length) for a clip that
+      carries a SourceBPM, against the Timeline tempo AStretchBPM - the same
+      rule the audio player applies (outside 0.25..4 or ~1.0 means 1.0). }
+    function ConformFactor(AStretchBPM: Double): Double;
+    { Source position for a VIDEO clip at timeline position ASeconds: honours
+      Reversed and the tempo conform, matching what the audio of the same clip
+      does. }
+    function VideoSourceSecondsAt(ASeconds, AStretchBPM: Double): Double;
 
     property Id: Integer read FId;
     property Name: string read FName write FName;
@@ -266,10 +274,40 @@ type
     property Color: Integer read FColor write FColor;
   end;
 
+  { A video effect or transition laid over a span of one video track (see
+    UDAW.Video.Effects). A transition region sits across the cut between two
+    clips; PivotSeconds is that cut (the outgoing clip is held on its last
+    picture after it, the incoming one on its first picture before it). }
+  TVideoEffectRegion = class
+  private
+    FId: Integer;
+    FTrackId: Integer;
+    FKind: string;
+    FName: string;
+    FStartSeconds: Double;
+    FLengthSeconds: Double;
+    FPivotSeconds: Double;
+    FParams: string;
+  public
+    constructor Create(AId, ATrackId: Integer; const AKind, AName: string;
+      AStart, ALength, APivot: Double; const AParams: string);
+    function EndSeconds: Double;
+    property Id: Integer read FId;
+    property TrackId: Integer read FTrackId;
+    property Kind: string read FKind;
+    property Name: string read FName;
+    property StartSeconds: Double read FStartSeconds write FStartSeconds;
+    property LengthSeconds: Double read FLengthSeconds write FLengthSeconds;
+    property PivotSeconds: Double read FPivotSeconds write FPivotSeconds;
+    property Params: string read FParams write FParams;
+  end;
+
   TClipEdge = (ceStart, ceEnd);
 
   TTimeline = class
   private
+    FVideoFx: TObjectList<TVideoEffectRegion>;
+    FNextVideoFxId: Integer;
     FTracks: TObjectList<TTimelineTrack>;
     FSources: TObjectList<TMediaSource>;
     FMarkers: TObjectList<TTimelineMarker>;
@@ -373,6 +411,17 @@ type
     procedure RemoveRegion(AId: Integer);
     function RegionCount: Integer;
     function GetRegion(AIndex: Integer): TTimelineRegion;
+
+    { ---- video effects (undoable through TAddVideoEffectCommand) ---- }
+    function AddVideoEffect(ATrackId: Integer; const AKind, AName: string;
+      AStart, ALength, APivot: Double; const AParams: string): TVideoEffectRegion;
+    function AddVideoEffectWithId(AId, ATrackId: Integer; const AKind, AName: string;
+      AStart, ALength, APivot: Double; const AParams: string): TVideoEffectRegion;
+    procedure RemoveVideoEffect(AId: Integer);
+    function VideoEffectCount: Integer;
+    function GetVideoEffect(AIndex: Integer): TVideoEffectRegion;
+    function VideoEffectById(AId: Integer): TVideoEffectRegion;
+    procedure BumpVideoEffectId(AObservedId: Integer);
 
     { ---- queries ---- }
     function TotalDurationSeconds: Double;
@@ -711,6 +760,20 @@ begin
   Result := g;
 end;
 
+function TTimelineClip.ConformFactor(AStretchBPM: Double): Double;
+begin
+  Result := 1.0;
+  if (AStretchBPM <= 0) or IsMidiClip or (FSourceBPM <= 0) then Exit;
+  Result := FSourceBPM / AStretchBPM;
+  if (Abs(Result - 1.0) < 0.001) or (Result < 0.25) or (Result > 4.0) then Result := 1.0;
+end;
+
+function TTimelineClip.VideoSourceSecondsAt(ASeconds, AStretchBPM: Double): Double;
+begin
+  Result := FSourceOffsetSeconds +
+    (SourceSecondsAt(ASeconds) - FSourceOffsetSeconds) / ConformFactor(AStretchBPM);
+end;
+
 function TTimelineClip.SourceSecondsAt(ASeconds: Double): Double;
 var
   rel: Double;
@@ -884,6 +947,8 @@ begin
   FSources := TObjectList<TMediaSource>.Create(True);
   FMarkers := TObjectList<TTimelineMarker>.Create(True);
   FRegions := TObjectList<TTimelineRegion>.Create(True);
+  FVideoFx := TObjectList<TVideoEffectRegion>.Create(True);
+  FNextVideoFxId := 1;
   FNextTrackId := 1;
   FNextClipId := 1;
   FNextSourceId := 1;
@@ -894,6 +959,7 @@ end;
 
 destructor TTimeline.Destroy;
 begin
+  FVideoFx.Free;
   FRegions.Free;
   FMarkers.Free;
   FTracks.Free;
@@ -907,6 +973,8 @@ begin
   FSources.Clear;
   FMarkers.Clear;
   FRegions.Clear;
+  FVideoFx.Clear;
+  FNextVideoFxId := 1;
   FNextTrackId := 1;
   FNextClipId := 1;
   FNextSourceId := 1;
@@ -980,6 +1048,11 @@ begin
     Result.FRegions.Add(TTimelineRegion.Create(rg.Id, rg.Name, rg.StartSeconds, rg.LengthSeconds));
     Result.FRegions.Last.Color := rg.Color;
   end;
+  for i := 0 to FVideoFx.Count - 1 do
+    Result.FVideoFx.Add(TVideoEffectRegion.Create(FVideoFx[i].Id, FVideoFx[i].TrackId,
+      FVideoFx[i].Kind, FVideoFx[i].Name, FVideoFx[i].StartSeconds, FVideoFx[i].LengthSeconds,
+      FVideoFx[i].PivotSeconds, FVideoFx[i].Params));
+  Result.FNextVideoFxId := FNextVideoFxId;
   Result.FNextTrackId := FNextTrackId;
   Result.FNextClipId := FNextClipId;
   Result.FNextSourceId := FNextSourceId;
@@ -1518,6 +1591,80 @@ begin
       FRegions.Delete(i);
       Exit;
     end;
+end;
+
+{ ---- video effects ---- }
+
+constructor TVideoEffectRegion.Create(AId, ATrackId: Integer; const AKind, AName: string;
+  AStart, ALength, APivot: Double; const AParams: string);
+begin
+  inherited Create;
+  FId := AId;
+  FTrackId := ATrackId;
+  FKind := AKind;
+  FName := AName;
+  FStartSeconds := AStart;
+  FLengthSeconds := ALength;
+  FPivotSeconds := APivot;
+  FParams := AParams;
+end;
+
+function TVideoEffectRegion.EndSeconds: Double;
+begin
+  Result := FStartSeconds + FLengthSeconds;
+end;
+
+function TTimeline.AddVideoEffect(ATrackId: Integer; const AKind, AName: string;
+  AStart, ALength, APivot: Double; const AParams: string): TVideoEffectRegion;
+begin
+  Result := AddVideoEffectWithId(FNextVideoFxId, ATrackId, AKind, AName, AStart, ALength,
+    APivot, AParams);
+end;
+
+function TTimeline.AddVideoEffectWithId(AId, ATrackId: Integer; const AKind, AName: string;
+  AStart, ALength, APivot: Double; const AParams: string): TVideoEffectRegion;
+begin
+  if ALength < 0 then ALength := 0;
+  Result := TVideoEffectRegion.Create(AId, ATrackId, AKind, AName, Max(0, AStart), ALength,
+    APivot, AParams);
+  FVideoFx.Add(Result);
+  BumpVideoEffectId(AId);
+end;
+
+procedure TTimeline.RemoveVideoEffect(AId: Integer);
+var
+  i: Integer;
+begin
+  for i := 0 to FVideoFx.Count - 1 do
+    if FVideoFx[i].Id = AId then
+    begin
+      FVideoFx.Delete(i);
+      Exit;
+    end;
+end;
+
+function TTimeline.VideoEffectCount: Integer;
+begin
+  Result := FVideoFx.Count;
+end;
+
+function TTimeline.GetVideoEffect(AIndex: Integer): TVideoEffectRegion;
+begin
+  Result := FVideoFx[AIndex];
+end;
+
+function TTimeline.VideoEffectById(AId: Integer): TVideoEffectRegion;
+var
+  i: Integer;
+begin
+  for i := 0 to FVideoFx.Count - 1 do
+    if FVideoFx[i].Id = AId then Exit(FVideoFx[i]);
+  Result := nil;
+end;
+
+procedure TTimeline.BumpVideoEffectId(AObservedId: Integer);
+begin
+  if AObservedId >= FNextVideoFxId then FNextVideoFxId := AObservedId + 1;
 end;
 
 function TTimeline.RegionCount: Integer;

@@ -284,7 +284,7 @@ begin
   for i := 1 to Length(S) do
   begin
     Result := Result xor Ord(S[i]);
-    Result := Result * 16777619;
+    Result := Cardinal((UInt64(Result) * 16777619) and $FFFFFFFF);   // 32-bit wrap by design
   end;
 end;
 

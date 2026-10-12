@@ -12,6 +12,9 @@ uses {$IFDEF FPC}UDAW.Compat,{$ENDIF} SysUtils;
   freeform atom) holding the UDAW build version. }
 procedure EncodeCompressedFile(const AWav, AOutput, AFormat: string; AProgress: TProc<Double>;
   ABpm: Double = 0; const AArtist: string = '');
+{ Writes the same tempo / author / created-by / version atoms into an existing
+  MP4 (e.g. a video export). Only the movie header moves; media is untouched. }
+procedure StampMp4File(const AFile: string; ABpm: Double; const AArtist: string);
 implementation
 uses Classes, Math, UDAW.Errors, UDAW.Threading, UDAW.Media.Attribution, UDAW.Version,
   UDAW.Codec.MP3.Metadata, UDAW.Codec.MP4.Atoms
@@ -349,7 +352,17 @@ begin
     RoUninitialize;
   end;
 end;
+procedure StampMp4File(const AFile: string; ABpm: Double; const AArtist: string);
+begin
+  StampMp4(AFile, ABpm, AArtist);
+end;
+
 {$ELSE}
+procedure StampMp4File(const AFile: string; ABpm: Double; const AArtist: string);
+begin
+  RaiseUDAW(errConfig, 'Media.Transcode', 'MP4 tagging is only available in the Windows build.');
+end;
+
 procedure EncodeCompressedFile(const AWav, AOutput, AFormat: string; AProgress: TProc<Double>;
   ABpm: Double; const AArtist: string);
 begin

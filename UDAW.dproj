@@ -108,6 +108,12 @@
         <DCCReference Include="src\audio\dsp\UDAW.DSP.AudioToMidi.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.SpectralFx.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.Warp.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.VideoPlayer.pas" />
+        <DCCReference Include="src\timeline\UDAW.Video.Effects.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.VideoFxCache.pas" />
+        <DCCReference Include="src\video\UDAW.Media.DirectShow.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.VideoExport.pas" />
+        <DCCReference Include="src\codecs\mp4\UDAW.Codec.MKV.Writer.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Exciter.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.LookaheadLimiter.pas" />
         <DCCReference Include="src\audio\graph\UDAW.Audio.Graph.Nodes.pas" />

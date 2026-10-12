@@ -24,14 +24,46 @@ type
 
 implementation
 
-uses UDAW.Errors, UDAW.Audio.Types, UDAW.Audio.Buffer,
+uses UDAW.Errors, UDAW.Timeline.Model, UDAW.Audio.Types, UDAW.Audio.Buffer,
   UDAW.Timeline.Playback, UDAW.Mixer.Engine, UDAW.Codec.WAV,
-  UDAW.Codec.MP3, UDAW.Codec.MP3.Metadata, UDAW.Codec.MP3.Frame, UDAW.Codec.MP4,
+  UDAW.Codec.MP3, UDAW.Codec.MP3.Metadata, UDAW.Codec.MP3.Frame, UDAW.Codec.MP4, UDAW.Codec.MP4.Container,
   UDAW.Codec.FLAC.Encoder, UDAW.DSP.Dither,
   UDAW.Media.Attribution, UDAW.Media.Progress, UDAW.Media.Transcode
+  {$IF DEFINED(UDAW_WINDOWS) AND NOT DEFINED(FPC)}
+  , UDAW.Timeline.VideoExport, UDAW.Codec.MKV.Writer
+  {$IFEND}
   {$IFDEF UDAW_WINDOWS}
   , Winapi.Windows
   {$ENDIF};
+
+{ True when an un-muted video clip with a video source touches
+  [AStart, AStart + ADuration). Kept here (not in the Windows-only video
+  unit) so every build refuses a video timeline instead of silently
+  dropping the picture. }
+function HasVideoInRange(ATl: TTimeline; AStart, ADuration: Double): Boolean;
+var
+  i, j: Integer;
+  trk: TTimelineTrack;
+  clip: TTimelineClip;
+  src: TMediaSource;
+begin
+  Result := False;
+  for i := 0 to ATl.TrackCount - 1 do
+  begin
+    trk := ATl.GetTrack(i);
+    if (trk.Kind <> tkVideo) or trk.Muted then Continue;
+    for j := 0 to trk.ClipCount - 1 do
+    begin
+      clip := trk.GetClip(j);
+      if clip.Muted or clip.IsMidiClip then Continue;
+      src := ATl.SourceById(clip.SourceId);
+      if (src = nil) or (src.Kind <> mkVideoFile) then Continue;
+      if (ADuration > 0) and ((clip.EndSeconds <= AStart) or (clip.StartSeconds >= AStart + ADuration)) then
+        Continue;
+      Exit(True);
+    end;
+  end;
+end;
 
 constructor TTimelineExportJob.Create(AProject: TProjectDocument; const AFileName: string);
 var
@@ -74,7 +106,8 @@ var
   dither: array[0..1] of TDitherer;
   frames, done: Int64;
   sr, n, ch, i: Integer;
-  ext, temp, backup, sidecar, waveTemp: string;
+  ext, temp, backup, sidecar, waveTemp, rawTemp, videoTemp: string;
+  videoMode: Boolean;
   guid: TGUID;
   raw: array[0..BLOCK * 2 - 1] of SmallInt;
   info: TStringList;
@@ -87,6 +120,8 @@ var
   summary: string;
   unconformed: Integer;
   stampBpm: Double;
+  verifyReader: TMP4Reader;
+  mp4Out: string;
 begin
   dither[0] := nil;
   dither[1] := nil;
@@ -95,12 +130,27 @@ begin
   player := nil; mixer := nil; buf := nil; writer := nil; stream := nil;
   ext := LowerCase(ExtractFileExt(FFileName));
   if (ext <> '.wav') and (ext <> '.pcm') and (ext <> '.mp3') and
-     (ext <> '.mp4') and (ext <> '.m4a') and (ext <> '.flac') then
-    RaiseUDAW(errInvalidArgument, 'Timeline.Export', 'Choose WAV, PCM, MP3, MP4, M4A or FLAC.');
+     (ext <> '.mp4') and (ext <> '.m4a') and (ext <> '.flac') and (ext <> '.mkv') then
+    RaiseUDAW(errInvalidArgument, 'Timeline.Export', 'Choose WAV, PCM, MP3, MP4, M4A, FLAC or MKV.');
+  { A timeline with video clips exports as a video file (MP4 / MKV); MKV is
+    video-only, and a video timeline cannot go to an audio-only format. }
+  videoMode := HasVideoInRange(FProject.Timeline, FRangeStart,
+    IfThen(FRangeEnd > FRangeStart, FRangeEnd - FRangeStart, FProject.Timeline.TotalDurationSeconds));
+  {$IF NOT (DEFINED(UDAW_WINDOWS) AND NOT DEFINED(FPC))}
+  if videoMode then
+    RaiseUDAW(errConfig, 'Timeline.Export',
+      'This Timeline contains video, and video export (MP4 / MKV) is only available in the Windows build. ' +
+      'Remove the video channel to export the audio mix.');
+  {$IFEND}
+  if (ext = '.mkv') and not videoMode then
+    RaiseUDAW(errInvalidArgument, 'Timeline.Export', 'MKV export needs a video clip on the Timeline.');
+  if videoMode and (ext <> '.mp4') and (ext <> '.mkv') then
+    RaiseUDAW(errInvalidArgument, 'Timeline.Export',
+      'This Timeline contains video: export it as MP4 or MKV (other formats would drop the picture).');
   sr := FProject.SampleRate;
   { Compressed exports are always rendered and encoded at 48 kHz (the standard
     MP3/AAC/video rate), regardless of the project rate. }
-  if (ext = '.mp3') or (ext = '.mp4') or (ext = '.m4a') then sr := 48000;
+  if (ext = '.mp3') or (ext = '.mp4') or (ext = '.m4a') or (ext = '.mkv') then sr := 48000;
   if FRangeEnd > FRangeStart then
     frames := Ceil((FRangeEnd - FRangeStart) * sr)
   else
@@ -111,6 +161,8 @@ begin
   temp := FFileName + '.' + GUIDToString(guid) + '.partial' + ext;
   backup := temp + '.previous';
   waveTemp := temp + '.wav';
+  rawTemp := temp + '.pcm16';
+  videoTemp := temp + '.video.mp4';
   sidecar := FFileName + '.txt';
   published := False;
   hadOld := False;
@@ -153,7 +205,9 @@ begin
     SetProgress(0.1, 'Stage 4/6: Rendering mix - starting');
     buf := TAudioBuffer.Create(2, BLOCK, sr);
     EnsurePlanar(blockPcm, 2, BLOCK);
-    if (ext = '.mp3') or (ext = '.mp4') or (ext = '.m4a') or (ext = '.flac') then
+    if videoMode then
+      stream := TFileStream.Create(rawTemp, fmCreate)
+    else if (ext = '.mp3') or (ext = '.mp4') or (ext = '.m4a') or (ext = '.flac') then
       writer := TWavWriter.Create(waveTemp, wsfPCM24, 2, sr)
     else if ext = '.wav' then writer := TWavWriter.Create(temp, wsfPCM24, 2, sr)
     else stream := TFileStream.Create(temp, fmCreate);
@@ -189,24 +243,80 @@ begin
         Format('Stage 4/6: Rendering mix %.0f%% (%.1f / %.1f s)',
           [100.0 * done / frames, done / sr, frames / sr]));
     end;
+    { The Windows MP3 encoder emits whole 1152-sample frames only and drops the
+      final partial one, which cut the end off the program (4800 samples came
+      back as 4608). One frame of trailing silence guarantees every program
+      sample lands in a complete frame. }
+    if (writer <> nil) and (ext = '.mp3') then
+      for n := 1 to 2 do
+      begin
+        for ch := 0 to 1 do FillChar(blockPcm[ch][0], BLOCK * SizeOf(Single), 0);
+        writer.WriteFrames(blockPcm, BLOCK);
+      end;
     FreeAndNil(writer);
     FreeAndNil(stream);
     FreeAndNil(dither[0]);
     FreeAndNil(dither[1]);
     ThrowIfCancelled;
     SetProgress(0.7, 'Stage 5/6: Render complete - starting ' + UpperCase(Copy(ext, 2, 4)) + ' output');
-    if (ext = '.mp3') or (ext = '.mp4') or (ext = '.m4a') then
-    begin
-      { Clips are only time-stretched to the project tempo when they carry a
-        SourceBPM (Clip Tempo...). If any audio clip has none, that audio plays
-        at its own native tempo, so claiming the project BPM in the tag would
-        be false. }
-      unconformed := 0;
-      for i := 0 to FProject.Timeline.TrackCount - 1 do
+    { Clips are only time-stretched to the project tempo when they carry a
+      SourceBPM (Clip Tempo...). If any sound clip has none, that audio plays
+      at its own native tempo, so claiming the project BPM in a tag would be
+      false. (Picture clips carry no tempo of their own and are not counted.) }
+    unconformed := 0;
+    for i := 0 to FProject.Timeline.TrackCount - 1 do
+      if FProject.Timeline.GetTrack(i).Kind <> tkVideo then
         for n := 0 to FProject.Timeline.GetTrack(i).ClipCount - 1 do
           with FProject.Timeline.GetTrack(i).GetClip(n) do
             if (not IsMidiClip) and (SourceBPM <= 0) then Inc(unconformed);
-      if unconformed = 0 then stampBpm := FProject.TempoBPM else stampBpm := 0;
+    if unconformed = 0 then stampBpm := FProject.TempoBPM else stampBpm := 0;
+    if videoMode then
+    begin
+      mp4Out := temp;
+      if ext = '.mkv' then mp4Out := videoTemp;
+      {$IF DEFINED(UDAW_WINDOWS) AND NOT DEFINED(FPC)}
+      ExportTimelineVideoMp4(FProject.Timeline, rawTemp, mp4Out, sr,
+        FRangeStart, frames / sr, FProject.TempoBPM,
+        procedure(Fraction: Double)
+        begin
+          ThrowIfCancelled;
+          SetProgress(0.7 + Fraction * IfThen(ext = '.mkv', 0.2, 0.28),
+            Format('Stage 5/6: Encoding video %.0f%%', [Fraction * 100]));
+        end);
+      if ext = '.mkv' then
+      begin
+        SetProgress(0.9, 'Stage 5/6: Writing MKV container');
+        RemuxMp4ToMkv(videoTemp, temp, stampBpm, FProject.Author,
+          procedure(Fraction: Double)
+          begin
+            ThrowIfCancelled;
+            SetProgress(0.9 + Fraction * 0.08, Format('Stage 5/6: Writing MKV container %.0f%%', [Fraction * 100]));
+          end);
+      end;
+      SetProgress(0.98, 'Stage 5/6: Verifying video file');
+      begin
+        { The result must hold both a picture and a sound track of the right length. }
+        verifyReader := TMP4Reader.Create(Mp4ReadMoovBox(mp4Out));
+        try
+          if (verifyReader.FirstVideoTrack = nil) or (verifyReader.FirstVideoTrack.Table.SampleCount = 0) then
+            RaiseUDAW(errIO, 'Timeline.Export', 'The encoded file has no picture. Export aborted.');
+          if (verifyReader.FirstAudioTrack = nil) or
+             (Abs(verifyReader.FirstAudioTrack.DurationSeconds - frames / sr) > Max(0.5, 0.02 * frames / sr)) then
+            RaiseUDAW(errIO, 'Timeline.Export', 'The encoded sound does not match the timeline length. Export aborted.');
+          summary := Format('%d x %d, %d video frames, %.2f s',
+            [verifyReader.FirstVideoTrack.VideoWidth, verifyReader.FirstVideoTrack.VideoHeight,
+             verifyReader.FirstVideoTrack.Table.SampleCount, frames / sr]);
+        finally verifyReader.Free; end;
+      end;
+      if ext = '.mp4' then StampMp4File(temp, stampBpm, FProject.Author);
+      if unconformed = 0 then
+        summary := summary + Format(', tempo %.2f BPM', [FProject.TempoBPM]);
+      {$ELSE}
+      RaiseUDAW(errConfig, 'Timeline.Export', 'Video export is available on Windows only.');
+      {$IFEND}
+    end
+    else if (ext = '.mp3') or (ext = '.mp4') or (ext = '.m4a') then
+    begin
       EncodeCompressedFile(waveTemp, temp, ext,
         procedure(Fraction: Double)
         begin
@@ -328,6 +438,8 @@ begin
     end;
     SysUtils.DeleteFile(temp + '.tagged');
     SysUtils.DeleteFile(waveTemp);
+    SysUtils.DeleteFile(rawTemp);
+    SysUtils.DeleteFile(videoTemp);
     SysUtils.DeleteFile(temp);
     SysUtils.DeleteFile(temp + '.txt');
   end;

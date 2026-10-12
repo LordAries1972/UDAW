@@ -40,7 +40,7 @@ implementation
 
 {$IFNDEF FPC}
 uses
-  StrUtils, IdHTTP, IdURI, IdException, IdStack, TaurusTLS, TaurusTLS_X509, UDAW.AI.JSON;
+  StrUtils, IdHTTP, IdURI, IdException, IdStack, TaurusTLS, TaurusTLS_X509, TaurusTLSHeaders_x509, TaurusTLSHeaders_types, TaurusTLS_Utils, UDAW.AI.JSON;
 
 const
   INIT_BODY = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":' +

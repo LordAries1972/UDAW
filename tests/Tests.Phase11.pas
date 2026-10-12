@@ -665,7 +665,7 @@ begin
     on E: EUDAWError do CheckEqualInt(Ord(errConfig), Ord(E.Code), 'errConfig on bad version');
   end;
   try
-    TrackerModuleFromString('UDAWTRACKER 1'#10'PATTERN 0 rows=4'#10'R00 C-4 01 40 z09'#10).Free;
+    TrackerModuleFromString('UDAWTRACKER 1'#10'PATTERN 0 rows=4'#10'R00 C-4 01 40 l09'#10).Free;
     Fail('bad effect letter should raise');
   except
     on E: EUDAWError do CheckEqualInt(Ord(errConfig), Ord(E.Code), 'errConfig on bad effect');

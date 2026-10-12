@@ -93,11 +93,19 @@ type
     FMaxBitrate: Cardinal;
     FAudioSpecificConfig: TBytes;   // raw ASC / DecoderSpecificInfo
     FTable: TMP4SampleTable;
+    FVideoWidth: Integer;
+    FVideoHeight: Integer;
+    FEditStartTicks: Int64;    // elst: media time the first real edit starts at (encoder priming)
+    FEditLengthTicks: Int64;   // elst: that edit's length in media ticks; -1 = not stated
     procedure DetectAudioCodec(ATree: TMP4AtomTree; AStsd: TMP4Atom);
+    procedure DetectVideoEntry(ATree: TMP4AtomTree; AStsd: TMP4Atom);
   public
     constructor Create;
     destructor Destroy; override;
     function IsAudio: Boolean;
+    function IsVideo: Boolean;
+    property VideoWidth: Integer read FVideoWidth;
+    property VideoHeight: Integer read FVideoHeight;
     function DurationSeconds: Double;
     { PCM sample entries have a natural per-sample decoder here; AAC/ALAC/... are
       handed to their own codec unit. }
@@ -121,6 +129,11 @@ type
     property MaxBitrate: Cardinal read FMaxBitrate;
     property AudioSpecificConfig: TBytes read FAudioSpecificConfig;
     property Table: TMP4SampleTable read FTable;
+    { Edit list (elst): leading media ticks to discard, and how many media ticks
+      to keep after that (-1 = to the end).  Encoders put their priming samples
+      in front of the real audio and say so only here. }
+    property EditStartTicks: Int64 read FEditStartTicks;
+    property EditLengthTicks: Int64 read FEditLengthTicks;
   end;
 
   TMP4Reader = class
@@ -140,6 +153,10 @@ type
     function TrackCount: Integer;
     function GetTrack(AIndex: Integer): TMP4Track;
     function FirstAudioTrack: TMP4Track;
+    { the Nth sound track in file order (0-based); nil past the last }
+    function AudioTrackAt(AIndex: Integer): TMP4Track;
+    function AudioTrackCount: Integer;
+    function FirstVideoTrack: TMP4Track;
     { "Container: MP4 (brand ...)  |  Audio codec: AAC LC 44100 Hz 2 ch" }
     function ContainerReport: string;
     function Describe: string;
@@ -729,6 +746,7 @@ begin
   FTable := TMP4SampleTable.Create;
   FCodec := mckUnknown;
   FBitsPerSample := 16;
+  FEditLengthTicks := -1;
 end;
 
 destructor TMP4Track.Destroy;
@@ -740,6 +758,40 @@ end;
 function TMP4Track.IsAudio: Boolean;
 begin
   Result := FHandlerType = 'soun';
+end;
+
+function TMP4Track.IsVideo: Boolean;
+begin
+  Result := FHandlerType = 'vide';
+end;
+
+{ Visual sample entry: 6 reserved + 2 data_ref_index, 2 pre_defined + 2 reserved
+  + 12 pre_defined, then width(2) height(2). Only the FourCC and picture size
+  are kept - the video itself is displayed by the OS, never decoded here. }
+procedure TMP4Track.DetectVideoEntry(ATree: TMP4AtomTree; AStsd: TMP4Atom);
+var
+  data: TBytes;
+  o, entryStart: Int64;
+begin
+  data := ATree.Data;
+  if AStsd.ChildCount = 0 then
+  begin
+    o := AStsd.ContentOffset + 8;
+    if o + 8 > Length(data) then Exit;
+    FSampleEntry := ReadFourCC(data, o + 4).Text;
+    entryStart := o + 8;
+  end
+  else
+  begin
+    FSampleEntry := AStsd.Child(0).Kind.Text;
+    entryStart := AStsd.Child(0).ContentOffset;
+  end;
+  if entryStart + 28 <= Length(data) then
+  begin
+    FVideoWidth := BE_U16(data, entryStart + 24);
+    FVideoHeight := BE_U16(data, entryStart + 26);
+  end;
+  if FSampleEntry <> '' then FCodecName := FSampleEntry;
 end;
 
 function TMP4Track.DurationSeconds: Double;
@@ -1083,11 +1135,13 @@ end;
 procedure TMP4Reader.ParseTrak(ATrak: TMP4Atom);
 var
   t: TMP4Track;
-  tkhd, mdia, mdhd, hdlr, minf, stbl, stsd: TMP4Atom;
+  tkhd, mdia, mdhd, hdlr, minf, stbl, stsd, edts, elst: TMP4Atom;
   o: Int64;
   ver: Byte;
   langPacked: Word;
   n: Integer;
+  cnt: Cardinal;
+  segDur, mediaTime: Int64;
 begin
   t := TMP4Track.Create;
   try
@@ -1133,6 +1187,42 @@ begin
           Chr((langPacked and $1F) + $60);
     end;
 
+    t.FEditLengthTicks := -1;
+    edts := ATrak.Find('edts');
+    if edts <> nil then
+    begin
+      elst := edts.Find('elst');
+      if elst <> nil then
+      begin
+        o := elst.ContentOffset;
+        ver := BE_U8(FTree.Data, o);
+        cnt := BE_U32(FTree.Data, o + 4);
+        o := o + 8;
+        for n := 0 to Integer(Min(cnt, 32)) - 1 do
+        begin
+          if ver = 1 then
+          begin
+            if o + 20 > Length(FTree.Data) then Break;
+            segDur := Int64(BE_U64(FTree.Data, o));
+            mediaTime := Int64(BE_U64(FTree.Data, o + 8));
+            Inc(o, 20);
+          end
+          else
+          begin
+            if o + 12 > Length(FTree.Data) then Break;
+            segDur := BE_U32(FTree.Data, o);
+            mediaTime := Integer(BE_U32(FTree.Data, o + 4));
+            Inc(o, 12);
+          end;
+          if mediaTime < 0 then Continue;            // empty edit: a gap, not media
+          t.FEditStartTicks := mediaTime;
+          if (segDur > 0) and (FMovieTimescale > 0) and (t.FMediaTimescale > 0) then
+            t.FEditLengthTicks := (segDur * t.FMediaTimescale + FMovieTimescale div 2) div FMovieTimescale;
+          Break;
+        end;
+      end;
+    end;
+
     hdlr := mdia.Find('hdlr');
     if hdlr <> nil then
       t.FHandlerType := SafeAscii(FTree.Data, hdlr.ContentOffset + 8, 4);
@@ -1145,7 +1235,9 @@ begin
       begin
         stsd := stbl.Find('stsd');
         if (stsd <> nil) and (t.FHandlerType = 'soun') then
-          t.DetectAudioCodec(FTree, stsd);
+          t.DetectAudioCodec(FTree, stsd)
+        else if (stsd <> nil) and (t.FHandlerType = 'vide') then
+          t.DetectVideoEntry(FTree, stsd);
         t.FTable.Parse(FTree, stbl);
       end;
     end;
@@ -1177,6 +1269,38 @@ begin
   Result := nil;
   for i := 0 to High(FTracks) do
     if FTracks[i].IsAudio then Exit(FTracks[i]);
+end;
+
+function TMP4Reader.AudioTrackCount: Integer;
+var
+  i: Integer;
+begin
+  Result := 0;
+  for i := 0 to High(FTracks) do
+    if FTracks[i].IsAudio then Inc(Result);
+end;
+
+function TMP4Reader.AudioTrackAt(AIndex: Integer): TMP4Track;
+var
+  i, n: Integer;
+begin
+  Result := nil;
+  n := 0;
+  for i := 0 to High(FTracks) do
+    if FTracks[i].IsAudio then
+    begin
+      if n = AIndex then Exit(FTracks[i]);
+      Inc(n);
+    end;
+end;
+
+function TMP4Reader.FirstVideoTrack: TMP4Track;
+var
+  i: Integer;
+begin
+  Result := nil;
+  for i := 0 to High(FTracks) do
+    if FTracks[i].IsVideo then Exit(FTracks[i]);
 end;
 
 function TMP4Reader.ContainerReport: string;

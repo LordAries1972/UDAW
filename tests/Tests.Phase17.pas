@@ -352,7 +352,7 @@ begin
     proj.Free;
   end;
 
-  Check(Pos('UDAWMIDI 1', s) > 0, 'header present');
+  Check(Pos(MIDI_PROJECT_MAGIC + ' ' + IntToStr(MIDI_PROJECT_VERSION), s) > 0, 'header present');
   back := MidiProjectFromString(s);
   try
     CheckEqualInt(1, back.ClipCount, 'one clip');
@@ -388,7 +388,7 @@ begin
     doc.Free;
   end;
 
-  Check(Pos('UDAWPROJECT 5', text) > 0, 'project file is version 5');
+  Check(Pos(PROJECT_FILE_MAGIC + ' ' + IntToStr(PROJECT_FILE_VERSION), text) > 0, 'project file carries the current version');
   Check(Pos('MIDI-BEGIN', text) > 0, 'MIDI section written');
 
   doc2 := ProjectFromString(text);

@@ -48,6 +48,8 @@ type
     SampleRate: Integer;
     Frames: Int64;
     DecodedBlocks: Int64;
+    DamagedBlocks: Int64;         // frames that could not be decoded - replaced by silence, timing kept
+    FirstError: string;           // why the first damaged frame failed (diagnostics)
     HadSBR: Boolean;              // stream signalled SBR (output is core-band only)
     TablesPopulated: Boolean;    // false => HuffData.inc still stubbed
   end;
@@ -261,15 +263,73 @@ end;
 
 { ============================ decode ========================= }
 
+{ Decode one access unit.  A damaged or empty unit becomes a frame of silence so
+  every later sample keeps its place in time (never a truncated file). }
+procedure DecodeUnitOrConceal(ADec: TAACDecoder; ABytes: PByte; ALen: Integer;
+  var ABlock: TAudioPlanar; out AProduced: Integer; var ADamaged: Int64; var AFirstError: string);
+var
+  br: TAacBitReader;
+  ok: Boolean;
+  ch: Integer;
+begin
+  ok := False;
+  AProduced := 0;
+  if ALen > 0 then
+  begin
+    br.Init(ABytes, ALen, 0);
+    try
+      ok := ADec.DecodeFrame(br, ABlock, AProduced) = adsOK;
+    except
+      on E: Exception do
+      begin
+        ok := False;
+        if AFirstError = '' then AFirstError := E.ClassName + ': ' + E.Message;
+      end;
+    end;
+  end;
+  if (not ok) or (AProduced <= 0) or (Length(ABlock) < ADec.Channels) then
+  begin
+    AProduced := ADec.FrameLength;
+    SetLength(ABlock, ADec.Channels);
+    for ch := 0 to ADec.Channels - 1 do
+    begin
+      SetLength(ABlock[ch], AProduced);
+      FillChar(ABlock[ch][0], AProduced * SizeOf(Single), 0);
+    end;
+    Inc(ADamaged);
+  end;
+end;
+
+{ AAC lists channels in stream-element order (centre first); the engine and
+  WAV use the front-left, front-right, centre, LFE, rear... order.  Only the
+  fixed channelConfiguration layouts 3..7 need reordering. }
+procedure AacToWaveChannelOrder(var AData: TAudioPlanar; AChannelConfig: Integer);
+var
+  src: TAudioPlanar;
+  map: array of Integer;       // map[outCh] = stream channel
+  i: Integer;
+begin
+  case AChannelConfig of
+    3: map := [1, 2, 0];                          // C L R        -> L R C
+    4: map := [1, 2, 0, 3];                       // C L R Cs     -> L R C Cs
+    5: map := [1, 2, 0, 3, 4];                    // C L R Ls Rs  -> L R C Ls Rs
+    6: map := [1, 2, 0, 5, 3, 4];                 // C L R Ls Rs LFE -> L R C LFE Ls Rs
+    7: map := [3, 4, 0, 7, 5, 6, 1, 2];           // C Lc Rc L R Ls Rs LFE -> L R C LFE Ls Rs Lc Rc
+  else
+    Exit;
+  end;
+  if Length(AData) <> Length(map) then Exit;
+  src := Copy(AData);
+  for i := 0 to High(map) do AData[i] := src[map[i]];
+end;
+
 function AacDecodeAdts(const AData: TBytes; out ARes: TAACDecodeResult): Boolean;
 var
   dec: TAACDecoder;
   ofs, i, ch, k, produced: Integer;
   h: TAdtsHeader;
-  br: TAacBitReader;
   block: TAudioPlanar;
   outPos, capacity: Int64;
-  st: TAACDecodeStatus;
 begin
   FillChar(ARes, SizeOf(ARes), 0);
   RefuseIfNoTables;
@@ -296,9 +356,8 @@ begin
     while (i + 7 <= Length(AData)) and ParseAdtsAt(AData, i, h) and h.Valid do
     begin
       if i + h.FrameLength > Length(AData) then Break;
-      br.Init(@AData[i + h.HeaderBytes], h.FrameLength - h.HeaderBytes, 0);
-      st := dec.DecodeFrame(br, block, produced);
-      if st <> adsOK then Break;
+      DecodeUnitOrConceal(dec, @AData[i + h.HeaderBytes], h.FrameLength - h.HeaderBytes,
+        block, produced, ARes.DamagedBlocks, ARes.FirstError);
 
       if outPos + produced > capacity then
       begin
@@ -318,7 +377,8 @@ begin
 
     for ch := 0 to ARes.Channels - 1 do SetLength(ARes.Data[ch], outPos);
     ARes.Frames := outPos;
-    ARes.HadSBR := dec.Config.Extension <> aeNone;
+    ARes.HadSBR := (dec.Config.Extension <> aeNone) or dec.SbrSeen;
+    AacToWaveChannelOrder(ARes.Data, h.ChannelConfig);
     Result := outPos > 0;
   finally
     dec.Free;
@@ -336,10 +396,8 @@ var
   cfg: TAacAudioConfig;
   dec: TAACDecoder;
   au, ch, k, produced: Integer;
-  br: TAacBitReader;
   block: TAudioPlanar;
   outPos, capacity: Int64;
-  st: TAACDecodeStatus;
 begin
   FillChar(ARes, SizeOf(ARes), 0);
   RefuseIfNoTables;
@@ -362,10 +420,11 @@ begin
     outPos := 0;
     for au := 0 to High(AAccessUnits) do
     begin
-      if Length(AAccessUnits[au]) = 0 then Continue;
-      br.Init(@AAccessUnits[au][0], Length(AAccessUnits[au]), 0);
-      st := dec.DecodeFrame(br, block, produced);
-      if st <> adsOK then Break;
+      if Length(AAccessUnits[au]) = 0 then
+        DecodeUnitOrConceal(dec, nil, 0, block, produced, ARes.DamagedBlocks, ARes.FirstError)
+      else
+        DecodeUnitOrConceal(dec, @AAccessUnits[au][0], Length(AAccessUnits[au]),
+          block, produced, ARes.DamagedBlocks, ARes.FirstError);
       if outPos + produced > capacity then
       begin
         capacity := (outPos + produced) * 2 + 4096;
@@ -381,7 +440,8 @@ begin
 
     for ch := 0 to ARes.Channels - 1 do SetLength(ARes.Data[ch], outPos);
     ARes.Frames := outPos;
-    ARes.HadSBR := cfg.Extension <> aeNone;
+    ARes.HadSBR := (cfg.Extension <> aeNone) or dec.SbrSeen;
+    AacToWaveChannelOrder(ARes.Data, cfg.ChannelConfig);
     Result := outPos > 0;
   finally
     dec.Free;

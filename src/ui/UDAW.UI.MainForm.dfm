@@ -1042,6 +1042,48 @@
           WordWrap = False
         end
       end
+      object pnlTlVideo: TPanel
+        Left = 632
+        Top = 72
+        Width = 320
+        Height = 315
+        Align = alRight
+        BevelOuter = bvLowered
+        Caption = 'Video'
+        Color = clBlack
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clGray
+        Font.Height = -12
+        Font.Name = 'Segoe UI'
+        Font.Style = []
+        ParentBackground = False
+        ParentFont = False
+        TabOrder = 4
+        Visible = False
+        OnResize = pnlTlVideoResize
+        object pnlTlVideoFx: TPanel
+          Left = 1
+          Top = 1
+          Width = 318
+          Height = 313
+          Align = alClient
+          BevelOuter = bvNone
+          Caption = ''
+          Color = clBlack
+          ParentBackground = False
+          ShowCaption = False
+          TabOrder = 0
+          Visible = False
+          object pbTlVideoFx: TPaintBox
+            Left = 0
+            Top = 0
+            Width = 318
+            Height = 313
+            Align = alClient
+            OnPaint = pbTlVideoFxPaint
+          end
+        end
+      end
       object sbTlHorz: TScrollBar
         Left = 0
         Top = 387
@@ -1072,6 +1114,7 @@
         OnDragDrop = pbTimelineDragDrop
         OnDragOver = pbTimelineDragOver
         OnMouseDown = pbTimelineMouseDown
+        OnMouseLeave = pbTimelineMouseLeave
         OnMouseMove = pbTimelineMouseMove
         OnMouseUp = pbTimelineMouseUp
         OnMouseWheel = pbTimelineMouseWheel
@@ -1764,6 +1807,23 @@
                 Height = 23
                 TabOrder = 9
                 Text = 'en'
+              end
+              object lblSetTlRefresh: TLabel
+                Transparent = True
+                Left = 470
+                Top = 283
+                Width = 160
+                Height = 15
+                Caption = 'Timeline refresh (per second)'
+              end
+              object cboSetTlRefresh: TComboBox
+                Left = 640
+                Top = 280
+                Width = 70
+                Height = 23
+                Style = csDropDownList
+                TabOrder = 14
+                OnChange = cboSetTlRefreshChange
               end
               object chkSetTempoAuto: TCheckBox
                 Left = 16
@@ -4596,7 +4656,7 @@
     Top = 160
   end
   object dlgTimelineExport: TSaveDialog
-    Filter = 'WAV - 24-bit stereo PCM|*.wav|MP3 - 320 kbps stereo|*.mp3|MP4 - AAC stereo audio|*.mp4|M4A - AAC stereo audio|*.m4a|Raw PCM - signed 16-bit stereo + metadata|*.pcm|FLAC - 24-bit lossless stereo|*.flac'
+    Filter = 'WAV - 24-bit stereo PCM|*.wav|MP3 - 320 kbps stereo|*.mp3|MP4 - AAC stereo audio|*.mp4|M4A - AAC stereo audio|*.m4a|Raw PCM - signed 16-bit stereo + metadata|*.pcm|FLAC - 24-bit lossless stereo|*.flac|MKV - video with audio|*.mkv'
     Options = [ofOverwritePrompt, ofHideReadOnly, ofPathMustExist, ofEnableSizing]
     Title = 'Export complete timeline mix'
     Left = 280
@@ -4647,6 +4707,10 @@
       object pmSunoLyricsExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmSunoLyricsExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmSunoLyricsExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -4718,7 +4782,7 @@
   end
   object dlgOpenMp4: TOpenDialog
     DefaultExt = 'mp4'
-    Filter = 'MP4 audio (*.mp4;*.m4a)|*.mp4;*.m4a|All files (*.*)|*.*'
+    Filter = 'Video and audio (*.mp4;*.m4a;*.m4v;*.mov;*.mkv;*.webm)|*.mp4;*.m4a;*.m4v;*.mov;*.mkv;*.webm|All files (*.*)|*.*'
     Options = [ofFileMustExist]
     Left = 688
     Top = 288
@@ -5062,6 +5126,10 @@
           Caption = 'MP4...'
           OnClick = pmTlExportMp4Click
         end
+        object mnuTlExportMkv: TMenuItem
+          Caption = 'MKV...'
+          OnClick = pmTlExportMkvClick
+        end
         object mnuTlExportFlac: TMenuItem
           Caption = 'FLAC...'
           OnClick = pmTlExportFlacClick
@@ -5284,7 +5352,7 @@
           Caption = '-'
         end
         object mnuTlEffects: TMenuItem
-          Caption = 'Effects'
+          Caption = 'Audio Effects'
           object mnuTlFxAmplify: TMenuItem
             Tag = 12
             Caption = 'Amplify'
@@ -5398,6 +5466,16 @@
             Caption = 'Gate'
             OnClick = TlFxMenuClick
           end
+          object mnuTlFxTube: TMenuItem
+            Tag = 40
+            Caption = 'Tube Saturation'
+            OnClick = TlFxMenuClick
+          end
+          object mnuTlFxSoftClip: TMenuItem
+            Tag = 41
+            Caption = 'Soft Clip'
+            OnClick = TlFxMenuClick
+          end
           object mnuTlFxHardClip: TMenuItem
             Tag = 18
             Caption = 'Hard Clip'
@@ -5499,6 +5577,303 @@
             Tag = 6
             Caption = 'Tremolo'
             OnClick = TlFxMenuClick
+          end
+        end
+        object mnuTlVideoEffects: TMenuItem
+          Caption = 'Video Effects'
+          object mnuTlVfxGrpDissolve: TMenuItem
+            Caption = 'Dissolve'
+            object mnuTlVfxCrossfade: TMenuItem
+              Tag = 0
+              Caption = 'Cross Dissolve'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxDipblack: TMenuItem
+              Tag = 1
+              Caption = 'Dip to Black'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxDipwhite: TMenuItem
+              Tag = 2
+              Caption = 'Dip to White'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxBlurdissolve: TMenuItem
+              Tag = 3
+              Caption = 'Blur Dissolve'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxPixeldissolve: TMenuItem
+              Tag = 4
+              Caption = 'Pixelate Dissolve'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpWipe: TMenuItem
+            Caption = 'Wipe'
+            object mnuTlVfxWipeleft: TMenuItem
+              Tag = 5
+              Caption = 'Wipe Left'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxWiperight: TMenuItem
+              Tag = 6
+              Caption = 'Wipe Right'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxWipeup: TMenuItem
+              Tag = 7
+              Caption = 'Wipe Up'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxWipedown: TMenuItem
+              Tag = 8
+              Caption = 'Wipe Down'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxClock: TMenuItem
+              Tag = 9
+              Caption = 'Clock Wipe'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxBarndoor: TMenuItem
+              Tag = 10
+              Caption = 'Barn Doors'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxCircleopen: TMenuItem
+              Tag = 11
+              Caption = 'Iris Open'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxCircleclose: TMenuItem
+              Tag = 12
+              Caption = 'Iris Close'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpSlideandZoom: TMenuItem
+            Caption = 'Slide and Zoom'
+            object mnuTlVfxSlideleft: TMenuItem
+              Tag = 13
+              Caption = 'Push Left'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSlideright: TMenuItem
+              Tag = 14
+              Caption = 'Push Right'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSlideup: TMenuItem
+              Tag = 15
+              Caption = 'Push Up'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSlidedown: TMenuItem
+              Tag = 16
+              Caption = 'Push Down'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxZoomin: TMenuItem
+              Tag = 17
+              Caption = 'Zoom In'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxZoomout: TMenuItem
+              Tag = 18
+              Caption = 'Zoom Out'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxGlitchtrans: TMenuItem
+              Tag = 19
+              Caption = 'Glitch Transition'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpFade: TMenuItem
+            Caption = 'Fade'
+            object mnuTlVfxFadein: TMenuItem
+              Tag = 20
+              Caption = 'Fade In'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxFadeout: TMenuItem
+              Tag = 21
+              Caption = 'Fade Out'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxFlash: TMenuItem
+              Tag = 22
+              Caption = 'Flash'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpBlurandSharpen: TMenuItem
+            Caption = 'Blur and Sharpen'
+            object mnuTlVfxBlur: TMenuItem
+              Tag = 23
+              Caption = 'Blur'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSharpen: TMenuItem
+              Tag = 24
+              Caption = 'Sharpen'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxPixelate: TMenuItem
+              Tag = 25
+              Caption = 'Pixelate'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpColour: TMenuItem
+            Caption = 'Colour'
+            object mnuTlVfxBw: TMenuItem
+              Tag = 26
+              Caption = 'Black and White'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSepia: TMenuItem
+              Tag = 27
+              Caption = 'Sepia'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxInvert: TMenuItem
+              Tag = 28
+              Caption = 'Invert'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxDuotone: TMenuItem
+              Tag = 29
+              Caption = 'Duotone'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxTint: TMenuItem
+              Tag = 30
+              Caption = 'Colour Tint'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxWarm: TMenuItem
+              Tag = 31
+              Caption = 'Warm'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxCool: TMenuItem
+              Tag = 32
+              Caption = 'Cool'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxBrighten: TMenuItem
+              Tag = 33
+              Caption = 'Brighten'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxDarken: TMenuItem
+              Tag = 34
+              Caption = 'Darken'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxContrast: TMenuItem
+              Tag = 35
+              Caption = 'Contrast'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxVivid: TMenuItem
+              Tag = 36
+              Caption = 'Vivid'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxDesaturate: TMenuItem
+              Tag = 37
+              Caption = 'Desaturate'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxPosterize: TMenuItem
+              Tag = 38
+              Caption = 'Posterize'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpStyle: TMenuItem
+            Caption = 'Style'
+            object mnuTlVfxVignette: TMenuItem
+              Tag = 39
+              Caption = 'Vignette'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxGrain: TMenuItem
+              Tag = 40
+              Caption = 'Film Grain'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxScanlines: TMenuItem
+              Tag = 41
+              Caption = 'VHS Scanlines'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSketch: TMenuItem
+              Tag = 42
+              Caption = 'Sketch'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxEmboss: TMenuItem
+              Tag = 43
+              Caption = 'Emboss'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpDistort: TMenuItem
+            Caption = 'Distort'
+            object mnuTlVfxGlitch: TMenuItem
+              Tag = 44
+              Caption = 'Glitch'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxRgbsplit: TMenuItem
+              Tag = 45
+              Caption = 'RGB Split'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxMirror: TMenuItem
+              Tag = 46
+              Caption = 'Mirror'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxFlipv: TMenuItem
+              Tag = 47
+              Caption = 'Flip Vertical'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxGrpMotion: TMenuItem
+            Caption = 'Motion'
+            object mnuTlVfxShake: TMenuItem
+              Tag = 48
+              Caption = 'Shake'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSlowzoom: TMenuItem
+              Tag = 49
+              Caption = 'Slow Zoom In'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxSpin: TMenuItem
+              Tag = 50
+              Caption = 'Spin'
+              OnClick = TlVideoFxMenuClick
+            end
+            object mnuTlVfxPulse: TMenuItem
+              Tag = 51
+              Caption = 'Zoom Pulse'
+              OnClick = TlVideoFxMenuClick
+            end
+          end
+          object mnuTlVfxSep: TMenuItem
+            Caption = '-'
+          end
+          object mnuTlVfxRemove: TMenuItem
+            Caption = 'Remove Video Effect at Playhead'
+            OnClick = TlVideoFxRemoveClick
           end
         end
         object mnuTlEditSep2: TMenuItem
@@ -6076,6 +6451,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmTrkGridExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmTrkGridExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -6113,6 +6492,10 @@
       object pmTrkSeqExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmTrkSeqExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmTrkSeqExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -6201,6 +6584,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmMixerExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmMixerExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -6272,6 +6659,10 @@
       object pmPianoRollExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmPianoRollExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmPianoRollExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -6498,6 +6889,10 @@
           Caption = 'MP4...'
           OnClick = pmTlExportMp4Click
         end
+        object pmTlExportMkv: TMenuItem
+          Caption = 'MKV...'
+          OnClick = pmTlExportMkvClick
+        end
         object pmTlExportFlac: TMenuItem
           Caption = 'FLAC...'
           OnClick = pmTlExportFlacClick
@@ -6597,7 +6992,7 @@
         Caption = '-'
       end
       object pmTlEffects: TMenuItem
-        Caption = 'Effects'
+        Caption = 'Audio Effects'
         object pmTlFxAmplify: TMenuItem
           Tag = 12
           Caption = 'Amplify'
@@ -6711,6 +7106,16 @@
           Caption = 'Gate'
           OnClick = TlFxMenuClick
         end
+        object pmTlFxTube: TMenuItem
+          Tag = 40
+          Caption = 'Tube Saturation'
+          OnClick = TlFxMenuClick
+        end
+        object pmTlFxSoftClip: TMenuItem
+          Tag = 41
+          Caption = 'Soft Clip'
+          OnClick = TlFxMenuClick
+        end
         object pmTlFxHardClip: TMenuItem
           Tag = 18
           Caption = 'Hard Clip'
@@ -6812,6 +7217,303 @@
           Tag = 6
           Caption = 'Tremolo'
           OnClick = TlFxMenuClick
+        end
+      end
+      object pmTlVideoEffects: TMenuItem
+        Caption = 'Video Effects'
+        object pmTlVfxGrpDissolve: TMenuItem
+          Caption = 'Dissolve'
+          object pmTlVfxCrossfade: TMenuItem
+            Tag = 0
+            Caption = 'Cross Dissolve'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxDipblack: TMenuItem
+            Tag = 1
+            Caption = 'Dip to Black'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxDipwhite: TMenuItem
+            Tag = 2
+            Caption = 'Dip to White'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxBlurdissolve: TMenuItem
+            Tag = 3
+            Caption = 'Blur Dissolve'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxPixeldissolve: TMenuItem
+            Tag = 4
+            Caption = 'Pixelate Dissolve'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpWipe: TMenuItem
+          Caption = 'Wipe'
+          object pmTlVfxWipeleft: TMenuItem
+            Tag = 5
+            Caption = 'Wipe Left'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxWiperight: TMenuItem
+            Tag = 6
+            Caption = 'Wipe Right'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxWipeup: TMenuItem
+            Tag = 7
+            Caption = 'Wipe Up'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxWipedown: TMenuItem
+            Tag = 8
+            Caption = 'Wipe Down'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxClock: TMenuItem
+            Tag = 9
+            Caption = 'Clock Wipe'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxBarndoor: TMenuItem
+            Tag = 10
+            Caption = 'Barn Doors'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxCircleopen: TMenuItem
+            Tag = 11
+            Caption = 'Iris Open'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxCircleclose: TMenuItem
+            Tag = 12
+            Caption = 'Iris Close'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpSlideandZoom: TMenuItem
+          Caption = 'Slide and Zoom'
+          object pmTlVfxSlideleft: TMenuItem
+            Tag = 13
+            Caption = 'Push Left'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSlideright: TMenuItem
+            Tag = 14
+            Caption = 'Push Right'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSlideup: TMenuItem
+            Tag = 15
+            Caption = 'Push Up'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSlidedown: TMenuItem
+            Tag = 16
+            Caption = 'Push Down'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxZoomin: TMenuItem
+            Tag = 17
+            Caption = 'Zoom In'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxZoomout: TMenuItem
+            Tag = 18
+            Caption = 'Zoom Out'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxGlitchtrans: TMenuItem
+            Tag = 19
+            Caption = 'Glitch Transition'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpFade: TMenuItem
+          Caption = 'Fade'
+          object pmTlVfxFadein: TMenuItem
+            Tag = 20
+            Caption = 'Fade In'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxFadeout: TMenuItem
+            Tag = 21
+            Caption = 'Fade Out'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxFlash: TMenuItem
+            Tag = 22
+            Caption = 'Flash'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpBlurandSharpen: TMenuItem
+          Caption = 'Blur and Sharpen'
+          object pmTlVfxBlur: TMenuItem
+            Tag = 23
+            Caption = 'Blur'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSharpen: TMenuItem
+            Tag = 24
+            Caption = 'Sharpen'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxPixelate: TMenuItem
+            Tag = 25
+            Caption = 'Pixelate'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpColour: TMenuItem
+          Caption = 'Colour'
+          object pmTlVfxBw: TMenuItem
+            Tag = 26
+            Caption = 'Black and White'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSepia: TMenuItem
+            Tag = 27
+            Caption = 'Sepia'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxInvert: TMenuItem
+            Tag = 28
+            Caption = 'Invert'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxDuotone: TMenuItem
+            Tag = 29
+            Caption = 'Duotone'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxTint: TMenuItem
+            Tag = 30
+            Caption = 'Colour Tint'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxWarm: TMenuItem
+            Tag = 31
+            Caption = 'Warm'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxCool: TMenuItem
+            Tag = 32
+            Caption = 'Cool'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxBrighten: TMenuItem
+            Tag = 33
+            Caption = 'Brighten'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxDarken: TMenuItem
+            Tag = 34
+            Caption = 'Darken'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxContrast: TMenuItem
+            Tag = 35
+            Caption = 'Contrast'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxVivid: TMenuItem
+            Tag = 36
+            Caption = 'Vivid'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxDesaturate: TMenuItem
+            Tag = 37
+            Caption = 'Desaturate'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxPosterize: TMenuItem
+            Tag = 38
+            Caption = 'Posterize'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpStyle: TMenuItem
+          Caption = 'Style'
+          object pmTlVfxVignette: TMenuItem
+            Tag = 39
+            Caption = 'Vignette'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxGrain: TMenuItem
+            Tag = 40
+            Caption = 'Film Grain'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxScanlines: TMenuItem
+            Tag = 41
+            Caption = 'VHS Scanlines'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSketch: TMenuItem
+            Tag = 42
+            Caption = 'Sketch'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxEmboss: TMenuItem
+            Tag = 43
+            Caption = 'Emboss'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpDistort: TMenuItem
+          Caption = 'Distort'
+          object pmTlVfxGlitch: TMenuItem
+            Tag = 44
+            Caption = 'Glitch'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxRgbsplit: TMenuItem
+            Tag = 45
+            Caption = 'RGB Split'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxMirror: TMenuItem
+            Tag = 46
+            Caption = 'Mirror'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxFlipv: TMenuItem
+            Tag = 47
+            Caption = 'Flip Vertical'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxGrpMotion: TMenuItem
+          Caption = 'Motion'
+          object pmTlVfxShake: TMenuItem
+            Tag = 48
+            Caption = 'Shake'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSlowzoom: TMenuItem
+            Tag = 49
+            Caption = 'Slow Zoom In'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxSpin: TMenuItem
+            Tag = 50
+            Caption = 'Spin'
+            OnClick = TlVideoFxMenuClick
+          end
+          object pmTlVfxPulse: TMenuItem
+            Tag = 51
+            Caption = 'Zoom Pulse'
+            OnClick = TlVideoFxMenuClick
+          end
+        end
+        object pmTlVfxSep: TMenuItem
+          Caption = '-'
+        end
+        object pmTlVfxRemove: TMenuItem
+          Caption = 'Remove Video Effect at Playhead'
+          OnClick = TlVideoFxRemoveClick
         end
       end
       object pmTlSepEditE: TMenuItem
@@ -6968,6 +7670,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmTimelineRulerExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmTimelineRulerExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7054,6 +7760,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmProjectExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmProjectExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7118,6 +7828,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmMp3ExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmMp3ExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7160,6 +7874,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmSystemExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmSystemExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7201,6 +7919,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmLogExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmLogExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7238,6 +7960,10 @@
       object pmJobsExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmJobsExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmJobsExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -7292,6 +8018,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmAudioExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmAudioExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7325,6 +8055,10 @@
       object pmDspExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmDspExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmDspExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -7363,6 +8097,10 @@
       object pmGraphExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmGraphExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmGraphExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -7413,6 +8151,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmWavExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmWavExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7455,6 +8197,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmRecordingExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmRecordingExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7496,6 +8242,10 @@
       object pmSecureExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmSecureExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmSecureExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -7561,6 +8311,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmMp4ExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmMp4ExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7599,6 +8353,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmSettingsExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmSettingsExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7633,6 +8391,10 @@
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
       end
+      object pmScopeExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
+      end
       object pmScopeExportFlac: TMenuItem
         Caption = 'FLAC...'
         OnClick = pmTlExportFlacClick
@@ -7666,6 +8428,10 @@
       object pmAdvDspExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmAdvDspExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmAdvDspExportFlac: TMenuItem
         Caption = 'FLAC...'
@@ -7792,6 +8558,10 @@
       object pmAiExportMp4: TMenuItem
         Caption = 'MP4...'
         OnClick = pmTlExportMp4Click
+      end
+      object pmAiExportMkv: TMenuItem
+        Caption = 'MKV...'
+        OnClick = pmTlExportMkvClick
       end
       object pmAiExportFlac: TMenuItem
         Caption = 'FLAC...'

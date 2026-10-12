@@ -62,6 +62,7 @@ const
   CFG_GEN_LOCALE    = 'locale';
   CFG_GEN_SHOW_HINTS     = 'show_hints';          // system-wide (not per project): rollover hint bubbles, default on
   CFG_GEN_TEMPO_AUTO     = 'tempo_auto_detect';   // 1st imported audio track sets the Timeline BPM (default on)
+  CFG_GEN_TL_REFRESH_HZ  = 'timeline_refresh_hz'; // Timeline redraws per second while playing: 5..40 in steps of 5 (default 20)
   CFG_GEN_TEMPO_RESAMPLE = 'tempo_resample';      // conform clip tempo by resampling (pitch follows) instead of phase vocoder (default off)
 
   { [paths] - user-configurable working directories (Settings tab).  Each is a

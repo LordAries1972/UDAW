@@ -38,6 +38,14 @@ type
     CompatibleBrands: string;      // space separated
     Fragmented: Boolean;
     HasAudio: Boolean;
+    AudioStreamCount: Integer;     // how many separate sound streams the file holds
+    { --- the first video track, when present (shown by the OS, never decoded
+          here) --- }
+    HasVideo: Boolean;
+    VideoCodecName: string;
+    VideoWidth: Integer;
+    VideoHeight: Integer;
+    VideoDurationSeconds: Double;
     { --- the audio track, when present --- }
     SampleEntry: string;          // raw FourCC from stsd
     Codec: TMP4CodecKind;
@@ -51,6 +59,9 @@ type
     DurationSeconds: Double;
     AvgBitrateKbps: Integer;
     Decodable: Boolean;           // this unit can turn it into PCM right now
+    { the in-house decoders do not cover this file (HE-AAC, fragmented MP4, MKV ...):
+      the system pipeline (Mp4SystemDecode) does the decoding }
+    UseSystemDecoder: Boolean;
     function ContainerReport: string;
     function Describe: string;
   end;
@@ -63,9 +74,26 @@ type
     Codec: TMP4CodecKind;
     CodecName: string;
     ContainerBrand: string;
+    Degraded: Boolean;            // only the core band could be decoded (SBR not reconstructed)
+    DamagedBlocks: Int64;         // AAC frames that failed to decode and were replaced by silence
+    FirstError: string;           // why the first of them failed
   end;
 
   TMP4EncodeCodec = (mecPCM16, mecPCM24, mecFloat32);
+
+  { The Windows build registers the system (DirectShow) pipeline here - the same
+    approach MPC-HC takes: whatever splitter and decoder the machine has turn
+    the file into PCM.  Left nil elsewhere. }
+  TMP4SystemProbe = function(const AFileName: string; out AInfo: TMP4ProbeInfo): Boolean;
+  TMP4SystemDecode = function(const AFileName: string; AStream: Integer;
+    out ARes: TMP4DecodeResult): Boolean;
+
+var
+  Mp4SystemProbe: TMP4SystemProbe = nil;
+  Mp4SystemDecode: TMP4SystemDecode = nil;
+
+{ A Matroska / WebM file (EBML header) - never read by the in-house MP4 code. }
+function IsMatroskaFile(const AFileName: string): Boolean;
 
 { ---- sniffing (never looks at the extension) ---- }
 function Mp4SniffData(const AData: TBytes): Boolean;
@@ -78,6 +106,10 @@ function Mp4ProbeFile(const AFileName: string; out AInfo: TMP4ProbeInfo): Boolea
 { ---- decode to engine PCM ---- }
 function Mp4DecodeAudio(const AData: TBytes; out ARes: TMP4DecodeResult): Boolean;
 function Mp4DecodeAudioFile(const AFileName: string; out ARes: TMP4DecodeResult): Boolean;
+{ The Nth sound stream (0-based, file order) - a file with several languages or
+  commentary tracks holds more than one. Stream 0 is what Mp4DecodeAudioFile reads. }
+function Mp4DecodeAudioStreamFile(const AFileName: string; AStream: Integer;
+  out ARes: TMP4DecodeResult): Boolean;
 
 { ---- encode PCM into an MP4 container ---- }
 function Mp4EncodeAudio(const APcm: TAudioPlanar; ASampleRate: Integer;
@@ -183,7 +215,9 @@ begin
       if Length(buf) = 0 then Exit;
       n := fs.Read(buf[0], Length(buf));
       SetLength(buf, n);
-      Result := Mp4SniffData(buf);
+      Result := Mp4SniffData(buf) or
+        (Assigned(Mp4SystemProbe) and (n >= 4) and (buf[0] = $1A) and (buf[1] = $45) and
+         (buf[2] = $DF) and (buf[3] = $A3));
     finally
       fs.Free;
     end;
@@ -201,11 +235,33 @@ begin
     Result := AacTablesReady;
 end;
 
+{ AAC access units each decode to 1024 frames.  The edit list says how many of
+  the leading frames are encoder priming (to drop) and how many frames are real
+  audio (the rest is encoder padding).  Both numbers are in media ticks. }
+procedure AacEditRange(ATrack: TMP4Track; AAccessUnits: Integer;
+  out ASkipFrames, AKeepFrames: Integer);
+var
+  rate: Int64;
+  total: Int64;
+begin
+  total := Int64(AAccessUnits) * 1024;
+  ASkipFrames := 0;
+  AKeepFrames := Integer(total);
+  rate := ATrack.SampleRate;
+  if (ATrack.MediaTimescale = 0) or (rate = 0) then Exit;
+  ASkipFrames := Integer((ATrack.EditStartTicks * rate + ATrack.MediaTimescale div 2) div ATrack.MediaTimescale);
+  if ASkipFrames > total then ASkipFrames := Integer(total);
+  total := total - ASkipFrames;
+  if ATrack.EditLengthTicks >= 0 then
+    total := Min(total, (ATrack.EditLengthTicks * rate + ATrack.MediaTimescale div 2) div ATrack.MediaTimescale);
+  AKeepFrames := Integer(total);
+end;
+
 function Mp4Probe(const AData: TBytes; out AInfo: TMP4ProbeInfo): Boolean;
 var
   rdr: TMP4Reader;
-  at: TMP4Track;
-  i: Integer;
+  at, vt: TMP4Track;
+  i, skip, keep: Integer;
 begin
   FillChar(AInfo, SizeOf(AInfo), 0);
   Result := False;
@@ -225,6 +281,7 @@ begin
       AInfo.CompatibleBrands := AInfo.CompatibleBrands + rdr.CompatibleBrands[i];
     end;
     AInfo.Fragmented := rdr.Fragmented;
+    AInfo.AudioStreamCount := rdr.AudioTrackCount;
 
     at := rdr.FirstAudioTrack;
     if at <> nil then
@@ -240,8 +297,24 @@ begin
       AInfo.BitsPerSample := at.BitsPerSample;
       AInfo.SampleCount := at.Table.SampleCount;
       AInfo.DurationSeconds := at.DurationSeconds;
+      if (at.Codec in [mckAAC_LC, mckHE_AAC, mckHE_AACv2]) and (at.SampleRate > 0) then
+      begin
+        { for AAC the table counts access units; report real PCM frames }
+        AacEditRange(at, at.Table.SampleCount, skip, keep);
+        AInfo.SampleCount := keep;
+        AInfo.DurationSeconds := keep / at.SampleRate;
+      end;
       AInfo.AvgBitrateKbps := at.AvgBitrate div 1000;
       AInfo.Decodable := CodecDecodableHere(at.Codec) and (not rdr.Fragmented);
+    end;
+    vt := rdr.FirstVideoTrack;
+    if vt <> nil then
+    begin
+      AInfo.HasVideo := True;
+      AInfo.VideoCodecName := vt.CodecName;
+      AInfo.VideoWidth := vt.VideoWidth;
+      AInfo.VideoHeight := vt.VideoHeight;
+      AInfo.VideoDurationSeconds := vt.DurationSeconds;
     end;
     Result := True;
   finally
@@ -249,29 +322,223 @@ begin
   end;
 end;
 
-function Mp4ProbeFile(const AFileName: string; out AInfo: TMP4ProbeInfo): Boolean;
+{ The file's ftyp and moov boxes only (the sound/picture payload in mdat is
+  skipped by seeking), so probing or decoding the sound of a large video never
+  loads the video.  Empty when the layout is not the usual one. }
+function ReadHeaderAndMoov(const AFileName: string): TBytes;
+const
+  MAX_MOOV = 1024 * 1024 * 1024;
+var
+  fs: TFileStream;
+  hdr: array[0..15] of Byte;
+  pos, size, hdrLen: Int64;
+  kind: string;
+  ftyp, moov: TBytes;
+  i: Integer;
+
+  procedure Grab(var ADest: TBytes);
+  begin
+    SetLength(ADest, size);
+    fs.Position := pos;
+    fs.ReadBuffer(ADest[0], size);
+  end;
+
 begin
-  Result := Mp4Probe(LoadFile(AFileName), AInfo);
+  SetLength(Result, 0);
+  try
+    fs := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+  except
+    Exit;
+  end;
+  try
+    pos := 0;
+    while (pos + 8 <= fs.Size) and ((Length(moov) = 0) or (Length(ftyp) = 0)) do
+    begin
+      fs.Position := pos;
+      fs.ReadBuffer(hdr[0], 8);
+      size := (Int64(hdr[0]) shl 24) or (Int64(hdr[1]) shl 16) or (Int64(hdr[2]) shl 8) or hdr[3];
+      kind := Chr(hdr[4]) + Chr(hdr[5]) + Chr(hdr[6]) + Chr(hdr[7]);
+      hdrLen := 8;
+      if size = 1 then
+      begin
+        if pos + 16 > fs.Size then Break;
+        fs.ReadBuffer(hdr[8], 8);
+        size := 0;
+        for i := 8 to 15 do size := (size shl 8) or hdr[i];
+        hdrLen := 16;
+      end
+      else if size = 0 then
+        size := fs.Size - pos;
+      if (size < hdrLen) or (pos + size > fs.Size) then Break;
+      if (kind = 'ftyp') and (Length(ftyp) = 0) and (size <= 4096) then Grab(ftyp)
+      else if (kind = 'moov') and (Length(moov) = 0) then
+      begin
+        if size > MAX_MOOV then Break;
+        Grab(moov);
+      end;
+      pos := pos + size;
+    end;
+    if Length(moov) = 0 then Exit;
+    SetLength(Result, Length(ftyp) + Length(moov));
+    if Length(ftyp) > 0 then Move(ftyp[0], Result[0], Length(ftyp));
+    Move(moov[0], Result[Length(ftyp)], Length(moov));
+  finally
+    fs.Free;
+  end;
+end;
+
+function IsMatroskaFile(const AFileName: string): Boolean;
+var
+  fs: TFileStream;
+  b: array[0..3] of Byte;
+begin
+  Result := False;
+  if not FileExists(AFileName) then Exit;
+  try
+    fs := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+    try
+      Result := (fs.Read(b[0], 4) = 4) and (b[0] = $1A) and (b[1] = $45) and
+        (b[2] = $DF) and (b[3] = $A3);
+    finally
+      fs.Free;
+    end;
+  except
+    Result := False;
+  end;
+end;
+
+{ HE-AAC (SBR / PS), fragmented MP4 and codecs without an in-house decoder are
+  decoded by the system pipeline when there is one.  Whatever it decodes, it
+  also measures: a fragmented file's moov has no sample table (no duration), and
+  an HE-AAC stream's real rate is twice the one its config states. }
+procedure MarkSystemDecode(const AFileName: string; var AInfo: TMP4ProbeInfo);
+var
+  sys: TMP4ProbeInfo;
+begin
+  if not Assigned(Mp4SystemDecode) then Exit;
+  if AInfo.HasAudio and
+     (AInfo.Fragmented or (not AInfo.Decodable) or
+      (AInfo.Codec in [mckHE_AAC, mckHE_AACv2]) or
+      (AInfo.AudioObjectType in [5, 29])) then
+  begin
+    AInfo.UseSystemDecoder := True;
+    AInfo.Decodable := True;
+  end;
+  if (AInfo.UseSystemDecoder or (AInfo.Fragmented and (AInfo.DurationSeconds <= 0))) and
+     Assigned(Mp4SystemProbe) and Mp4SystemProbe(AFileName, sys) then
+  begin
+    if sys.HasAudio then
+    begin
+      AInfo.HasAudio := True;
+      if AInfo.UseSystemDecoder then
+      begin
+        AInfo.SampleRate := sys.SampleRate;
+        AInfo.Channels := sys.Channels;
+      end;
+      AInfo.DurationSeconds := sys.DurationSeconds;
+      AInfo.SampleCount := sys.SampleCount;
+      if sys.AudioStreamCount > AInfo.AudioStreamCount then
+        AInfo.AudioStreamCount := sys.AudioStreamCount;
+      if AInfo.CodecName = '' then AInfo.CodecName := sys.CodecName;
+      if AInfo.Fragmented then AInfo.UseSystemDecoder := True;
+      AInfo.Decodable := True;
+    end;
+    if AInfo.HasVideo and (sys.VideoDurationSeconds > 0) and
+       (AInfo.VideoDurationSeconds <= 0) then
+      AInfo.VideoDurationSeconds := sys.VideoDurationSeconds;
+  end;
+end;
+
+function Mp4ProbeFile(const AFileName: string; out AInfo: TMP4ProbeInfo): Boolean;
+var
+  head: TBytes;
+begin
+  FillChar(AInfo, SizeOf(AInfo), 0);
+  if IsMatroskaFile(AFileName) then
+    Exit(Assigned(Mp4SystemProbe) and Mp4SystemProbe(AFileName, AInfo));
+  if not FileExists(AFileName) then
+    RaiseUDAWFmt(errFileNotFound, MP4_FACADE_SUBSYS, 'MP4 file not found: %s', [AFileName]);
+  head := ReadHeaderAndMoov(AFileName);
+  if Length(head) = 0 then
+  begin
+    { not the usual layout: only a file that really looks like MP4 is read whole }
+    if not Mp4SniffFile(AFileName) then Exit(False);
+    head := LoadFile(AFileName);
+  end;
+  Result := Mp4Probe(head, AInfo);
+  if Result then MarkSystemDecode(AFileName, AInfo);
 end;
 
 { ============================ decode ============================= }
 
-{ read a sample's raw bytes out of the file buffer }
-function SampleBytes(const AData: TBytes; const S: TMP4SampleRef): TBytes;
+{ Where the audio samples' bytes come from: a whole file already in memory, or
+  the file itself - read sample by sample so a multi-gigabyte video file never
+  has to be loaded just to get at its sound. }
+type
+  TMP4SampleSource = class
+  public
+    function Read(const S: TMP4SampleRef): TBytes; virtual; abstract;
+  end;
+
+  TMP4MemorySource = class(TMP4SampleSource)
+  private
+    FData: TBytes;
+  public
+    constructor Create(const AData: TBytes);
+    function Read(const S: TMP4SampleRef): TBytes; override;
+  end;
+
+  TMP4FileSource = class(TMP4SampleSource)
+  private
+    FStream: TFileStream;
+  public
+    constructor Create(const AFileName: string);
+    destructor Destroy; override;
+    function Read(const S: TMP4SampleRef): TBytes; override;
+  end;
+
+constructor TMP4MemorySource.Create(const AData: TBytes);
 begin
-  SetLength(Result, 0);
-  if (S.Offset < 0) or (S.Size <= 0) or (S.Offset + S.Size > Length(AData)) then Exit;
-  SetLength(Result, S.Size);
-  Move(AData[S.Offset], Result[0], S.Size);
+  inherited Create;
+  FData := AData;
 end;
 
-procedure DecodePCMTrack(const AData: TBytes; ATrack: TMP4Track;
+function TMP4MemorySource.Read(const S: TMP4SampleRef): TBytes;
+begin
+  SetLength(Result, 0);
+  if (S.Offset < 0) or (S.Size <= 0) or (S.Offset + S.Size > Length(FData)) then Exit;
+  SetLength(Result, S.Size);
+  Move(FData[S.Offset], Result[0], S.Size);
+end;
+
+constructor TMP4FileSource.Create(const AFileName: string);
+begin
+  inherited Create;
+  FStream := TFileStream.Create(AFileName, fmOpenRead or fmShareDenyNone);
+end;
+
+destructor TMP4FileSource.Destroy;
+begin
+  FStream.Free;
+  inherited;
+end;
+
+function TMP4FileSource.Read(const S: TMP4SampleRef): TBytes;
+begin
+  SetLength(Result, 0);
+  if (S.Offset < 0) or (S.Size <= 0) or (S.Offset + S.Size > FStream.Size) then Exit;
+  SetLength(Result, S.Size);
+  FStream.Position := S.Offset;
+  FStream.ReadBuffer(Result[0], S.Size);
+end;
+
+procedure DecodePCMTrack(ASource: TMP4SampleSource; ATrack: TMP4Track;
   out ARes: TMP4DecodeResult);
 var
   ch, chans, bytesPerSample, frameBytes, i, fi, totalFrames: Integer;
   kind: TMP4CodecKind;
   littleEndian, isFloat, isUnsigned: Boolean;
-  blob: TBytes;
+  blob, sb: TBytes;
   p, blobLen: Int64;
   s: Single;
   smp: TMP4SampleRefArray;
@@ -375,10 +642,11 @@ begin
   p := 0;
   for i := 0 to High(smp) do
   begin
-    if (smp[i].Offset >= 0) and (smp[i].Offset + smp[i].Size <= Length(AData)) and (smp[i].Size > 0) then
+    sb := ASource.Read(smp[i]);
+    if Length(sb) > 0 then
     begin
-      Move(AData[smp[i].Offset], blob[p], smp[i].Size);
-      Inc(p, smp[i].Size);
+      Move(sb[0], blob[p], Length(sb));
+      Inc(p, Length(sb));
     end;
   end;
   blobLen := p;
@@ -406,11 +674,11 @@ begin
   ARes.CodecName := ATrack.CodecName;
 end;
 
-procedure DecodeMP3Track(const AData: TBytes; ATrack: TMP4Track;
+procedure DecodeMP3Track(ASource: TMP4SampleSource; ATrack: TMP4Track;
   out ARes: TMP4DecodeResult);
 var
   smp: TMP4SampleRefArray;
-  blob: TBytes;
+  blob, sb: TBytes;
   p, blobLen: Int64;
   i: Integer;
   mres: TMP3DecodeResult;
@@ -422,11 +690,14 @@ begin
   SetLength(blob, blobLen);
   p := 0;
   for i := 0 to High(smp) do
-    if (smp[i].Offset >= 0) and (smp[i].Offset + smp[i].Size <= Length(AData)) and (smp[i].Size > 0) then
+  begin
+    sb := ASource.Read(smp[i]);
+    if Length(sb) > 0 then
     begin
-      Move(AData[smp[i].Offset], blob[p], smp[i].Size);
-      Inc(p, smp[i].Size);
+      Move(sb[0], blob[p], Length(sb));
+      Inc(p, Length(sb));
     end;
+  end;
   SetLength(blob, p);
 
   if not Mp3Decode(blob, mres, False) then
@@ -440,7 +711,7 @@ begin
   ARes.CodecName := ATrack.CodecName;
 end;
 
-procedure DecodeAACTrack(const AData: TBytes; ATrack: TMP4Track;
+procedure DecodeAACTrack(ASource: TMP4SampleSource; ATrack: TMP4Track;
   out ARes: TMP4DecodeResult);
 var
   smp: TMP4SampleRefArray;
@@ -448,6 +719,7 @@ var
   i: Integer;
   ares_: TAACDecodeResult;
   asc: TBytes;
+  skip, keep: Integer;
 begin
   FillChar(ARes, SizeOf(ARes), 0);
   asc := ATrack.AudioSpecificConfig;
@@ -458,16 +730,7 @@ begin
   smp := ATrack.Table.Samples;
   SetLength(units, Length(smp));
   for i := 0 to High(smp) do
-  begin
-    if (smp[i].Offset >= 0) and (smp[i].Size > 0) and
-       (smp[i].Offset + smp[i].Size <= Length(AData)) then
-    begin
-      SetLength(units[i], smp[i].Size);
-      Move(AData[smp[i].Offset], units[i][0], smp[i].Size);
-    end
-    else
-      SetLength(units[i], 0);
-  end;
+    units[i] := ASource.Read(smp[i]);
 
   if not AacDecodeRaw(asc, units, ares_) then
     RaiseUDAW(errIO, MP4_FACADE_SUBSYS, 'AAC-in-MP4: the AAC-LC decoder produced no audio');
@@ -476,40 +739,61 @@ begin
   ARes.Channels := ares_.Channels;
   ARes.SampleRate := ares_.SampleRate;
   ARes.Frames := Integer(ares_.Frames);
+  ARes.Degraded := ares_.HadSBR;
+  ARes.DamagedBlocks := ares_.DamagedBlocks;
+  ARes.FirstError := ares_.FirstError;
+  { drop the encoder's priming and padding, as the edit list says }
+  AacEditRange(ATrack, Length(smp), skip, keep);
+  if (skip > 0) or (keep < ARes.Frames) then
+  begin
+    skip := Min(skip, ARes.Frames);
+    keep := Max(0, Min(keep, ARes.Frames - skip));
+    for i := 0 to High(ARes.Data) do
+    begin
+      if skip > 0 then Move(ARes.Data[i][skip], ARes.Data[i][0], keep * SizeOf(Single));
+      SetLength(ARes.Data[i], keep);
+    end;
+    ARes.Frames := keep;
+  end;
   ARes.Codec := ATrack.Codec;
   ARes.CodecName := ATrack.CodecName;
 end;
 
-function Mp4DecodeAudio(const AData: TBytes; out ARes: TMP4DecodeResult): Boolean;
+function DecodeWithSource(const AHeader: TBytes; ASource: TMP4SampleSource;
+  AStream: Integer; out ARes: TMP4DecodeResult): Boolean;
 var
   rdr: TMP4Reader;
   at: TMP4Track;
 begin
   FillChar(ARes, SizeOf(ARes), 0);
-  rdr := TMP4Reader.Create(AData);
+  rdr := TMP4Reader.Create(AHeader);
   try
     if rdr.Fragmented then
       RaiseUDAW(errNotImplemented, MP4_FACADE_SUBSYS,
-        'fragmented MP4 (moof) decoding is not supported in this phase');
-    at := rdr.FirstAudioTrack;
+        'fragmented MP4 (moof) decoding is not supported by the built-in reader');
+    at := rdr.AudioTrackAt(AStream);
     if at = nil then
-      RaiseUDAW(errIO, MP4_FACADE_SUBSYS, 'MP4 has no sound track to decode');
+      RaiseUDAWFmt(errIO, MP4_FACADE_SUBSYS, 'MP4 has no sound stream number %d to decode',
+        [AStream + 1]);
 
     ARes.ContainerBrand := rdr.MajorBrand;
 
     if at.IsPCM then
-      DecodePCMTrack(AData, at, ARes)
+      DecodePCMTrack(ASource, at, ARes)
     else if at.Codec in [mckMP3, mckMP2, mckMP1] then
-      DecodeMP3Track(AData, at, ARes)
+      DecodeMP3Track(ASource, at, ARes)
     else if at.Codec in [mckAAC_LC, mckHE_AAC, mckHE_AACv2] then
-      DecodeAACTrack(AData, at, ARes)
+      DecodeAACTrack(ASource, at, ARes)
     else
       RaiseUDAWFmt(errNotImplemented, MP4_FACADE_SUBSYS,
         'audio codec identified as "%s" (sample entry ''%s''); the built-in ' +
-        'decoder covers AAC-LC (and the HE-AAC core), not this profile. The ' +
-        'container, codec identity, %d Hz / %d ch / %.3f s and the ' +
-        'AudioSpecificConfig are all available via Mp4Probe.',
-        [at.CodecName, at.SampleEntry, at.SampleRate, at.ChannelCount, at.DurationSeconds]);
+        'decoders cover PCM, MP3 and AAC-LC, not this one.',
+        [at.CodecName, at.SampleEntry]);
+
+    if ARes.Degraded then
+      RaiseUDAWFmt(errNotImplemented, MP4_FACADE_SUBSYS,
+        'this %s track carries SBR/PS high-band data the built-in decoder does not ' +
+        'reconstruct; decoding it would drop the top of the spectrum.', [at.CodecName]);
 
     ARes.ContainerBrand := rdr.MajorBrand;
     Result := ARes.Frames > 0;
@@ -518,9 +802,64 @@ begin
   end;
 end;
 
+function Mp4DecodeAudio(const AData: TBytes; out ARes: TMP4DecodeResult): Boolean;
+var
+  src: TMP4MemorySource;
+begin
+  src := TMP4MemorySource.Create(AData);
+  try
+    Result := DecodeWithSource(AData, src, 0, ARes);
+  finally
+    src.Free;
+  end;
+end;
+
 function Mp4DecodeAudioFile(const AFileName: string; out ARes: TMP4DecodeResult): Boolean;
 begin
-  Result := Mp4DecodeAudio(LoadFile(AFileName), ARes);
+  Result := Mp4DecodeAudioStreamFile(AFileName, 0, ARes);
+end;
+
+function Mp4DecodeAudioStreamFile(const AFileName: string; AStream: Integer;
+  out ARes: TMP4DecodeResult): Boolean;
+var
+  head: TBytes;
+  src: TMP4FileSource;
+begin
+  FillChar(ARes, SizeOf(ARes), 0);
+  if IsMatroskaFile(AFileName) then
+  begin
+    if not Assigned(Mp4SystemDecode) then
+      RaiseUDAW(errNotImplemented, MP4_FACADE_SUBSYS,
+        'Matroska (MKV/WebM) files are decoded through the Windows media pipeline, which is not available in this build');
+    Exit(Mp4SystemDecode(AFileName, AStream, ARes));
+  end;
+  if not FileExists(AFileName) then
+    RaiseUDAWFmt(errFileNotFound, MP4_FACADE_SUBSYS, 'MP4 file not found: %s', [AFileName]);
+  try
+    head := ReadHeaderAndMoov(AFileName);
+    if Length(head) = 0 then
+    begin
+      if not Mp4SniffFile(AFileName) then
+        RaiseUDAWFmt(errConfig, MP4_FACADE_SUBSYS, 'not an MP4/M4A file: %s', [AFileName]);
+      Exit(Mp4DecodeAudio(LoadFile(AFileName), ARes));
+    end;
+    src := TMP4FileSource.Create(AFileName);
+    try
+      Result := DecodeWithSource(head, src, AStream, ARes);
+    finally
+      src.Free;
+    end;
+  except
+    on E: EUDAWError do
+    begin
+      { a codec or layout the in-house decoders do not cover: hand the file to
+        the system pipeline instead of giving up (or worse, guessing) }
+      if (E.Code = errNotImplemented) and Assigned(Mp4SystemDecode) then
+        Result := Mp4SystemDecode(AFileName, AStream, ARes)
+      else
+        raise;
+    end;
+  end;
 end;
 
 { ============================ encode ============================= }
