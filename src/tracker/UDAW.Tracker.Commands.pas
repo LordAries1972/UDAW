@@ -41,6 +41,21 @@ type
     function Description: string; override;
   end;
 
+  { Replaces a rectangle of cells (rows x channels, row-major in ACells) as one undo step; used by
+    the grid's cut / paste / delete / transpose. }
+  TSetTrackerCellsCommand = class(TTrackerCommand)
+  private
+    FPattern, FRow, FChannel, FRows, FChannels: Integer;
+    FOld, FNew: TTrackerCellArray;
+    FLabel: string;
+  public
+    constructor Create(ADoc: TProjectDocument; APattern, ARow, AChannel, ARows, AChannels: Integer;
+      const ACells: TTrackerCellArray; const ALabel: string);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+  end;
+
   TSetTrackerTransportCommand = class(TTrackerCommand)
   private
     FIsSpeed: Boolean;
@@ -53,11 +68,28 @@ type
     function AbsorbNext(ANext: TDAWCommand): Boolean; override;
   end;
 
+  { Sets (or, with an empty kind, removes) the whole-channel effect of one channel. }
+  TSetTrackerChannelFxCommand = class(TTrackerCommand)
+  private
+    FChannel: Integer;
+    FOld, FNew: TTrackerChannelFx;
+  public
+    constructor Create(ADoc: TProjectDocument; AChannel: Integer;
+      const AKind, AParams, AName: string);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+  end;
+
   TTrackerStructuralCommand = class abstract(TTrackerCommand)
   private
     FBefore, FAfter: string;
+    FMixBefore, FMixAfter: string;   // the Tracker mixer (text snapshots), when the command restarts it
   protected
     function Mutate: Boolean; virtual; abstract;
+    { True for a command that replaces the whole song (new tracker, an import): the Tracker mixer
+      then starts over with it - default strips for the new channels, no effects, a flat master EQ }
+    function ResetsMixer: Boolean; virtual;
   public
     function Execute: Boolean; override;
     procedure Undo; override;
@@ -138,6 +170,7 @@ type
     FLabel: string;
   protected
     function Mutate: Boolean; override;
+    function ResetsMixer: Boolean; override;
   public
     constructor Create(ADoc: TProjectDocument; const AData: TBytes;
       const ALabel: string = 'MOD');
@@ -152,6 +185,7 @@ type
     FLabel: string;
   protected
     function Mutate: Boolean; override;
+    function ResetsMixer: Boolean; override;
   public
     constructor Create(ADoc: TProjectDocument; const AData: TBytes;
       const ALabel: string = 'XM');
@@ -166,9 +200,24 @@ type
     FLabel: string;
   protected
     function Mutate: Boolean; override;
+    function ResetsMixer: Boolean; override;
   public
     constructor Create(ADoc: TProjectDocument; const AData: TBytes;
       const ALabel: string = 'MPTM');
+    function Description: string; override;
+  end;
+
+  { Replace the project's tracker module with one read from ScreamTracker 3 / 2 or
+    Composer 669 bytes. Undo restores the previous module (text snapshot). }
+  TImportLegacyCommand = class(TTrackerStructuralCommand)
+  private
+    FData: TBytes;
+    FLabel: string;
+  protected
+    function Mutate: Boolean; override;
+    function ResetsMixer: Boolean; override;
+  public
+    constructor Create(ADoc: TProjectDocument; const AData: TBytes; const ALabel: string = 'module');
     function Description: string; override;
   end;
 
@@ -178,6 +227,7 @@ type
   TNewTrackerModuleCommand = class(TTrackerStructuralCommand)
   protected
     function Mutate: Boolean; override;
+    function ResetsMixer: Boolean; override;
   public
     function Description: string; override;
   end;
@@ -185,7 +235,9 @@ type
 implementation
 
 uses
-  UDAW.Tracker.Instrument, UDAW.Codec.ProTracker, UDAW.Codec.XM, UDAW.Codec.MPTM;
+  UDAW.Tracker.Instrument, UDAW.Codec.ProTracker, UDAW.Codec.XM, UDAW.Codec.MPTM,
+  UDAW.Codec.TrackerLegacy,
+  UDAW.Mixer.Model, UDAW.Mixer.Serialization, UDAW.Tracker.Player;
 
 { ================= TTrackerCommand ================= }
 
@@ -241,6 +293,60 @@ begin
   Result := Format('Edit pattern %d row %d ch %d', [FPattern, FRow, FChannel]);
 end;
 
+{ ================= TSetTrackerCellsCommand ================= }
+
+constructor TSetTrackerCellsCommand.Create(ADoc: TProjectDocument;
+  APattern, ARow, AChannel, ARows, AChannels: Integer; const ACells: TTrackerCellArray;
+  const ALabel: string);
+begin
+  inherited Create(ADoc);
+  FPattern := APattern;
+  FRow := ARow;
+  FChannel := AChannel;
+  FRows := ARows;
+  FChannels := AChannels;
+  FNew := Copy(ACells);
+  FLabel := ALabel;
+end;
+
+function TSetTrackerCellsCommand.Execute: Boolean;
+var
+  p: TTrackerPattern;
+  r, c: Integer;
+begin
+  p := M.GetPattern(FPattern);
+  if (p = nil) or (FRows < 1) or (FChannels < 1) or (Length(FNew) <> FRows * FChannels) then Exit(False);
+  SetLength(FOld, FRows * FChannels);
+  for r := 0 to FRows - 1 do
+    for c := 0 to FChannels - 1 do
+      if (FRow + r < p.Rows) and (FChannel + c < p.Channels) then
+      begin
+        FOld[r * FChannels + c] := p.GetCell(FRow + r, FChannel + c);
+        p.SetCell(FRow + r, FChannel + c, FNew[r * FChannels + c]);
+      end;
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TSetTrackerCellsCommand.Undo;
+var
+  p: TTrackerPattern;
+  r, c: Integer;
+begin
+  p := M.GetPattern(FPattern);
+  if p = nil then Exit;
+  for r := 0 to FRows - 1 do
+    for c := 0 to FChannels - 1 do
+      if (FRow + r < p.Rows) and (FChannel + c < p.Channels) then
+        p.SetCell(FRow + r, FChannel + c, FOld[r * FChannels + c]);
+  FDoc.Touch;
+end;
+
+function TSetTrackerCellsCommand.Description: string;
+begin
+  Result := Format('%s pattern %d (%d x %d cells)', [FLabel, FPattern, FRows, FChannels]);
+end;
+
 { ================= TSetTrackerTransportCommand ================= }
 
 constructor TSetTrackerTransportCommand.Create(ADoc: TProjectDocument;
@@ -294,9 +400,49 @@ begin
   end;
 end;
 
+{ ================= TSetTrackerChannelFxCommand ================= }
+
+constructor TSetTrackerChannelFxCommand.Create(ADoc: TProjectDocument; AChannel: Integer;
+  const AKind, AParams, AName: string);
+begin
+  inherited Create(ADoc);
+  FChannel := AChannel;
+  FNew.Kind := AKind;
+  FNew.Params := AParams;
+  FNew.Name := AName;
+end;
+
+function TSetTrackerChannelFxCommand.Execute: Boolean;
+begin
+  FOld := M.GetChannelFx(FChannel);
+  if (FOld.Kind = FNew.Kind) and (FOld.Params = FNew.Params) then Exit(False);
+  M.SetChannelFx(FChannel, FNew.Kind, FNew.Params, FNew.Name);
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TSetTrackerChannelFxCommand.Undo;
+begin
+  M.SetChannelFx(FChannel, FOld.Kind, FOld.Params, FOld.Name);
+  FDoc.Touch;
+end;
+
+function TSetTrackerChannelFxCommand.Description: string;
+begin
+  if FNew.Kind = '' then Result := Format('Remove effect from tracker channel %d', [FChannel + 1])
+  else Result := Format('Set %s on tracker channel %d', [FNew.Name, FChannel + 1]);
+end;
+
 { ================= TTrackerStructuralCommand ================= }
 
+function TTrackerStructuralCommand.ResetsMixer: Boolean;
+begin
+  Result := False;
+end;
+
 function TTrackerStructuralCommand.Execute: Boolean;
+var
+  fresh: TMixerModel;
 begin
   FBefore := TrackerModuleToString(M);
   if not Mutate then
@@ -307,6 +453,15 @@ begin
   end;
   FAfter := TrackerModuleToString(M);
   if FAfter = FBefore then Exit(False);
+  if ResetsMixer then
+  begin
+    FMixBefore := MixerToString(FDoc.TrackerMixer);
+    fresh := TMixerModel.Create;
+    fresh.InitDefault;
+    EnsureTrackerMixerStrips(fresh, FDoc.Tracker.Channels, FDoc.Tracker);
+    FMixAfter := MixerToString(fresh);
+    FDoc.ReplaceTrackerMixer(fresh);
+  end;
   FDoc.Touch;
   Result := True;
 end;
@@ -314,12 +469,14 @@ end;
 procedure TTrackerStructuralCommand.Undo;
 begin
   FDoc.ReplaceTracker(TrackerModuleFromString(FBefore));
+  if ResetsMixer then FDoc.ReplaceTrackerMixer(MixerFromString(FMixBefore));
   FDoc.Touch;
 end;
 
 function TTrackerStructuralCommand.Redo: Boolean;
 begin
   FDoc.ReplaceTracker(TrackerModuleFromString(FAfter));
+  if ResetsMixer then FDoc.ReplaceTrackerMixer(MixerFromString(FMixAfter));
   FDoc.Touch;
   Result := True;
 end;
@@ -484,6 +641,11 @@ begin
   Result := True;
 end;
 
+function TImportModCommand.ResetsMixer: Boolean;
+begin
+  Result := True;
+end;
+
 function TImportModCommand.Description: string;
 begin
   Result := Format('Import %s module', [FLabel]);
@@ -502,6 +664,11 @@ end;
 function TImportXmCommand.Mutate: Boolean;
 begin
   FDoc.ReplaceTracker(XmToModule(FData));   // raises EUDAWError on a bad file
+  Result := True;
+end;
+
+function TImportXmCommand.ResetsMixer: Boolean;
+begin
   Result := True;
 end;
 
@@ -526,7 +693,38 @@ begin
   Result := True;
 end;
 
+function TImportMptmCommand.ResetsMixer: Boolean;
+begin
+  Result := True;
+end;
+
 function TImportMptmCommand.Description: string;
+begin
+  Result := Format('Import %s module', [FLabel]);
+end;
+
+{ ================= TImportLegacyCommand ================= }
+
+constructor TImportLegacyCommand.Create(ADoc: TProjectDocument; const AData: TBytes;
+  const ALabel: string);
+begin
+  inherited Create(ADoc);
+  FData := Copy(AData);
+  FLabel := ALabel;
+end;
+
+function TImportLegacyCommand.Mutate: Boolean;
+begin
+  FDoc.ReplaceTracker(LegacyToModule(FData));   // raises EUDAWError on a bad file
+  Result := True;
+end;
+
+function TImportLegacyCommand.ResetsMixer: Boolean;
+begin
+  Result := True;
+end;
+
+function TImportLegacyCommand.Description: string;
 begin
   Result := Format('Import %s module', [FLabel]);
 end;
@@ -540,6 +738,11 @@ begin
   fresh := TTrackerModule.Create;
   fresh.InitDefault;
   FDoc.ReplaceTracker(fresh);
+  Result := True;
+end;
+
+function TNewTrackerModuleCommand.ResetsMixer: Boolean;
+begin
   Result := True;
 end;
 

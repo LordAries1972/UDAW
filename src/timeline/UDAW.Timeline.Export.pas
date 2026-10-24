@@ -132,10 +132,12 @@ begin
   if (ext <> '.wav') and (ext <> '.pcm') and (ext <> '.mp3') and
      (ext <> '.mp4') and (ext <> '.m4a') and (ext <> '.flac') and (ext <> '.mkv') then
     RaiseUDAW(errInvalidArgument, 'Timeline.Export', 'Choose WAV, PCM, MP3, MP4, M4A, FLAC or MKV.');
-  { A timeline with video clips exports as a video file (MP4 / MKV); MKV is
-    video-only, and a video timeline cannot go to an audio-only format. }
-  videoMode := HasVideoInRange(FProject.Timeline, FRangeStart,
-    IfThen(FRangeEnd > FRangeStart, FRangeEnd - FRangeStart, FProject.Timeline.TotalDurationSeconds));
+  { A timeline with video clips exports as a video file only for MP4 / MKV.
+    Audio-only formats (WAV, PCM, MP3, M4A, FLAC) cannot carry a picture, so
+    the video is ignored entirely and only the audio mix is rendered. }
+  videoMode := ((ext = '.mp4') or (ext = '.mkv')) and
+    HasVideoInRange(FProject.Timeline, FRangeStart,
+      IfThen(FRangeEnd > FRangeStart, FRangeEnd - FRangeStart, FProject.Timeline.TotalDurationSeconds));
   {$IF NOT (DEFINED(UDAW_WINDOWS) AND NOT DEFINED(FPC))}
   if videoMode then
     RaiseUDAW(errConfig, 'Timeline.Export',
@@ -144,9 +146,6 @@ begin
   {$IFEND}
   if (ext = '.mkv') and not videoMode then
     RaiseUDAW(errInvalidArgument, 'Timeline.Export', 'MKV export needs a video clip on the Timeline.');
-  if videoMode and (ext <> '.mp4') and (ext <> '.mkv') then
-    RaiseUDAW(errInvalidArgument, 'Timeline.Export',
-      'This Timeline contains video: export it as MP4 or MKV (other formats would drop the picture).');
   sr := FProject.SampleRate;
   { Compressed exports are always rendered and encoded at 48 kHz (the standard
     MP3/AAC/video rate), regardless of the project rate. }
@@ -182,6 +181,7 @@ begin
       clip on a tkMidi track was silently missing from the export. }
     player.AttachMidi(FProject.Midi);
     player.SetStretchTempo(FProject.TempoBPM);   // same tempo conforming as live playback
+    player.SetTempoMap(FProject.TempoBPM, FProject.TempoMap);
     SetProgress(0.005, 'Stage 2/6: Decoding timeline sources');
     progress := TMediaProgressScope.Create(
       procedure(Fraction: Double; const Detail: string)
@@ -209,7 +209,7 @@ begin
       stream := TFileStream.Create(rawTemp, fmCreate)
     else if (ext = '.mp3') or (ext = '.mp4') or (ext = '.m4a') or (ext = '.flac') then
       writer := TWavWriter.Create(waveTemp, wsfPCM24, 2, sr)
-    else if ext = '.wav' then writer := TWavWriter.Create(temp, wsfPCM24, 2, sr)
+    else if ext = '.wav' then writer := TWavWriter.Create(temp, wsfPCM24, 2, sr, False, FProject.Author)
     else stream := TFileStream.Create(temp, fmCreate);
     { TPDF dither before quantising: 16-bit for the raw PCM path, 24-bit for
       the WAV/intermediate path (never truncate/round without it) }
@@ -282,7 +282,9 @@ begin
           ThrowIfCancelled;
           SetProgress(0.7 + Fraction * IfThen(ext = '.mkv', 0.2, 0.28),
             Format('Stage 5/6: Encoding video %.0f%%', [Fraction * 100]));
-        end);
+        end,
+        FProject.ExportSettings.MaxWidth, FProject.ExportSettings.VideoBitrateKbps,
+        FProject.ExportSettings.AudioBitrateKbps);
       if ext = '.mkv' then
       begin
         SetProgress(0.9, 'Stage 5/6: Writing MKV container');
@@ -324,7 +326,7 @@ begin
           SetProgress(0.7 + Fraction * 0.28, Format('Stage 5/6: Encoding %s audio %.0f%%', [UpperCase(Copy(ext, 2, 3)), Fraction * 100]));
         end,
         stampBpm,   // only stamped when the audio really was conformed to it
-        FProject.Author);
+        FProject.Author, FProject.ExportSettings.AudioBitrateKbps);
       SetProgress(0.98, 'Stage 5/6: Verifying encoded file');
       { The encoded file must last as long as the rendered mix (frames / sr).
         A mismatch means the encoder mis-stamped the rate/tempo - refuse to
@@ -378,7 +380,7 @@ begin
         begin
           ThrowIfCancelled;
           SetProgress(0.7 + Fraction * 0.28, Format('Stage 5/6: Encoding FLAC audio %.0f%%', [Fraction * 100]));
-        end);
+        end, FProject.Author);
     end;
     ThrowIfCancelled;
     if ext = '.pcm' then

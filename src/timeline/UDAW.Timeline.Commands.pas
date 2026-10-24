@@ -327,6 +327,53 @@ type
     function Description: string; override;
   end;
 
+  { any edit of the Chords lane - add, move, resize, rename, delete, detect -
+    swaps the whole lane's text snapshot; edits of the same kind in quick
+    succession (a drag) merge into one undo step }
+  TSetTimelineChordsCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FOld, FNew, FWhat: string;
+  public
+    constructor Create(ADoc: TProjectDocument; const ANewSnapshot, AWhat: string);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+    function AbsorbNext(ANext: TDAWCommand): Boolean; override;
+  end;
+
+  { move and / or rename a marker; a drag merges into a single undo step }
+  TSetTimelineMarkerCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FId: Integer;
+    FOldName, FNewName: string;
+    FOldSec, FNewSec: Double;
+  public
+    constructor Create(ADoc: TProjectDocument; AId: Integer; ANewSeconds: Double;
+      const ANewName: string);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+    function AbsorbNext(ANext: TDAWCommand): Boolean; override;
+  end;
+
+  { move / resize and / or rename a region; a drag merges into a single undo step }
+  TSetTimelineRegionCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FId: Integer;
+    FOldName, FNewName: string;
+    FOldStart, FOldLen, FNewStart, FNewLen: Double;
+  public
+    constructor Create(ADoc: TProjectDocument; AId: Integer; ANewStart, ANewLength: Double;
+      const ANewName: string);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+    function AbsorbNext(ANext: TDAWCommand): Boolean; override;
+  end;
+
   TAddTimelineRegionCommand = class(TDAWCommand)
   private
     FDoc: TProjectDocument;
@@ -351,6 +398,7 @@ type
     FName: string;
     FStart, FLength: Double;
     FColor: Integer;
+    FContinuous: Boolean;
   public
     constructor Create(ADoc: TProjectDocument; ARegionId: Integer);
     function Execute: Boolean; override;
@@ -1421,6 +1469,209 @@ begin
   Result := Format('Remove marker "%s"', [FName]);
 end;
 
+{ ================= TSetTimelineChordsCommand ================= }
+
+constructor TSetTimelineChordsCommand.Create(ADoc: TProjectDocument;
+  const ANewSnapshot, AWhat: string);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FNew := ANewSnapshot;
+  FWhat := AWhat;
+end;
+
+function TSetTimelineChordsCommand.Execute: Boolean;
+begin
+  FOld := FDoc.Timeline.ChordsSnapshot;
+  if FOld = FNew then Exit(False);
+  FDoc.Timeline.RestoreChords(FNew);
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TSetTimelineChordsCommand.Undo;
+begin
+  FDoc.Timeline.RestoreChords(FOld);
+  FDoc.Touch;
+end;
+
+function TSetTimelineChordsCommand.Description: string;
+begin
+  Result := FWhat;
+end;
+
+function TSetTimelineChordsCommand.AbsorbNext(ANext: TDAWCommand): Boolean;
+var
+  n: TSetTimelineChordsCommand;
+begin
+  Result := (ANext is TSetTimelineChordsCommand) and (MsSinceStamp <= MERGE_MS);
+  if not Result then Exit;
+  n := TSetTimelineChordsCommand(ANext);
+  Result := (n.FDoc = FDoc) and (n.FWhat = FWhat) and
+    ((Pos('Move', FWhat) = 1) or (Pos('Resize', FWhat) = 1));
+  if not Result then Exit;
+  FNew := n.FNew;
+  FDoc.Timeline.RestoreChords(FNew);
+  Restamp;
+end;
+
+{ ================= TSetTimelineMarkerCommand ================= }
+
+function FindTimelineMarker(ADoc: TProjectDocument; AId: Integer): TTimelineMarker;
+var
+  i: Integer;
+begin
+  Result := nil;
+  for i := 0 to ADoc.Timeline.MarkerCount - 1 do
+    if ADoc.Timeline.GetMarker(i).Id = AId then Exit(ADoc.Timeline.GetMarker(i));
+end;
+
+function FindTimelineRegion(ADoc: TProjectDocument; AId: Integer): TTimelineRegion;
+var
+  i: Integer;
+begin
+  Result := nil;
+  for i := 0 to ADoc.Timeline.RegionCount - 1 do
+    if ADoc.Timeline.GetRegion(i).Id = AId then Exit(ADoc.Timeline.GetRegion(i));
+end;
+
+constructor TSetTimelineMarkerCommand.Create(ADoc: TProjectDocument; AId: Integer;
+  ANewSeconds: Double; const ANewName: string);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FId := AId;
+  FNewSec := ANewSeconds;
+  FNewName := ANewName;
+end;
+
+function TSetTimelineMarkerCommand.Execute: Boolean;
+var
+  m: TTimelineMarker;
+begin
+  m := FindTimelineMarker(FDoc, FId);
+  if m = nil then Exit(False);
+  FOldName := m.Name;
+  FOldSec := m.Seconds;
+  if (FNewName = '') then FNewName := FOldName;
+  if (Abs(FNewSec - FOldSec) < 1e-9) and (FNewName = FOldName) then Exit(False);
+  m.Seconds := Max(0.0, FNewSec);
+  m.Name := FNewName;
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TSetTimelineMarkerCommand.Undo;
+var
+  m: TTimelineMarker;
+begin
+  m := FindTimelineMarker(FDoc, FId);
+  if m = nil then Exit;
+  m.Seconds := FOldSec;
+  m.Name := FOldName;
+  FDoc.Touch;
+end;
+
+function TSetTimelineMarkerCommand.Description: string;
+begin
+  if FNewName <> FOldName then Result := Format('Rename marker "%s"', [FNewName])
+  else Result := Format('Move marker "%s"', [FNewName]);
+end;
+
+function TSetTimelineMarkerCommand.AbsorbNext(ANext: TDAWCommand): Boolean;
+var
+  n: TSetTimelineMarkerCommand;
+  m: TTimelineMarker;
+begin
+  Result := (ANext is TSetTimelineMarkerCommand) and (MsSinceStamp <= MERGE_MS);
+  if not Result then Exit;
+  n := TSetTimelineMarkerCommand(ANext);
+  Result := (n.FDoc = FDoc) and (n.FId = FId);
+  if not Result then Exit;
+  FNewSec := n.FNewSec;
+  if n.FNewName <> '' then FNewName := n.FNewName;
+  m := FindTimelineMarker(FDoc, FId);
+  if m <> nil then
+  begin
+    m.Seconds := Max(0.0, FNewSec);
+    m.Name := FNewName;
+  end;
+  Restamp;
+end;
+
+{ ================= TSetTimelineRegionCommand ================= }
+
+constructor TSetTimelineRegionCommand.Create(ADoc: TProjectDocument; AId: Integer;
+  ANewStart, ANewLength: Double; const ANewName: string);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FId := AId;
+  FNewStart := ANewStart;
+  FNewLen := ANewLength;
+  FNewName := ANewName;
+end;
+
+function TSetTimelineRegionCommand.Execute: Boolean;
+var
+  r: TTimelineRegion;
+begin
+  r := FindTimelineRegion(FDoc, FId);
+  if r = nil then Exit(False);
+  FOldName := r.Name;
+  FOldStart := r.StartSeconds;
+  FOldLen := r.LengthSeconds;
+  if FNewName = '' then FNewName := FOldName;
+  if (Abs(FNewStart - FOldStart) < 1e-9) and (Abs(FNewLen - FOldLen) < 1e-9) and
+     (FNewName = FOldName) then Exit(False);
+  r.StartSeconds := Max(0.0, FNewStart);
+  r.LengthSeconds := Max(0.01, FNewLen);
+  r.Name := FNewName;
+  FDoc.Touch;
+  Result := True;
+end;
+
+procedure TSetTimelineRegionCommand.Undo;
+var
+  r: TTimelineRegion;
+begin
+  r := FindTimelineRegion(FDoc, FId);
+  if r = nil then Exit;
+  r.StartSeconds := FOldStart;
+  r.LengthSeconds := FOldLen;
+  r.Name := FOldName;
+  FDoc.Touch;
+end;
+
+function TSetTimelineRegionCommand.Description: string;
+begin
+  if FNewName <> FOldName then Result := Format('Rename region "%s"', [FNewName])
+  else Result := Format('Edit region "%s"', [FNewName]);
+end;
+
+function TSetTimelineRegionCommand.AbsorbNext(ANext: TDAWCommand): Boolean;
+var
+  n: TSetTimelineRegionCommand;
+  r: TTimelineRegion;
+begin
+  Result := (ANext is TSetTimelineRegionCommand) and (MsSinceStamp <= MERGE_MS);
+  if not Result then Exit;
+  n := TSetTimelineRegionCommand(ANext);
+  Result := (n.FDoc = FDoc) and (n.FId = FId);
+  if not Result then Exit;
+  FNewStart := n.FNewStart;
+  FNewLen := n.FNewLen;
+  if n.FNewName <> '' then FNewName := n.FNewName;
+  r := FindTimelineRegion(FDoc, FId);
+  if r <> nil then
+  begin
+    r.StartSeconds := Max(0.0, FNewStart);
+    r.LengthSeconds := Max(0.01, FNewLen);
+    r.Name := FNewName;
+  end;
+  Restamp;
+end;
+
 { ================= TAddTimelineRegionCommand ================= }
 
 constructor TAddTimelineRegionCommand.Create(ADoc: TProjectDocument; const AName: string;
@@ -1488,6 +1739,7 @@ begin
       FStart := r.StartSeconds;
       FLength := r.LengthSeconds;
       FColor := r.Color;
+      FContinuous := r.Continuous;
       FDoc.Timeline.RemoveRegion(FRegionId);
       FDoc.Touch;
       Exit(True);
@@ -1497,7 +1749,11 @@ end;
 
 procedure TRemoveTimelineRegionCommand.Undo;
 begin
-  FDoc.Timeline.AddRegionWithId(FRegionId, FName, FStart, FLength).Color := FColor;
+  with FDoc.Timeline.AddRegionWithId(FRegionId, FName, FStart, FLength) do
+  begin
+    Color := FColor;
+    Continuous := FContinuous;
+  end;
   FDoc.Touch;
 end;
 

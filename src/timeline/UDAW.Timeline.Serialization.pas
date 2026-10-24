@@ -358,7 +358,19 @@ begin
     begin
       m := ATimeline.GetMarker(i);
       sb.Append('MARKER ').Append(m.Id).Append(' ').Append(F(m.Seconds)).Append(' ')
-        .Append(QuoteStr(m.Name)).AppendLine;
+        .Append(QuoteStr(m.Name));
+      if m.Locked then sb.Append(' lock=1');
+      sb.AppendLine;
+    end;
+
+    for i := 0 to ATimeline.ChordCount - 1 do
+    begin
+      sb.Append('CHORD ').Append(ATimeline.GetChord(i).Id).Append(' ')
+        .Append(F(ATimeline.GetChord(i).StartSeconds)).Append(' ')
+        .Append(F(ATimeline.GetChord(i).LengthSeconds)).Append(' ')
+        .Append(QuoteStr(ATimeline.GetChord(i).Name));
+      if ATimeline.GetChord(i).Locked then sb.Append(' lock=1');
+      sb.AppendLine;
     end;
 
     for i := 0 to ATimeline.RegionCount - 1 do
@@ -366,7 +378,10 @@ begin
       rg := ATimeline.GetRegion(i);
       sb.Append('REGION ').Append(rg.Id).Append(' ').Append(F(rg.StartSeconds)).Append(' ')
         .Append(F(rg.LengthSeconds)).Append(' ').Append(rg.Color).Append(' ')
-        .Append(QuoteStr(rg.Name)).AppendLine;
+        .Append(QuoteStr(rg.Name));
+      if rg.Continuous then sb.Append(' cont=1');
+      if rg.Locked then sb.Append(' lock=1');
+      sb.AppendLine;
     end;
 
     for i := 0 to ATimeline.VideoEffectCount - 1 do
@@ -526,7 +541,15 @@ begin
         mId := IntTok(line, 'MARKER id');
         mSecs := FloatTok(line, 'MARKER seconds');
         nm := TakeQuoted(line);
-        ATimeline.AddMarkerWithId(mId, nm, mSecs);
+        ATimeline.AddMarkerWithId(mId, nm, mSecs).Locked := Pos('lock=1', line) > 0;
+      end
+      else if SameText(tok, 'CHORD') then
+      begin
+        rId := IntTok(line, 'CHORD id');
+        rStart := FloatTok(line, 'CHORD start');
+        rLen := FloatTok(line, 'CHORD length');
+        nm := TakeQuoted(line);
+        ATimeline.AddChordWithId(rId, nm, rStart, rLen).Locked := Pos('lock=1', line) > 0;
       end
       else if SameText(tok, 'REGION') then
       begin
@@ -535,7 +558,12 @@ begin
         rLen := FloatTok(line, 'REGION length');
         rColor := IntTok(line, 'REGION color');
         nm := TakeQuoted(line);
-        ATimeline.AddRegionWithId(rId, nm, rStart, rLen).Color := rColor;
+        with ATimeline.AddRegionWithId(rId, nm, rStart, rLen) do
+        begin
+          Color := rColor;
+          Continuous := Pos('cont=1', line) > 0;
+          Locked := Pos('lock=1', line) > 0;
+        end;
       end
       else if SameText(tok, 'VFX') then
       begin

@@ -130,11 +130,10 @@ begin
     Check(Contains(data, 'matroska'), 'MKV doc type');
     Check(Contains(data, 'Test Author'), 'MKV author tag');
 
-    { ---- a video timeline cannot silently drop its picture ---- }
+    { ---- audio-only formats ignore the picture and export the sound ---- }
     DeleteFile(folder + 'out.wav');
-    ExportJobTo(doc, folder + 'out.wav', False, msg);
-    Check(Pos('video', LowerCase(msg)) > 0, 'WAV export of a video timeline says why: ' + msg);
-    CheckFalse(FileExists(folder + 'out.wav'), 'no partial WAV left behind');
+    ExportJobTo(doc, folder + 'out.wav', True, msg);
+    Check(FileExists(folder + 'out.wav'), 'WAV export of a video timeline renders the audio: ' + msg);
   finally doc.Free; end;
 end;
 

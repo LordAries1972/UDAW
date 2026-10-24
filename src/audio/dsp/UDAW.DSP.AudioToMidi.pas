@@ -33,10 +33,18 @@ type
     class function Default: TA2MOptions; static;
   end;
 
+  { called now and then with 0..100 while the audio is analysed; return False to cancel
+    (AudioToMidi then returns no notes) }
+  TA2MProgress = function(APercent: Integer): Boolean of object;
+
 function AudioToMidi(const AMono: array of Single; ASampleRate: Integer;
-  const AOpts: TA2MOptions): TSeqNotes;
+  const AOpts: TA2MOptions; const AProgress: TA2MProgress = nil): TSeqNotes;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 class function TA2MOptions.Default: TA2MOptions;
 begin
@@ -119,7 +127,7 @@ begin
 end;
 
 function AudioToMidi(const AMono: array of Single; ASampleRate: Integer;
-  const AOpts: TA2MOptions): TSeqNotes;
+  const AOpts: TA2MOptions; const AProgress: TA2MProgress): TSeqNotes;
 const
   WIN = 2048;
 var
@@ -162,7 +170,7 @@ begin
   secPerBeat := 60.0 / Max(AOpts.Bpm, 20.0);
   hop := WIN div 4;
   frames := (Length(AMono) - WIN) div hop;
-  gate := Power(10.0, AOpts.GateDb / 20.0);
+  gate := FastExp10(AOpts.GateDb / 20.0);
   notes := TList<TSeqNote>.Create;
   try
     if AOpts.Mode = a2mMono then
@@ -171,6 +179,7 @@ begin
       SetLength(levels, frames);
       for f := 0 to frames - 1 do
       begin
+        if Assigned(AProgress) and (f and 63 = 0) and not AProgress(f * 100 div frames) then Exit;
         rms := 0;
         for i := 0 to WIN - 1 do rms := rms + Sqr(AMono[f * hop + i]);
         rms := Sqrt(rms / WIN);
@@ -221,12 +230,13 @@ begin
         SetLength(mag, bins);
         SetLength(hann, WIN);
         for i := 0 to WIN - 1 do
-          hann[i] := 0.5 - 0.5 * Cos(2.0 * Pi * i / WIN);
+          hann[i] := 0.5 - 0.5 * FastCos(2.0 * Pi * i / WIN);
         binHz := ASampleRate / (WIN * 2);
         SetLength(opens, Max(AOpts.MaxVoices, 1) * 4);
         for k := 0 to High(opens) do opens[k].Active := False;
         for f := 0 to frames - 1 do
         begin
+          if Assigned(AProgress) and (f and 63 = 0) and not AProgress(f * 100 div frames) then Exit;
           rms := 0;
           for i := 0 to WIN - 1 do
           begin
@@ -256,7 +266,7 @@ begin
               for i := 2 to bins - 3 do
                 if (i * binHz >= AOpts.MinHz) and (i * binHz <= AOpts.MaxHz) and
                    (not used[i]) and (mag[i] > mag[i - 1]) and (mag[i] >= mag[i + 1]) and
-                   (mag[i] > maxMag * Power(10.0, -AOpts.PeakDb / 20.0)) then
+                   (mag[i] > maxMag * FastExp10(-AOpts.PeakDb / 20.0)) then
                   if (peakBin < 0) or (mag[i] > mag[peakBin]) then peakBin := i;
               if peakBin < 0 then Break;
               hz := peakBin * binHz;
@@ -264,7 +274,7 @@ begin
               nv := 0;
               for k := 0 to High(peakKeys) do
               begin
-                hzk := 440.0 * Power(2.0, (peakKeys[k] - 69) / 12.0);
+                hzk := 440.0 * SemitoneRatio(peakKeys[k] - 69);
                 for cnt := 2 to 6 do
                   if Abs(hz / hzk - cnt) < 0.04 * cnt then nv := 1;
               end;

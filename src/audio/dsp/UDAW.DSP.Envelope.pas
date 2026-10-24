@@ -46,7 +46,7 @@ type
     procedure NoteOn;
     procedure NoteOff;
     procedure HardReset;
-    function Process: Single; {$IFDEF FPC}inline;{$ENDIF}
+    function Process: Single; inline;
     procedure ProcessBlockMul(ABuf: PSingle; AFrames: Integer);
     function IsActive: Boolean;
     property Stage: TADSRStage read FStage;
@@ -67,7 +67,7 @@ type
     procedure SetTimes(AAttackMs, AReleaseMs: Double);
     procedure SetMode(AMode: TFollowerMode);
     procedure Reset;
-    function Process(AX: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+    function Process(AX: Single): Single; inline;
     function ProcessBlock(ABuf: PSingle; AFrames: Integer): Single;   // returns last env
     function EnvelopeDb: Double;
     property Envelope: Double read FEnv;
@@ -83,7 +83,7 @@ type
     procedure Init(ASampleRate: Double; AAttackMs, AReleaseMs: Double);
     procedure SetTarget(AValue: Double);
     procedure SetImmediate(AValue: Double);
-    function Process: Single; {$IFDEF FPC}inline;{$ENDIF}
+    function Process: Single; inline;
     procedure ProcessBlockMul(ABuf: PSingle; AFrames: Integer);
     function Settled: Boolean;
     property Value: Double read FValue;

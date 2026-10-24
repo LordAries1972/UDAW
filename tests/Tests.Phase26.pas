@@ -14,10 +14,10 @@ procedure RegisterPhase26Tests;
 implementation
 
 uses
-  SysUtils,
+  SysUtils, Windows,
   UDAW.Testing,
-  UDAW.AI.ToolCommands,
-  UDAW.Project.Document, UDAW.Project.Commands,
+  UDAW.AI.ToolCommands, UDAW.AI.MCPServer, UDAW.SystemInfo, UDAW.UI.Display, UDAW.GL.Canvas,
+  UDAW.Project.Document, UDAW.Project.Commands, UDAW.Project.Serialization,
   UDAW.Mixer.Model;
 
 const
@@ -197,6 +197,283 @@ begin
   end;
 end;
 
+type
+  { stands in for the window: records the call it was handed }
+  TFakeUI = class
+    LastKind: TAIToolKind;
+    Calls: Integer;
+    function Handle(const ACall: TAIToolCall): string;
+  end;
+
+function TFakeUI.Handle(const ACall: TAIToolCall): string;
+begin
+  LastKind := ACall.Kind;
+  Inc(Calls);
+  if ACall.Kind = atkRunCommand then
+    Result := '{"error":"refused for the test"}'
+  else
+    Result := '{"ok":true}';
+end;
+
+procedure Test_ParseAIToolCalls_ApplicationTools;
+var
+  calls: TArray<TAIToolCall>;
+begin
+  calls := ParseAIToolCalls(
+    '```tool' + sLineBreak + '{"command":"SelectClips","clip_ids":[3,5,8]}' + sLineBreak + '```' +
+    '```tool' + sLineBreak + '{"command":"ClampClips","clip_ids":[5],"mode":"next"}' + sLineBreak + '```' +
+    '```tool' + sLineBreak + '{"command":"RunCommand","menu_path":"Timeline > Edit > Clamp to > Clamp to Last Segment"}' + sLineBreak + '```' +
+    '```tool' + sLineBreak + '{"command":"SetRange","start_sec":1.5,"end_sec":4}' + sLineBreak + '```');
+  CheckEqualInt(4, Length(calls), 'four application tool blocks parsed');
+  Check(calls[0].Kind = atkSelectClips, 'SelectClips');
+  CheckEqualInt(3, Length(calls[0].ClipIds), 'three clip ids');
+  CheckEqualInt(8, calls[0].ClipIds[2], 'ids in order');
+  Check(calls[1].Kind = atkClampClips, 'ClampClips');
+  CheckEqualStr('next', calls[1].Mode, 'mode parsed');
+  Check(calls[2].Kind = atkRunCommand, 'RunCommand');
+  Check(Pos('Clamp to Last Segment', calls[2].CommandPath) > 0, 'menu path parsed');
+  Check(calls[3].Kind = atkSetRange, 'SetRange');
+  CheckNear(1.5, calls[3].StartSec, 1.0E-9, 'start parsed');
+  CheckNear(4.0, calls[3].EndSec, 1.0E-9, 'end parsed');
+end;
+
+procedure Test_ValidateToolCall_ApplicationTools;
+var
+  c: TAIToolCall;
+  err: string;
+begin
+  FillChar(c, SizeOf(c), 0);
+  c.HasKind := True; c.Kind := atkClampClips;
+  c.HasClipIds := True; c.ClipIds := [1];
+  c.HasMode := True; c.Mode := 'sideways';
+  CheckFalse(ValidateToolCall(c, err), 'unknown clamp mode rejected');
+  c.Mode := 'LAST';
+  Check(ValidateToolCall(c, err), 'mode is case-insensitive');
+
+  Finalize(c);
+  FillChar(c, SizeOf(c), 0);
+  c.HasKind := True; c.Kind := atkRunCommand;
+  CheckFalse(ValidateToolCall(c, err), 'RunCommand needs a path');
+
+  FillChar(c, SizeOf(c), 0);
+  c.HasKind := True; c.Kind := atkSetRange;
+  c.HasStartSec := True; c.StartSec := 5;
+  c.HasEndSec := True; c.EndSec := 2;
+  CheckFalse(ValidateToolCall(c, err), 'range must end after it starts');
+  c.HasEnabled := True; c.Enabled := False;
+  Check(ValidateToolCall(c, err), 'clearing the range needs no times');
+end;
+
+procedure Test_Dispatcher_ApplicationTools_GoToTheWindow;
+var
+  doc: TProjectDocument;
+  cmds: TCommandManager;
+  dispatcher: TAIToolDispatcher;
+  ui: TFakeUI;
+  call: TAIToolCall;
+  resultText: string;
+begin
+  doc := TProjectDocument.CreateNew;
+  cmds := TCommandManager.Create;
+  ui := TFakeUI.Create;
+  try
+    FillChar(call, SizeOf(call), 0);
+    call.HasKind := True; call.Kind := atkSetPlayhead;
+    call.HasPositionSec := True; call.PositionSec := 2;
+    dispatcher := TAIToolDispatcher.Create(doc, cmds);
+    try
+      CheckFalse(dispatcher.Execute(call, resultText), 'without a window the call fails cleanly');
+      Check(Pos('error', resultText) > 0, 'and says why');
+      dispatcher.OnUICommand := ui.Handle;
+      Check(dispatcher.Execute(call, resultText), 'with a window the call goes through');
+      CheckEqualInt(1, ui.Calls, 'window handed the call once');
+      Check(ui.LastKind = atkSetPlayhead, 'the right call');
+      call.Kind := atkRunCommand;
+      CheckFalse(dispatcher.Execute(call, resultText), 'an error result counts as a failure');
+    finally
+      dispatcher.Free;
+    end;
+  finally
+    ui.Free;
+    cmds.Free;
+    doc.Free;
+  end;
+end;
+
+procedure Test_EveryToolIsDescribedAndRoundTrips;
+var
+  k, back: TAIToolKind;
+begin
+  for k := Low(TAIToolKind) to High(TAIToolKind) do
+  begin
+    Check(AIToolKindFromId(AIToolKindId(k), back) and (back = k), 'id round-trips: ' + AIToolKindId(k));
+    Check(AIToolDescription(k) <> AIToolKindId(k), 'has a real description: ' + AIToolKindId(k));
+    Check(Pos(AIToolKindId(k), AIToolSystemPrompt) > 0, 'named in the system prompt: ' + AIToolKindId(k));
+  end;
+end;
+
+
+procedure Test_McpToolsList_PublishesEveryTool;
+var
+  server: TUDAWMcpServer;
+  resp: string;
+  k: TAIToolKind;
+begin
+  server := TUDAWMcpServer.Create;
+  try
+    resp := server.HandleRequestForTest('{"jsonrpc":"2.0","id":1,"method":"tools/list"}');
+    for k := Low(TAIToolKind) to High(TAIToolKind) do
+      Check(Pos('"name":"' + AIToolKindId(k) + '"', resp) > 0, 'tools/list publishes ' + AIToolKindId(k));
+    Check(Pos('"items"', resp) > 0, 'array parameters carry an element type');
+    resp := server.HandleRequestForTest('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"SetPlayhead","arguments":{"position_sec":3}}}');
+    Check(Pos('no live project', resp) + Pos('no project', resp) > 0, 'a call without a project says so, no crash');
+  finally
+    server.Free;
+  end;
+end;
+
+procedure Test_ScoreSpread_RoundTripsInTheProjectFile;
+var
+  doc, back: TProjectDocument;
+  text, old: string;
+begin
+  doc := TProjectDocument.CreateNew;
+  try
+    CheckNear(1.0, doc.ScoreSpread, 1.0E-9, 'normal spacing by default');
+    doc.ScoreSpread := 1.7;
+    text := ProjectToString(doc);
+    back := ProjectFromString(text);
+    try
+      CheckNear(1.7, back.ScoreSpread, 1.0E-6, 'spacing comes back from the file');
+    finally
+      back.Free;
+    end;
+    old := StringReplace(text, 'SCORESPREAD 1.7' + sLineBreak, '', []);
+    Check(old <> text, 'the file carries a SCORESPREAD line');
+    back := ProjectFromString(old);
+    try
+      CheckNear(1.0, back.ScoreSpread, 1.0E-9, 'a file without the line loads with normal spacing');
+    finally
+      back.Free;
+    end;
+    doc.ScoreSpread := 99;
+    CheckNear(3.0, doc.ScoreSpread, 1.0E-9, 'spacing is clamped');
+  finally
+    doc.Free;
+  end;
+end;
+
+function InfoValue(AInfo: TSysInfo; const AKey: string): string;
+var
+  i: Integer;
+begin
+  for i := 0 to AInfo.Count - 1 do
+    if (AInfo[i].Kind = sikRow) and SameText(AInfo[i].Key, AKey) then Exit(AInfo[i].Value);
+  Result := '';
+end;
+
+function InfoHasSection(AInfo: TSysInfo; const ATitle: string): Boolean;
+var
+  i: Integer;
+begin
+  for i := 0 to AInfo.Count - 1 do
+    if (AInfo[i].Kind = sikSection) and (Pos(ATitle, AInfo[i].Key) = 1) then Exit(True);
+  Result := False;
+end;
+
+procedure Test_SystemInfo_ReportsTheMachine;
+var
+  info: TSysInfo;
+  extraRan: Boolean;
+  txt: string;
+begin
+  SetEnvironmentVariable('UDAW_TEST_SECRET_KEY', 'top-secret-value');
+  info := TSysInfo.Create;
+  try
+    extraRan := False;
+    CollectSystemInfo(info,
+      procedure(AInfo: TSysInfo)
+      begin
+        extraRan := True;
+        AInfo.Section('From the application');
+        AInfo.Row('Marker', 'present');
+      end);
+    Check(extraRan, 'the application can add its own sections');
+    CheckEqualStr('', InfoValue(info, 'This section could not be read'), 'every section of the report could be read');
+    Check(InfoHasSection(info, 'Application'), 'application section');
+    Check(InfoHasSection(info, 'Operating system'), 'operating system section');
+    Check(InfoHasSection(info, 'Processor'), 'processor section');
+    Check(InfoHasSection(info, 'Memory'), 'memory section');
+    Check(InfoHasSection(info, 'Video adapters'), 'video adapter section');
+    Check(InfoHasSection(info, 'Displays'), 'display section');
+    Check(InfoHasSection(info, 'Drives'), 'drives section');
+    Check(InfoHasSection(info, 'Loaded modules'), 'module list');
+    Check(InfoHasSection(info, 'Environment'), 'environment');
+    Check(InfoValue(info, 'Total physical memory (RAM)') <> '', 'total RAM is reported');
+    Check(Pos('GB', InfoValue(info, 'Total physical memory (RAM)')) > 0, 'RAM is shown in GB on any real machine');
+    Check(InfoValue(info, 'Virtual address space of this process - total') <> '', 'virtual memory is reported');
+    Check(InfoValue(info, 'Commit limit (RAM + page file)') <> '', 'page file / commit limit is reported');
+    CheckEqualStr(IntToStr(GetCurrentProcessId), InfoValue(info, 'Process id'), 'process id');
+    Check(InfoValue(info, 'Logical processors') <> '', 'CPU core count');
+    Check(InfoValue(info, 'Name') <> '', 'a name for the CPU or the OS');
+    CheckEqualStr('(hidden)', InfoValue(info, 'UDAW_TEST_SECRET_KEY'), 'a secret-looking environment value is never shown');
+    txt := info.AsText;
+    Check(Pos('top-secret-value', txt) = 0, 'the secret is not in the text report either');
+    Check(Pos('== Memory ==', txt) > 0, 'the text report has section headings');
+  finally
+    info.Free;
+  end;
+end;
+
+procedure Test_Display_ListsMonitorsAndModes;
+var
+  mons: TArray<TMonitorEntry>;
+  modes: TArray<TDisplayMode>;
+  cur: TDisplayMode;
+  i: Integer;
+  found: Boolean;
+begin
+  mons := ListMonitors;
+  Check(Length(mons) >= 1, 'at least one monitor');
+  Check(mons[0].Primary, 'the primary monitor comes first');
+  Check(mons[0].Rect.Right > mons[0].Rect.Left, 'a real desktop rectangle');
+  modes := ListDisplayModes(mons[0].Device);
+  Check(Length(modes) > 0, 'the primary monitor offers modes');
+  for i := 1 to High(modes) do
+    Check((modes[i].Width < modes[i - 1].Width) or
+          ((modes[i].Width = modes[i - 1].Width) and (modes[i].Height <= modes[i - 1].Height)),
+      'modes are listed widest first');
+  if CurrentDisplayMode(mons[0].Device, cur) then
+  begin
+    found := False;
+    for i := 0 to High(modes) do
+      if (modes[i].Width = cur.Width) and (modes[i].Height = cur.Height) then found := True;
+    Check(found, 'the mode in use is among those offered');
+  end;
+  cur.Width := 1920; cur.Height := 1080; cur.Frequency := 144; cur.Bits := 32;
+  CheckEqualStr('1920 x 1080 @ 144 Hz', DisplayModeText(cur), 'mode text');
+end;
+
+procedure Test_Gl_DriverReportAndFrameCounters;
+var
+  rep: TArray<string>;
+  s: string;
+  fps, draws: Double;
+  surfaces: Integer;
+  hasRenderer: Boolean;
+begin
+  rep := GLDriverReport;
+  Check(Length(rep) > 0, 'the driver report is never empty');
+  hasRenderer := False;
+  for s in rep do
+    if Pos('renderer|', s) = 1 then hasRenderer := True;
+  Check(hasRenderer or (Pos('status|', rep[0]) = 1), 'a renderer name, or a clear statement why not');
+  GLSampleFrames(fps, draws, surfaces);
+  GLSampleFrames(fps, draws, surfaces);
+  CheckEqualInt(0, surfaces, 'nothing was drawn between two samples');
+  CheckNear(0.0, fps, 1.0E-9, 'so the frame rate is zero');
+end;
+
 procedure RegisterPhase26Tests;
 begin
   RegisterTest(GRP, 'ParseAIToolCalls: extracts a fenced tool block', Test_ParseAIToolCalls_ExtractsFencedBlock);
@@ -208,6 +485,15 @@ begin
   RegisterTest(GRP, 'Dispatcher: SetGain goes through the undo stack', Test_Dispatcher_SetGain_GoesThroughUndoStack);
   RegisterTest(GRP, 'Dispatcher: GetProjectInfo returns JSON, no undo entry', Test_Dispatcher_GetProjectInfo_ReturnsJSON);
   RegisterTest(GRP, 'Dispatcher: unknown track fails cleanly', Test_Dispatcher_UnknownTrack_FailsCleanly);
+  RegisterTest(GRP, 'ParseAIToolCalls: application tools (arrays, paths, ranges)', Test_ParseAIToolCalls_ApplicationTools);
+  RegisterTest(GRP, 'ValidateToolCall: application tools', Test_ValidateToolCall_ApplicationTools);
+  RegisterTest(GRP, 'Dispatcher: application tools go to the window', Test_Dispatcher_ApplicationTools_GoToTheWindow);
+  RegisterTest(GRP, 'Every tool is described, named in the prompt and round-trips', Test_EveryToolIsDescribedAndRoundTrips);
+  RegisterTest(GRP, 'MCP tools/list publishes every tool', Test_McpToolsList_PublishesEveryTool);
+  RegisterTest(GRP, 'Score vertical spacing is saved with the project', Test_ScoreSpread_RoundTripsInTheProjectFile);
+  RegisterTest(GRP, 'System report covers the machine and hides secrets', Test_SystemInfo_ReportsTheMachine);
+  RegisterTest(GRP, 'Display: monitors and modes are listed', Test_Display_ListsMonitorsAndModes);
+  RegisterTest(GRP, 'OpenGL: driver report and frame counters', Test_Gl_DriverReportAndFrameCounters);
 end;
 
 end.

@@ -27,7 +27,7 @@ interface
 uses
   UDAW.Media.Progress, SysUtils, Classes, Math,
   UDAW.Errors, UDAW.Audio.Types, UDAW.Codec.WAV,
-  UDAW.Codec.MP3, UDAW.Codec.MP4, UDAW.Codec.FLAC;
+  UDAW.Codec.MP3, UDAW.Codec.MP4, UDAW.Codec.FLAC, UDAW.Timeline.TrackerSource;
 
 const
   WAVEFORM_SUBSYS = 'Timeline.Waveform';
@@ -709,6 +709,9 @@ var
   mp3Res: TMP3DecodeResult;
   mp4Res: TMP4DecodeResult;
   flacRes: TFLACDecodeResult;
+  trkPcm: TAudioPlanar;
+  trkFrames: Integer;
+  trkBpm: Double;
 begin
   { Codec loops report real decode progress through the scoped media reporter. }
   if Mp3SniffFile(AFileName) then
@@ -740,6 +743,17 @@ begin
       RaiseUDAWFmt(errInvalidState, WAVEFORM_SUBSYS, 'FLAC decode failed: %s', [AFileName]);
     Result := BuildWaveformCacheFromPlanar(flacRes.Pcm, flacRes.Channels,
       Integer(flacRes.TotalFrames), flacRes.SampleRate, ABaseBin, AFactor);
+    if Assigned(AOnProgress) then AOnProgress(1);
+    Exit;
+  end;
+
+  if TrackerSniffFile(AFileName) then
+  begin
+    if Assigned(AOnProgress) then AOnProgress(0);
+    if not TrackerRenderFile(AFileName, trkPcm, trkFrames, trkBpm) then
+      RaiseUDAWFmt(errInvalidState, WAVEFORM_SUBSYS, 'Tracker module render failed: %s', [AFileName]);
+    Result := BuildWaveformCacheFromPlanar(trkPcm, Length(trkPcm), trkFrames,
+      TRACKER_SOURCE_RATE, ABaseBin, AFactor);
     if Assigned(AOnProgress) then AOnProgress(1);
     Exit;
   end;

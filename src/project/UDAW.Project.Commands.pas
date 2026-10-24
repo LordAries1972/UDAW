@@ -26,6 +26,7 @@ uses
   SysUtils, Generics.Collections,
   UDAW.Errors,
   UDAW.Audio.Graph, UDAW.Audio.Graph.Nodes,
+  UDAW.Timeline.Time,
   UDAW.Project.Document;
 
 const
@@ -84,6 +85,9 @@ type
     procedure Undo;
     procedure Redo;
     procedure Clear;
+    { Drops what was undone (the redo stack) - for a cancelled job whose commands were
+      rolled back and must not be redoable, since the files they used are deleted. }
+    procedure DiscardRedo;
     function UndoDescription: string;
     function RedoDescription: string;
     function UndoCount: Integer;
@@ -131,6 +135,21 @@ type
     FOldValue, FNewValue: Double;
   public
     constructor Create(ADoc: TProjectDocument; ANewValue: Double);
+    function Execute: Boolean; override;
+    procedure Undo; override;
+    function Description: string; override;
+    function AbsorbNext(ANext: TDAWCommand): Boolean; override;
+  end;
+
+  { replace the whole tempo map (add / move / retune / delete a tempo point);
+    a drag of one point merges into a single undo step }
+  TSetTempoMapCommand = class(TDAWCommand)
+  private
+    FDoc: TProjectDocument;
+    FOldMap, FNewMap: TTempoPoints;
+    FLabel: string;
+  public
+    constructor Create(ADoc: TProjectDocument; const ANewMap: TTempoPoints; const ALabel: string);
     function Execute: Boolean; override;
     procedure Undo; override;
     function Description: string; override;
@@ -355,6 +374,12 @@ begin
   Changed;
 end;
 
+procedure TCommandManager.DiscardRedo;
+begin
+  ClearRedo;
+  Changed;
+end;
+
 procedure TCommandManager.Clear;
 begin
   FUndoStack.Clear;
@@ -531,6 +556,57 @@ begin
   begin
     FNewValue := TSetTempoCommand(ANext).FNewValue;
     FDoc.TempoBPM := FNewValue;
+    Restamp;
+  end;
+end;
+
+{ ================= TSetTempoMapCommand ================= }
+
+constructor TSetTempoMapCommand.Create(ADoc: TProjectDocument; const ANewMap: TTempoPoints;
+  const ALabel: string);
+begin
+  inherited Create;
+  FDoc := ADoc;
+  FNewMap := Copy(ANewMap);
+  FLabel := ALabel;
+end;
+
+function MapsEqual(const A, B: TTempoPoints): Boolean;
+var
+  i: Integer;
+begin
+  Result := Length(A) = Length(B);
+  if Result then
+    for i := 0 to High(A) do
+      if (Abs(A[i].Seconds - B[i].Seconds) > 1e-9) or (Abs(A[i].Bpm - B[i].Bpm) > 1e-9) then
+        Exit(False);
+end;
+
+function TSetTempoMapCommand.Execute: Boolean;
+begin
+  FOldMap := Copy(FDoc.TempoMap);
+  FDoc.TempoMap := FNewMap;
+  Result := not MapsEqual(FOldMap, FDoc.TempoMap);
+end;
+
+procedure TSetTempoMapCommand.Undo;
+begin
+  FDoc.TempoMap := FOldMap;
+end;
+
+function TSetTempoMapCommand.Description: string;
+begin
+  Result := FLabel;
+end;
+
+function TSetTempoMapCommand.AbsorbNext(ANext: TDAWCommand): Boolean;
+begin
+  Result := (ANext is TSetTempoMapCommand) and (TSetTempoMapCommand(ANext).FDoc = FDoc) and
+    (TSetTempoMapCommand(ANext).FLabel = FLabel) and (MsSinceStamp <= COMMAND_MERGE_WINDOW_MS);
+  if Result then
+  begin
+    FNewMap := Copy(TSetTempoMapCommand(ANext).FNewMap);
+    FDoc.TempoMap := FNewMap;
     Restamp;
   end;
 end;

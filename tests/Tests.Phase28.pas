@@ -117,13 +117,17 @@ begin
       Check(session.HasPendingPreview, 'preview performed at least one command');
       Check(master.InsertCount > insertsBefore, 'the mastering/EQ chain was actually added to the master strip');
 
+      { undo/redo replaces the whole mixer model, so the strip must be re-fetched }
       session.CompareToggle;   // -> Original
+      master := doc.Mixer.MasterStrip;
       CheckEqualInt(insertsBefore, master.InsertCount, 'comparing to Original removes the previewed inserts');
 
       session.CompareToggle;   // -> AI Recommendation
+      master := doc.Mixer.MasterStrip;
       Check(master.InsertCount > insertsBefore, 'comparing back restores the previewed inserts');
 
       session.Reject;
+      master := doc.Mixer.MasterStrip;
       CheckEqualInt(insertsBefore, master.InsertCount, 'reject leaves the master strip exactly as it was');
       CheckFalse(session.HasPendingPreview, 'reject clears the session');
     finally

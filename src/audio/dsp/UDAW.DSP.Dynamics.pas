@@ -20,7 +20,7 @@ uses
   UDAW.Audio.Types, UDAW.DSP.Math, UDAW.DSP.Filters, UDAW.DSP.Envelope;
 
 type
-  TDynamicsMode = (dynCompressor, dynLimiter, dynExpander, dynGate, dynDeEsser);
+  TDynamicsMode = (dynCompressor, dynLimiter, dynExpander, dynGate, dynDeEsser, dynDucker);
 
   TDynamicsProcessor = class
   private
@@ -43,6 +43,7 @@ type
     FHoldSamplesMax: Integer;
     FHoldCounter: Integer;
     FLastGrDb: Double;
+    FDuckAtk, FDuckRel, FDuckHeldLin: Double;   // ducker gain ballistics
     procedure Recalc;
     function StaticGainDb(ALevelDb: Double): Double;
   public
@@ -62,6 +63,8 @@ type
       const ADetector: array of PSingle);
 
     function CurrentGainReductionDb: Double;   // >= 0, amount of attenuation
+    { static input->output level curve in dB (for editor displays) }
+    function StaticTransferDb(AInDb: Double): Double;
 
     property Mode: TDynamicsMode read FMode;
     property ThresholdDb: Double read FThresholdDb;
@@ -73,6 +76,10 @@ function DynamicsModeFromId(const AId: string; out AMode: TDynamicsMode): Boolea
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 function DynamicsModeId(AMode: TDynamicsMode): string;
 begin
   case AMode of
@@ -80,6 +87,7 @@ begin
     dynExpander: Result := 'expander';
     dynGate:     Result := 'gate';
     dynDeEsser:  Result := 'deesser';
+    dynDucker:   Result := 'ducker';
   else
     Result := 'compressor';
   end;
@@ -134,10 +142,18 @@ procedure TDynamicsProcessor.Recalc;
 begin
   if FRatio < 1.0 then FRatio := 1.0;
   if FKneeDb < 0 then FKneeDb := 0;
-  FFollower.SetTimes(Max(0.05, FAttackMs), Max(1.0, FReleaseMs));
+  if FMode = dynDucker then
+  begin
+    { the key is followed quickly; attack / release shape the duck itself }
+    FFollower.SetTimes(0.5, 20.0);
+    FDuckAtk := FastExp(-1.0 / (Max(0.1, FAttackMs) * 0.001 * FSampleRate));
+    FDuckRel := FastExp(-1.0 / (Max(1.0, FReleaseMs) * 0.001 * FSampleRate));
+  end
+  else
+    FFollower.SetTimes(Max(0.05, FAttackMs), Max(1.0, FReleaseMs));
   FSideHp.SetParams(bqHighpass, Max(200.0, Min(FSideHpHz, FSampleRate * 0.45)), 0.70710678);
   { a short extra smoothing pole so the gain itself never steps }
-  FGainSmoothCoef := Exp(-1.0 / (0.001 * 2.0 * FSampleRate));
+  FGainSmoothCoef := FastExp(-1.0 / (0.001 * 2.0 * FSampleRate));
   FHoldSamplesMax := Round(Max(0.0, FHoldMs) * 0.001 * FSampleRate);
 end;
 
@@ -148,6 +164,7 @@ begin
   FCurGainLin := 1.0;
   FHoldCounter := 0;
   FLastGrDb := 0.0;
+  FDuckHeldLin := 1.0;
 end;
 
 procedure TDynamicsProcessor.SetParams(AMode: TDynamicsMode; AThresholdDb, ARatio,
@@ -212,6 +229,16 @@ begin
           Result := (x - T) * (FRatio - 1.0);
         if Result < FRangeDb then Result := FRangeDb;
       end;
+    dynDucker:
+      begin
+        { key above the threshold pulls the signal down by up to RangeDb (a
+          negative number); the knee width is the transition zone }
+        if W < 1.0 then W := 1.0;
+        d := (x - T) / W + 0.5;
+        if d <= 0 then d := 0 else if d >= 1 then d := 1
+        else d := d * d * (3.0 - 2.0 * d);
+        Result := Min(0.0, FRangeDb) * d;
+      end;
   end;
 end;
 
@@ -221,12 +248,20 @@ var
   i, ch, nc, nd: Integer;
   key, envLin, envDb, grDb, targetLin, makeup: Double;
   wantOpen: Boolean;
-  s: Double;
+  s, invNd, invNc, lastEnvLin, lastEnvDb, lastGrDb, lastTargetLin, gainMakeup: Double;
 begin
   nc := Length(AIn);
   if nc = 0 then Exit;
   nd := Length(ADetector);
   makeup := DbToLinear(FMakeupDb);
+  invNc := 1.0 / nc;
+  if nd > 0 then invNd := 1.0 / nd else invNd := 0.0;
+  { transcendental results are reused while their input is unchanged (silence,
+    steady signals) - identical output, far fewer Log10/Power calls }
+  lastEnvLin := -1.0;
+  lastEnvDb := 0.0;
+  lastGrDb := 1.0;      // grDb is always <= 0, so this never matches
+  lastTargetLin := 1.0;
 
   for i := 0 to AFrames - 1 do
   begin
@@ -236,20 +271,27 @@ begin
       key := 0;
       for ch := 0 to nd - 1 do
         key := key + Abs(ADetector[ch][i]);
-      key := key / nd;
+      key := key * invNd;
     end
     else
     begin
       key := 0;
       for ch := 0 to nc - 1 do
         key := key + Abs(AIn[ch][i]);
-      key := key / nc;
+      key := key * invNc;
     end;
     if FMode = dynDeEsser then
       key := Abs(FSideHp.ProcessSample(Single(key)));
 
     envLin := FFollower.Process(Single(key));
-    if envLin < 1.0E-9 then envDb := -180.0 else envDb := 20.0 * Log10(envLin);
+    if envLin <> lastEnvLin then
+    begin
+      if envLin < 1.0E-9 then envDb := -180.0 else envDb := 20.0 * FastLog10(envLin);
+      lastEnvLin := envLin;
+      lastEnvDb := envDb;
+    end
+    else
+      envDb := lastEnvDb;
 
     grDb := StaticGainDb(envDb);   // <= 0
 
@@ -266,19 +308,55 @@ begin
       end;
     end;
 
-    targetLin := DbToLinear(grDb);
-    { one-pole smooth the linear gain (follower already shaped the level, this
-      just removes any residual zipper at the knee) }
-    FCurGainLin := targetLin + (FCurGainLin - targetLin) * FGainSmoothCoef;
+    if grDb <> lastGrDb then
+    begin
+      if grDb = 0.0 then targetLin := 1.0 else targetLin := DbToLinear(grDb);
+      lastGrDb := grDb;
+      lastTargetLin := targetLin;
+    end
+    else
+      targetLin := lastTargetLin;
+    if FMode = dynDucker then
+    begin
+      { hold the duck for HoldMs after the key drops, then release }
+      if grDb < -0.05 then
+      begin
+        FHoldCounter := FHoldSamplesMax;
+        FDuckHeldLin := targetLin;
+      end
+      else if FHoldCounter > 0 then
+      begin
+        Dec(FHoldCounter);
+        targetLin := FDuckHeldLin;
+      end
+      else
+        FDuckHeldLin := 1.0;
+      if targetLin < FCurGainLin then
+        FCurGainLin := targetLin + (FCurGainLin - targetLin) * FDuckAtk
+      else
+        FCurGainLin := targetLin + (FCurGainLin - targetLin) * FDuckRel;
+    end
+    else
+      { one-pole smooth the linear gain (follower already shaped the level, this
+        just removes any residual zipper at the knee) }
+      FCurGainLin := targetLin + (FCurGainLin - targetLin) * FGainSmoothCoef;
     if Abs(FCurGainLin - targetLin) < DSP_DENORMAL_FLOOR then FCurGainLin := targetLin;
-    FLastGrDb := -20.0 * Log10(Max(FCurGainLin, 1.0E-9));
 
+    gainMakeup := FCurGainLin * makeup;
     for ch := 0 to nc - 1 do
     begin
-      s := AIn[ch][i] * FCurGainLin * makeup;
+      s := AIn[ch][i] * gainMakeup;
       AOut[ch][i] := Single(FlushDenorm(Single(s)));
     end;
   end;
+  { meter value: only the end-of-block gain reduction is ever read }
+  if AFrames > 0 then
+    FLastGrDb := -20.0 * FastLog10(Max(FCurGainLin, 1.0E-9));
+end;
+
+function TDynamicsProcessor.StaticTransferDb(AInDb: Double): Double;
+begin
+  Result := AInDb + StaticGainDb(AInDb) + FMakeupDb;
 end;
 
 function TDynamicsProcessor.CurrentGainReductionDb: Double;

@@ -213,7 +213,7 @@ try {
     Write-Host "==> Building UDAW.exe ($Config)"
     & $dcc -B "-NS$ns" "-D$defines" "-U$rtl" $optimization `
         "-E$OutputDir" '-NUbuild\dcu' `
-        '-Usrc\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\project;src\recording;src\mixer;src\tracker;src\application;src\ui;src\web;src\input;src\video;src\ai;src\browser;src\composer;src\voice;ThirdParty\TaurusTLS\Source' `
+        '-Usrc\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\project;src\recording;src\mixer;src\tracker;src\application;src\ui;src\web;src\input;src\video;src\ai;src\browser;src\composer;src\voice;ThirdParty\TaurusTLS\Source;ThirdParty\dglOpenGL' `
         '-Isrc\common' '-Rsrc\ui' `
         'UDAW.dpr'
     if ($LASTEXITCODE -ne 0) { throw "dcc64 failed ($LASTEXITCODE)" }
@@ -237,6 +237,7 @@ Write-Host "==> Copying VCL style resources"
 New-Item -ItemType Directory -Force -Path (Join-Path $OutputDir 'resources\styles') | Out-Null
 Copy-Item 'resources\styles\*.vsf' (Join-Path $OutputDir 'resources\styles') -Force -ErrorAction SilentlyContinue
 Copy-Item 'udaw-icon-image.png' (Join-Path $OutputDir 'udaw-icon-image.png') -Force
+Copy-Item 'about-udaw.dat' (Join-Path $OutputDir 'about-udaw.dat') -Force   # help page, read from disk (the web server is gone)
 
 # ---- Stamp the in-app help page's version banner ------------------------
 # F:\Projects\Web\EffectualDesigns\about-udaw.dat is the help page the
@@ -248,7 +249,8 @@ Copy-Item 'udaw-icon-image.png' (Join-Path $OutputDir 'udaw-icon-image.png') -Fo
 # doesn't have that separate web project checked out (or a failed edit)
 # must never fail the UDAW build itself over it.
 try {
-    $helpPath = 'F:\Projects\Web\EffectualDesigns\about-udaw.dat'
+    # the help page now lives next to the project (read from disk / embedded in the exe)
+    $helpPath = Join-Path $PSScriptRoot '..\about-udaw.dat'
     if (Test-Path $helpPath) {
         Write-Host "==> Stamping help page version banner"
         $versionStr = "1.0.$newBuild"

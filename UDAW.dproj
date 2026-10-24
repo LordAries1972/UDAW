@@ -26,10 +26,11 @@
         <Base>true</Base>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Base)'!=''">
-        <DCC_UnitSearchPath>src\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\project;src\recording;src\mixer;src\tracker;src\application;src\ui;src\web;src\input;src\video;src\ai;src\browser;src\composer;src\voice;ThirdParty\TaurusTLS\Source;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
+        <DCC_UnitSearchPath>src\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\project;src\recording;src\mixer;src\tracker;src\application;src\ui;src\web;src\input;src\video;src\ai;src\browser;src\composer;src\voice;ThirdParty\TaurusTLS\Source;ThirdParty\dglOpenGL;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <DCC_IncludePath>src\common;$(DCC_IncludePath)</DCC_IncludePath>
         <DCC_Define>$(DCC_Define)</DCC_Define>
         <DCC_ExeOutput>build\bin</DCC_ExeOutput>
+        <DCC_MapFile>3</DCC_MapFile>
         <DCC_DcuOutput>build\dcu\$(Platform)\$(Config)</DCC_DcuOutput>
         <DCC_Namespace>System;Xml;Data;Datasnap;Web;Soap;Vcl;Vcl.Imaging;Vcl.Touch;Vcl.Samples;Vcl.Shell;Winapi;$(DCC_Namespace)</DCC_Namespace>
         <VerInfo_Locale>1033</VerInfo_Locale>
@@ -76,6 +77,7 @@
         <DCCReference Include="src\audio\backend\UDAW.Audio.Backend.WASAPI.pas" />
         <DCCReference Include="src\audio\UDAW.Audio.Backend.Factory.pas" />
         <DCCReference Include="src\audio\UDAW.Audio.Engine.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.MathTables.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Math.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Interpolation.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Filters.pas" />
@@ -84,6 +86,7 @@
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Envelope.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Meter.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Dynamics.pas" />
+        <DCCReference Include="src\audio\dsp\UDAW.DSP.CurveMath.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Modulation.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Distortion.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Reverb.pas" />
@@ -101,14 +104,20 @@
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Dither.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.Spectral.pas" />
         <DCCReference Include="src\sequencer\UDAW.Sequencer.Patterns.pas" />
+        <DCCReference Include="src\sequencer\UDAW.Pattern.Model.pas" />
+        <DCCReference Include="src\sequencer\UDAW.Pattern.Commands.pas" />
+        <DCCReference Include="src\sequencer\UDAW.Drum.KitModel.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.DrumInstrument.pas" />
         <DCCReference Include="src\synth\UDAW.Synth.Instruments.pas" />
         <DCCReference Include="src\mixer\UDAW.Mixer.Modulation.pas" />
         <DCCReference Include="src\mixer\UDAW.Mixer.CLAP.pas" />
         <DCCReference Include="src\mixer\UDAW.Mixer.VST3.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.AudioToMidi.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.ExtraFx.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.SpectralFx.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.Warp.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.VideoPlayer.pas" />
+        <DCCReference Include="src\timeline\UDAW.Video.EffectsPlus.pas" />
         <DCCReference Include="src\timeline\UDAW.Video.Effects.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.VideoFxCache.pas" />
         <DCCReference Include="src\video\UDAW.Media.DirectShow.pas" />
@@ -165,10 +174,12 @@
         <DCCReference Include="src\codecs\tracker\UDAW.Codec.ProTracker.pas" />
         <DCCReference Include="src\codecs\tracker\UDAW.Codec.XM.pas" />
         <DCCReference Include="src\codecs\tracker\UDAW.Codec.MPTM.pas" />
+        <DCCReference Include="src\codecs\tracker\UDAW.Codec.TrackerLegacy.pas" />
         <DCCReference Include="src\codecs\flstudio\UDAW.Codec.FLStudio.pas" />
         <DCCReference Include="src\codecs\flstudio\UDAW.Codec.FLStudio.Timeline.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.Time.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.Waveform.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.TrackerSource.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.Model.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.Serialization.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.View.pas" />
@@ -181,6 +192,7 @@
         <DCCReference Include="src\tracker\UDAW.Tracker.Instrument.pas" />
         <DCCReference Include="src\tracker\UDAW.Tracker.Pattern.pas" />
         <DCCReference Include="src\tracker\UDAW.Tracker.Player.pas" />
+        <DCCReference Include="src\tracker\UDAW.Tracker.ScoreNotes.pas" />
         <DCCReference Include="src\tracker\UDAW.Tracker.Serialization.pas" />
         <DCCReference Include="src\project\UDAW.Project.Document.pas" />
         <DCCReference Include="src\project\UDAW.Project.Serialization.pas" />
@@ -245,12 +257,48 @@
         <DCCReference Include="src\ui\UDAW.UI.SplashForm.pas">
             <Form>frmSplash</Form>
         </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.ProjectStartForm.pas">
+            <Form>frmProjectStart</Form>
+        </DCCReference>
         <DCCReference Include="src\ui\UDAW.UI.LogForm.pas">
             <Form>frmLogViewer</Form>
         </DCCReference>
-        <DCCReference Include="src\ui\UDAW.UI.MixInsertParams.pas">
-            <Form>frmMixInsertParams</Form>
+        <DCCReference Include="src\ui\UDAW.UI.VideoForm.pas">
+            <Form>frmVideoPlayer</Form>
+            <FormType>dfm</FormType>
         </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.SpectrumForm.pas">
+            <Form>frmSpectrum</Form>
+            <FormType>dfm</FormType>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.MeterForm.pas">
+            <Form>frmMeters</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.FoleyForm.pas">
+            <Form>frmFoley</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.MixInsertParams.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.CapsuleProgress.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.MixerStrip.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.CurvePaint.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.EffectEditor.pas">
+            <Form>frmEffectEditor</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.InstrumentEditor.pas">
+            <Form>frmInstrumentEditor</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.TrkFxPick.pas">
+            <Form>frmTrkFxPick</Form>
+        </DCCReference>
+        <DCCReference Include="src\timeline\UDAW.Timeline.FxPresets.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.OfflineFx.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.TimelineHeader.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.Score.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.ScorePdf.pas" />
+        <DCCReference Include="src\project\UDAW.Project.DialogPaths.pas" />
+        <DCCReference Include="src\audio\UDAW.Drum.Machine.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.PluginScan.pas" />
+        <DCCReference Include="src\ai\UDAW.Scripting.Python.pas" />
         <DCCReference Include="src\input\UDAW.Input.KeyHooks.pas" />
         <DCCReference Include="src\ui\UDAW.UI.MainForm.pas">
             <Form>frmMain</Form>

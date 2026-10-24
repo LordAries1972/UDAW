@@ -55,6 +55,16 @@ const
   CFG_SEC_GENERAL   = 'general';
   CFG_SEC_LOGGING   = 'logging';
   CFG_SEC_PATHS     = 'paths';
+  CFG_SEC_DISPLAY   = 'display';
+
+  { [display] - Settings > OpenGL: how the window sits on the screen and the frame-rate display }
+  CFG_DSP_MODE      = 'screen_mode';     // 0 windowed, 1 borderless full screen, 2 exclusive full screen
+  CFG_DSP_MONITOR   = 'monitor';         // display device name of the monitor used for full screen
+  CFG_DSP_WIDTH     = 'mode_width';      // the exclusive mode: width, height and refresh rate
+  CFG_DSP_HEIGHT    = 'mode_height';
+  CFG_DSP_HZ        = 'mode_hz';
+  CFG_DSP_SHOW_FPS  = 'show_fps';        // frame rate in the top right corner (default off)
+  CFG_DSP_FPS_WHEN  = 'fps_when';        // 0 always, 1 only in full screen, 2 only in a window
 
   CFG_LOG_LEVEL     = 'level';           // trace|debug|info|warn|error|critical
   CFG_LOG_MAXBYTES  = 'max_file_bytes';
@@ -62,7 +72,8 @@ const
   CFG_GEN_LOCALE    = 'locale';
   CFG_GEN_SHOW_HINTS     = 'show_hints';          // system-wide (not per project): rollover hint bubbles, default on
   CFG_GEN_TEMPO_AUTO     = 'tempo_auto_detect';   // 1st imported audio track sets the Timeline BPM (default on)
-  CFG_GEN_TL_REFRESH_HZ  = 'timeline_refresh_hz'; // Timeline redraws per second while playing: 5..40 in steps of 5 (default 20)
+  CFG_GEN_SHOW_START     = 'show_project_start';  // the Project Startup screen (New / Open / recent / Help) is shown at launch (default on)
+  CFG_GEN_TL_REFRESH_HZ  = 'timeline_refresh_hz'; // Timeline redraws per second while playing: 5..60 in steps of 5 (default 20)
   CFG_GEN_TEMPO_RESAMPLE = 'tempo_resample';      // conform clip tempo by resampling (pitch follows) instead of phase vocoder (default off)
 
   { [paths] - user-configurable working directories (Settings tab).  Each is a
@@ -86,6 +97,7 @@ const
   CFG_PATH_PLUGINS     = 'plugins_dir';        // VST/VST3 plug-in folder
   CFG_PATH_SOUNDFONTS  = 'soundfonts_dir';     // SoundFont (.sf2/.sfz) folder
   CFG_PATH_VOCALS      = 'vocals_dir';         // vocal recording folder
+  CFG_PATH_SCRIPTS     = 'scripts_dir';        // default folder for Python scripts (empty = Scripts under the config folder)
 
 implementation
 

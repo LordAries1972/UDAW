@@ -32,6 +32,14 @@ const
   THEME_COLORS_DEFAULT = 'Studio Dark';
 
 type
+  { A colour for an effect that has no dedicated TUDAWTheme field: every other
+    audio effect and every video effect. Key is the effect name ('Echo') or
+    'video:<id>'. Effects with no entry get a stable generated colour. }
+  TNamedColor = record
+    Key: string;
+    Color: TColor;
+  end;
+
   TFadeDisplayMode = (fdmColours, fdmCurves, fdmColoursAndCurves);
   TUDAWTheme = record
     Name: string;
@@ -65,7 +73,19 @@ type
     FxAmplify, FxDeEsser, FxDelay, FxExpander, FxFoldback, FxGate, FxHardClip,
     FxLimiter, FxPingPongDelay,
     FxBalance, FxBassEnhance, FxDCOffsetRemover, FxExciter, FxHighPassFilter, FxLowPassFilter, FxMakeMono, FxMultibandCompressor, FxNotchFilter, FxPitchShift, FxPresenceBoost, FxStereoWidener, FxTransientShaper, FxTrebleBoost: TColor;
+    ExtraFx: TArray<TNamedColor>;   // see TNamedColor
+    Trk: array[0..29] of TColor;     // tracker colours, indexed by TTrkColorRole
+    Score: array[0..9] of TColor;    // Score / guitar-tab colours, indexed by TScoreColorRole
   end;
+
+  { the Score tab's colour roles: staff notation and guitar tablature }
+  TScoreColorRole = (
+    scrPage, scrInk, scrStaff, scrLedger, scrTabString, scrTabNumber, scrTabOutline,
+    scrPlayhead, scrChord, scrBarNumber);
+
+  { the tracker's colour roles (pattern grid, channel headers, LEDs, sequence strip) }
+  TTrkColorRole = (
+    tcGridTop, tcGridBottom, tcBeatRow, tcBarRow, tcLines, tcGutter, tcRowNumber, tcHeader, tcHeaderText, tcNote, tcInstrument, tcVolume, tcEffect, tcParam, tcEmpty, tcNoteOff, tcNoteCut, tcCursor, tcCursorField, tcHover, tcPlaying, tcLedIdle, tcLedNormal, tcLedHot, tcLedPeak, tcMuted, tcFxActive, tcSeqStep, tcSeqCurrent, tcSeqPlaying);
 
   { One editable colour role, for a data-driven "Colors" settings page - each
     entry is a (display name, getter, setter) triple over TUDAWTheme so the
@@ -80,7 +100,16 @@ type
     csFxTremolo, csFxAutoPan, csFxSaturation, csFxBitCrusher, csFxBrightenEQ,
     csFxSilence, csFxAmplify, csFxDeEsser, csFxDelay, csFxExpander, csFxFoldback,
     csFxGate, csFxHardClip, csFxLimiter, csFxPingPongDelay,
-    csFxBalance, csFxBassEnhance, csFxDCOffsetRemover, csFxExciter, csFxHighPassFilter, csFxLowPassFilter, csFxMakeMono, csFxMultibandCompressor, csFxNotchFilter, csFxPitchShift, csFxPresenceBoost, csFxStereoWidener, csFxTransientShaper, csFxTrebleBoost);
+    csFxBalance, csFxBassEnhance, csFxDCOffsetRemover, csFxExciter, csFxHighPassFilter, csFxLowPassFilter, csFxMakeMono, csFxMultibandCompressor, csFxNotchFilter, csFxPitchShift, csFxPresenceBoost, csFxStereoWidener, csFxTransientShaper, csFxTrebleBoost,
+    csTrkGridTop, csTrkGridBottom, csTrkBeatRow, csTrkBarRow, csTrkLines, csTrkGutter, csTrkRowNumber, csTrkHeader, csTrkHeaderText, csTrkNote, csTrkInstrument, csTrkVolume, csTrkEffect, csTrkParam, csTrkEmpty, csTrkNoteOff, csTrkNoteCut, csTrkCursor, csTrkCursorField, csTrkHover, csTrkPlaying, csTrkLedIdle, csTrkLedNormal, csTrkLedHot, csTrkLedPeak, csTrkMuted, csTrkFxActive, csTrkSeqStep, csTrkSeqCurrent, csTrkSeqPlaying,
+    csScorePage, csScoreInk, csScoreStaff, csScoreLedger, csScoreTabString, csScoreTabNumber,
+    csScoreTabOutline, csScorePlayhead, csScoreChord, csScoreBarNumber);
+
+{ Colour of an effect without a dedicated field (see TNamedColor): the
+  theme's saved colour for AKey, else a stable colour generated from the name
+  so every effect is distinguishable out of the box. }
+function ThemeExtraFxGet(const ATheme: TUDAWTheme; const AKey: string): TColor;
+procedure ThemeExtraFxSet(var ATheme: TUDAWTheme; const AKey: string; AColor: TColor);
 
 { All built-in theme names, in a fixed display order. }
 function ThemeColorsBuiltInNames: TArray<string>;
@@ -102,6 +131,10 @@ function ThemeColorsCurrent: TUDAWTheme;
 { Short alias for ThemeColorsCurrent, for terse use at custom-draw call
   sites (CurrentTheme.Waveform, CurrentTheme.Grid, ...). }
 function CurrentTheme: TUDAWTheme;
+{ One tracker colour of the current theme }
+function TrkColor(ARole: TTrkColorRole): TColor;
+{ One Score / guitar-tab colour of the current theme }
+function ScoreColor(ARole: TScoreColorRole): TColor;
 { Switches the in-memory current theme. Always succeeds - an unknown name
   resolves to THEME_COLORS_DEFAULT. }
 procedure ThemeColorsApply(const AName: string);
@@ -153,6 +186,46 @@ var
 function RGB(ARed, AGreen, ABlue: Byte): TColor;
 begin
   Result := TColor(ARed or (AGreen shl 8) or (ABlue shl 16));
+end;
+
+const
+  { default tracker colours, TColor $00BBGGRR, parallel to TTrkColorRole }
+  TRK_COLOR_DEFAULTS: array[0..29] of TColor = (
+    $002E221E, $0018100E, $008C5A46, $00BE826E, $00120C0A, $00342622, $00A08278, $004E3A34, $00EBDAD2, $00F0E0B0, $0060D8F0, $0060E060, $00E070F0, $00C0A0F0, $00504A44, $0040B0F0, $005050F0, $00E6783C, $005AD6FF, $00FFFFFF, $0078DC3C, $00183018, $0050E040, $0000D0F0, $00403CF0, $004040C8, $0078C846, $003C2C28, $00E6783C, $0078DC3C);
+
+procedure ApplyTrkDefaults(var ATheme: TUDAWTheme);
+var
+  i: Integer;
+begin
+  for i := 0 to High(TRK_COLOR_DEFAULTS) do ATheme.Trk[i] := TRK_COLOR_DEFAULTS[i];
+end;
+
+{ default Score colours follow the theme's own text / page colours until the user picks others }
+procedure ApplyScoreDefaults(var ATheme: TUDAWTheme);
+
+  function Mix(A, B: TColor; T: Double): TColor;
+  var
+    ca, cb: Integer;
+  begin
+    ca := ColorToRGB(A);
+    cb := ColorToRGB(B);
+    Result := RGB(
+      Round((ca and $FF) + ((cb and $FF) - (ca and $FF)) * T),
+      Round(((ca shr 8) and $FF) + (((cb shr 8) and $FF) - ((ca shr 8) and $FF)) * T),
+      Round(((ca shr 16) and $FF) + (((cb shr 16) and $FF) - ((ca shr 16) and $FF)) * T));
+  end;
+
+begin
+  ATheme.Score[Ord(scrPage)] := ATheme.Background;
+  ATheme.Score[Ord(scrInk)] := ATheme.Text;
+  ATheme.Score[Ord(scrStaff)] := Mix(ATheme.Background, ATheme.Text, 0.65);
+  ATheme.Score[Ord(scrLedger)] := Mix(ATheme.Background, ATheme.Text, 0.9);
+  ATheme.Score[Ord(scrTabString)] := Mix(ATheme.Background, ATheme.Text, 0.65);
+  ATheme.Score[Ord(scrTabNumber)] := ATheme.Text;
+  ATheme.Score[Ord(scrTabOutline)] := ATheme.Background;
+  ATheme.Score[Ord(scrPlayhead)] := TColor($0030A0F0);
+  ATheme.Score[Ord(scrChord)] := Mix(ATheme.Text, TColor($0070C0F0), 0.6);
+  ATheme.Score[Ord(scrBarNumber)] := ATheme.SecondaryText;
 end;
 
 function MakeTheme(const AName: string; ABackground, APanelBackground, AText,
@@ -226,6 +299,8 @@ begin
   Result.LogWarn := ALogWarn;
   Result.LogError := ALogError;
   Result.LogCritical := ALogCritical;
+  ApplyTrkDefaults(Result);
+  ApplyScoreDefaults(Result);
 end;
 
 function ThemeColorsBuiltInNames: TArray<string>;
@@ -290,6 +365,7 @@ end;
 function LoadThemeFile(const APath: string; out ATheme: TUDAWTheme): Boolean;
 var
   lines: TStringList;
+  n, v: Integer;
 
   function Field(const AKey, ADefault: string): string;
   var
@@ -353,6 +429,12 @@ begin
     ATheme.FxAutoPan := ColorField('fxautopan', RGB(80, 200, 200));
     ATheme.FxSaturation := ColorField('fxsaturation', RGB(220, 120, 60));
     ATheme.FxBitCrusher := ColorField('fxbitcrusher', RGB(140, 140, 140));
+    ApplyTrkDefaults(ATheme);
+    for n := 0 to High(ATheme.Trk) do
+      ATheme.Trk[n] := ColorField('trk' + IntToStr(n), ATheme.Trk[n]);
+    ApplyScoreDefaults(ATheme);
+    for n := 0 to High(ATheme.Score) do
+      ATheme.Score[n] := ColorField('score' + IntToStr(n), ATheme.Score[n]);
     ATheme.FxBrightenEQ := ColorField('fxbrighteneq', RGB(240, 220, 140));
     ATheme.FxSilence := ColorField('fxsilence', RGB(90, 90, 110));
     ATheme.FxAmplify := ColorField('fxamplify', RGB(255, 140, 60));
@@ -378,6 +460,10 @@ begin
     ATheme.FxStereoWidener := ColorField('fxstereowidener', RGB(90, 200, 140));
     ATheme.FxTransientShaper := ColorField('fxtransientshaper', RGB(240, 110, 80));
     ATheme.FxTrebleBoost := ColorField('fxtrebleboost', RGB(180, 220, 240));
+    SetLength(ATheme.ExtraFx, 0);
+    for n := 0 to lines.Count - 1 do
+      if (Copy(lines.Names[n], 1, 4) = 'xfx.') and TryStrToInt(lines.ValueFromIndex[n], v) then
+        ThemeExtraFxSet(ATheme, Copy(lines.Names[n], 5, MaxInt), TColor(v));
     Result := True;
   finally
     lines.Free;
@@ -387,6 +473,7 @@ end;
 function SaveThemeFile(const ATheme: TUDAWTheme; const APath: string): Boolean;
 var
   lines: TStringList;
+  n: Integer;
 begin
   ForceDirectories(ExtractFilePath(APath));
   lines := TStringList.Create;
@@ -423,6 +510,10 @@ begin
     lines.Values['fxautopan'] := IntToStr(Integer(ATheme.FxAutoPan));
     lines.Values['fxsaturation'] := IntToStr(Integer(ATheme.FxSaturation));
     lines.Values['fxbitcrusher'] := IntToStr(Integer(ATheme.FxBitCrusher));
+    for n := 0 to High(ATheme.Trk) do
+      lines.Values['trk' + IntToStr(n)] := IntToStr(Integer(ATheme.Trk[n]));
+    for n := 0 to High(ATheme.Score) do
+      lines.Values['score' + IntToStr(n)] := IntToStr(Integer(ATheme.Score[n]));
     lines.Values['fxbrighteneq'] := IntToStr(Integer(ATheme.FxBrightenEQ));
     lines.Values['fxsilence'] := IntToStr(Integer(ATheme.FxSilence));
     lines.Values['fxamplify'] := IntToStr(Integer(ATheme.FxAmplify));
@@ -448,6 +539,8 @@ begin
     lines.Values['fxstereowidener'] := IntToStr(Integer(ATheme.FxStereoWidener));
     lines.Values['fxtransientshaper'] := IntToStr(Integer(ATheme.FxTransientShaper));
     lines.Values['fxtrebleboost'] := IntToStr(Integer(ATheme.FxTrebleBoost));
+    for n := 0 to High(ATheme.ExtraFx) do
+      lines.Values['xfx.' + LowerCase(ATheme.ExtraFx[n].Key)] := IntToStr(Integer(ATheme.ExtraFx[n].Color));
     try
       lines.SaveToFile(APath);
       Result := True;
@@ -557,7 +650,78 @@ const
     'Effect: Amplify', 'Effect: De-Esser', 'Effect: Delay', 'Effect: Expander',
     'Effect: Foldback', 'Effect: Gate', 'Effect: Hard Clip', 'Effect: Limiter',
     'Effect: Ping-Pong Delay',
-    'Effect: Balance', 'Effect: Bass Enhance', 'Effect: DC Offset Remover', 'Effect: Exciter', 'Effect: High-Pass Filter', 'Effect: Low-Pass Filter', 'Effect: Make Mono', 'Effect: Multiband Compressor', 'Effect: Notch Filter', 'Effect: Pitch Shift', 'Effect: Presence Boost', 'Effect: Stereo Widener', 'Effect: Transient Shaper', 'Effect: Treble Boost');
+    'Effect: Balance', 'Effect: Bass Enhance', 'Effect: DC Offset Remover', 'Effect: Exciter', 'Effect: High-Pass Filter', 'Effect: Low-Pass Filter', 'Effect: Make Mono', 'Effect: Multiband Compressor', 'Effect: Notch Filter', 'Effect: Pitch Shift', 'Effect: Presence Boost', 'Effect: Stereo Widener', 'Effect: Transient Shaper', 'Effect: Treble Boost',
+    'Tracker: Grid background (top)', 'Tracker: Grid background (bottom)', 'Tracker: Beat row (every 4)', 'Tracker: Bar row (every 16)', 'Tracker: Grid lines', 'Tracker: Row number gutter', 'Tracker: Row numbers', 'Tracker: Channel header', 'Tracker: Channel header text', 'Tracker: Note', 'Tracker: Instrument', 'Tracker: Volume', 'Tracker: Effect command', 'Tracker: Effect parameter', 'Tracker: Empty cell', 'Tracker: Note off', 'Tracker: Note cut', 'Tracker: Cell cursor', 'Tracker: Cursor field', 'Tracker: Mouse hover', 'Tracker: Playing row', 'Tracker: Channel LED (silent)', 'Tracker: Channel LED (playing)', 'Tracker: Channel LED (loud)', 'Tracker: Channel LED (peak)', 'Tracker: Muted channel', 'Tracker: Channel with effect', 'Tracker: Sequence step', 'Tracker: Sequence step shown', 'Tracker: Sequence step playing',
+    'Score: Page background', 'Score: Notes, clefs and rests', 'Score: Staff lines', 'Score: Ledger lines',
+    'Tab: String lines', 'Tab: Fret numbers', 'Tab: Fret number outline', 'Score: Playhead',
+    'Score: Chord symbols', 'Score: Bar numbers');
+
+function ThemeExtraFxDefault(const AKey: string): TColor;
+var
+  h: Cardinal;
+  i: Integer;
+  hue, s, l, q, p: Double;
+  key: string;
+
+  function Chan(t: Double): Integer;
+  begin
+    if t < 0 then t := t + 1;
+    if t > 1 then t := t - 1;
+    if t < 1 / 6 then Result := Round(255 * (p + (q - p) * 6 * t))
+    else if t < 1 / 2 then Result := Round(255 * q)
+    else if t < 2 / 3 then Result := Round(255 * (p + (q - p) * (2 / 3 - t) * 6))
+    else Result := Round(255 * p);
+  end;
+
+begin
+  key := LowerCase(AKey);
+  h := 2166136261;                       // FNV-1a over the lower-cased key
+  for i := 1 to Length(key) do
+    h := (h xor Cardinal(Ord(key[i]))) * 16777619;
+  hue := (h mod 360) / 360;
+  s := 0.55;
+  l := 0.62;
+  q := l + s - l * s;
+  p := 2 * l - q;
+  Result := RGB(Chan(hue + 1 / 3), Chan(hue), Chan(hue - 1 / 3));
+end;
+
+function ThemeExtraFxGet(const ATheme: TUDAWTheme; const AKey: string): TColor;
+var
+  i: Integer;
+begin
+  for i := 0 to High(ATheme.ExtraFx) do
+    if SameText(ATheme.ExtraFx[i].Key, AKey) then Exit(ATheme.ExtraFx[i].Color);
+  Result := ThemeExtraFxDefault(AKey);
+end;
+
+procedure ThemeExtraFxSet(var ATheme: TUDAWTheme; const AKey: string; AColor: TColor);
+var
+  i: Integer;
+begin
+  { copy first: records are copied by value but a dynamic array is shared, and
+    an edit must not leak into the theme this one was copied from }
+  ATheme.ExtraFx := Copy(ATheme.ExtraFx);
+  for i := 0 to High(ATheme.ExtraFx) do
+    if SameText(ATheme.ExtraFx[i].Key, AKey) then
+    begin
+      ATheme.ExtraFx[i].Color := AColor;
+      Exit;
+    end;
+  SetLength(ATheme.ExtraFx, Length(ATheme.ExtraFx) + 1);
+  ATheme.ExtraFx[High(ATheme.ExtraFx)].Key := AKey;
+  ATheme.ExtraFx[High(ATheme.ExtraFx)].Color := AColor;
+end;
+
+function TrkColor(ARole: TTrkColorRole): TColor;
+begin
+  Result := CurrentTheme.Trk[Ord(ARole)];
+end;
+
+function ScoreColor(ARole: TScoreColorRole): TColor;
+begin
+  Result := CurrentTheme.Score[Ord(ARole)];
+end;
 
 function ColorSwatchName(ASwatch: TColorSwatch): string;
 begin
@@ -624,7 +788,9 @@ begin
     csFxTransientShaper: Result := ATheme.FxTransientShaper;
     csFxTrebleBoost: Result := ATheme.FxTrebleBoost;
   else
-    Result := clBlack;
+    if ASwatch >= csScorePage then Result := ATheme.Score[Ord(ASwatch) - Ord(csScorePage)]
+    else if ASwatch >= csTrkGridTop then Result := ATheme.Trk[Ord(ASwatch) - Ord(csTrkGridTop)]
+    else Result := clBlack;
   end;
 end;
 
@@ -687,6 +853,9 @@ begin
     csFxStereoWidener: ATheme.FxStereoWidener := AColor;
     csFxTransientShaper: ATheme.FxTransientShaper := AColor;
     csFxTrebleBoost: ATheme.FxTrebleBoost := AColor;
+  else
+    if ASwatch >= csScorePage then ATheme.Score[Ord(ASwatch) - Ord(csScorePage)] := AColor
+    else if ASwatch >= csTrkGridTop then ATheme.Trk[Ord(ASwatch) - Ord(csTrkGridTop)] := AColor;
   end;
 end;
 

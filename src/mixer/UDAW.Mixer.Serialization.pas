@@ -131,6 +131,21 @@ begin
   end;
 end;
 
+{ an insert's settings are one token on its INSERT line, so a space (or tab) inside them must not split it: it is written as %20 / %09 (and a literal % as %25) and read back the same way. Older files carry no such sequences and read exactly as before. }
+function EscapeParams(const S: string): string;
+begin
+  Result := StringReplace(S, '%', '%25', [rfReplaceAll]);
+  Result := StringReplace(Result, ' ', '%20', [rfReplaceAll]);
+  Result := StringReplace(Result, #9, '%09', [rfReplaceAll]);
+end;
+
+function UnescapeParams(const S: string): string;
+begin
+  Result := StringReplace(S, '%20', ' ', [rfReplaceAll]);
+  Result := StringReplace(Result, '%09', #9, [rfReplaceAll]);
+  Result := StringReplace(Result, '%25', '%', [rfReplaceAll]);
+end;
+
 function TakeQuoted(var S: string): string;
 var
   i, closeAt: Integer;
@@ -166,6 +181,7 @@ begin
     sb.Append('NEXTID ').Append(AModel.NextId).AppendLine;
     sb.Append('METER holdms=').Append(FloatId(AModel.MeterHoldMs))
       .Append(' decaydb=').Append(FloatId(AModel.MeterHoldDecayDbPerSec)).AppendLine;
+    if AModel.EqCollapsed then sb.Append('VIEW eqcollapsed=1').AppendLine;
     for i := 0 to AModel.StripCount - 1 do
     begin
       s := AModel.GetStrip(i);
@@ -184,14 +200,15 @@ begin
         .Append(' arm=').Append(BoolId(s.RecordArmed))
         .Append(' auto=').Append(MixAutomationModeId(s.AutomationMode))
         .Append(' vca=').Append(s.VCAGroupId)
-        .Append(' color=').Append(s.Color)
-        .AppendLine;
+        .Append(' color=').Append(s.Color);
+      if s.Collapsed then sb.Append(' collapsed=1');
+      sb.AppendLine;
       for j := 0 to s.InsertCount - 1 do
       begin
         ins := s.GetInsert(j);
         sb.Append('INSERT ').Append(s.Id).Append(' ')
           .Append(ins.Kind).Append(' ')
-          .Append(IfThen(ins.Params = '', '-', ins.Params));
+          .Append(IfThen(ins.Params = '', '-', EscapeParams(ins.Params)));
         if ins.Bypass then sb.Append(' bypass=1');
         if ins.SidechainStripId <> 0 then
           sb.Append(' sc=').Append(ins.SidechainStripId);
@@ -297,6 +314,8 @@ begin
         m.MeterHoldMs := KVFloat(line, 'holdms', MIX_METER_HOLD_MS_DEFAULT);
         m.MeterHoldDecayDbPerSec := KVFloat(line, 'decaydb', MIX_METER_HOLD_DECAY_DEFAULT);
       end
+      else if SameText(tok, 'VIEW') then
+        m.EqCollapsed := KVBool(line, 'eqcollapsed', False)
       else if SameText(tok, 'STRIP') then
       begin
         tok := TakeToken(line);
@@ -323,6 +342,7 @@ begin
           cur.AutomationMode := am;
         cur.VCAGroupId := KVInt(rest, 'vca', 0);
         cur.Color := KVInt(rest, 'color', 0);
+        cur.Collapsed := KVBool(rest, 'collapsed', False);
       end
       else if SameText(tok, 'INSERT') then
       begin
@@ -335,7 +355,7 @@ begin
         kindId := TakeToken(line);
         rest := line;
         params := TakeToken(rest);
-        if params = '-' then params := '';
+        if params = '-' then params := '' else params := UnescapeParams(params);
         cur.AddInsert(TMixInsert.Make(kindId, params, KVBool(rest, 'bypass', False),
           KVInt(rest, 'sc', 0)));
       end

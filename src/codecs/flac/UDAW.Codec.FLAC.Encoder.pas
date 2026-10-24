@@ -31,8 +31,11 @@ uses {$IFDEF FPC}UDAW.Compat,{$ENDIF}
 { Encodes AWavFile (any format UDAW.Codec.WAV can read) to a new FLAC file at
   AOutputFile, at a fixed 24-bit depth (matching the intermediate WAV the
   Timeline exporter renders for MP3/MP4 too - see UDAW.Timeline.Export).
-  AProgress, when given, is called with 0..1 as frames are encoded. }
-procedure FlacEncodeFile(const AWavFile, AOutputFile: string; AProgress: TProc<Double> = nil);
+  AProgress, when given, is called with 0..1 as frames are encoded.
+  When AArtist is non-empty a Vorbis-comment header block carries ARTIST and
+  COPYRIGHT so the author travels with the file. }
+procedure FlacEncodeFile(const AWavFile, AOutputFile: string; AProgress: TProc<Double> = nil;
+  const AArtist: string = '');
 
 implementation
 
@@ -358,8 +361,39 @@ begin
   Result := w.ToBytes;   // exactly 34 bytes
 end;
 
-procedure FlacEncodeFile(const AWavFile, AOutputFile: string; AProgress: TProc<Double>);
+{ Little-endian 32-bit length + UTF-8 text, as a Vorbis comment field. }
+procedure AppendVorbisField(var ABlock: TBytes; const AText: string);
 var
+  u: TBytes;
+  n, p: Integer;
+begin
+  u := TEncoding.UTF8.GetBytes(AText);
+  p := Length(ABlock);
+  SetLength(ABlock, p + 4 + Length(u));
+  for n := 0 to 3 do ABlock[p + n] := Byte(Length(u) shr (8 * n));
+  if Length(u) > 0 then Move(u[0], ABlock[p + 4], Length(u));
+end;
+
+function BuildVorbisCommentBlock(const AArtist: string): TBytes;
+var
+  p: Integer;
+begin
+  Result := nil;
+  AppendVorbisField(Result, 'UDAW');                       // vendor string
+  p := Length(Result);
+  SetLength(Result, p + 4);                                // comment count = 2 (LE32)
+  Result[p] := 2;
+  Result[p + 1] := 0;
+  Result[p + 2] := 0;
+  Result[p + 3] := 0;
+  AppendVorbisField(Result, 'ARTIST=' + AArtist);
+  AppendVorbisField(Result, 'COPYRIGHT=' + AArtist);
+end;
+
+procedure FlacEncodeFile(const AWavFile, AOutputFile: string; AProgress: TProc<Double>;
+  const AArtist: string);
+var
+  vorbis: TBytes;
   planar: TAudioPlanar;
   ch, sr, frameCount, i, c, done, n, frameIdx, minBlock, maxBlock: Integer;
   samples: TArray<TArray<Integer>>;
@@ -414,10 +448,18 @@ begin
   w.WriteBits(Ord('L'), 8);
   w.WriteBits(Ord('a'), 8);
   w.WriteBits(Ord('C'), 8);
-  w.WriteBits(1, 1);              // last metadata block
+  w.WriteBits(Ord(Trim(AArtist) = ''), 1);   // last metadata block unless a comment block follows
   w.WriteBits(FLAC_BLOCK_STREAMINFO, 7);
   w.WriteBits(34, 24);
   for i := 0 to High(streamInfo) do w.WriteBits(streamInfo[i], 8);
+  if Trim(AArtist) <> '' then
+  begin
+    vorbis := BuildVorbisCommentBlock(Trim(AArtist));
+    w.WriteBits(1, 1);
+    w.WriteBits(FLAC_BLOCK_VORBIS_COMMENT, 7);
+    w.WriteBits(Cardinal(Length(vorbis)), 24);
+    for i := 0 to High(vorbis) do w.WriteBits(vorbis[i], 8);
+  end;
 
   SetLength(blockChannels, ch);
   done := 0;

@@ -38,14 +38,14 @@ interface
 uses
   SysUtils, Classes,
   UDAW.Errors,
-  UDAW.Project.Document,
+  UDAW.Project.Document, UDAW.Timeline.Time,
   UDAW.Audio.Graph.Serializer,
   UDAW.Timeline.Model, UDAW.Timeline.Serialization,
   UDAW.Mixer.Model, UDAW.Mixer.Serialization,
-  UDAW.Tracker.Pattern, UDAW.Tracker.Serialization,
-  UDAW.MIDI.Serialization,
+  UDAW.Tracker.Pattern, UDAW.Tracker.Serialization, UDAW.Tracker.Player,
+  UDAW.MIDI.Serialization, UDAW.Pattern.Model, UDAW.Drum.KitModel,
   UDAW.Composer.SongSpec, UDAW.Composer.Lyrics, UDAW.Composer.Serialization,
-  UDAW.Project.WindowLayout;
+  UDAW.Project.WindowLayout, UDAW.Project.DialogPaths;
 
 const
   PROJECT_FILE_MAGIC   = 'UDAWPROJECT';
@@ -60,8 +60,16 @@ const
     with no WINDOWS block loads - the deserializer leaves an empty
     TWindowLayout, i.e. no windows reopen).  Every older section that is
     absent is still synthesised, so v1..v7 all round-trip through this
-    reader. }
-  PROJECT_FILE_VERSION = 7;
+    reader.  v9: adds the embedded PATTERNS section (the Pattern editor's
+    rhythm patterns with the instruments they use; an older file with no
+    PATTERNS block loads - the deserializer leaves an empty library).  v10: adds the
+    embedded DRUMKIT section (the drum machine's pads - sample, level, pan, mute, solo,
+    choke, mode and a waveform overview; an older file with no DRUMKIT block loads and
+    leaves the player's current kit alone).  v11: adds the embedded DIALOGS section (the last
+    path each file dialog was used with; an older file with no DIALOGS block loads with none).
+    v12: adds the SCORESPREAD line (the Score's vertical line spacing; an older file without it
+    loads with the normal spacing). }
+  PROJECT_FILE_VERSION = 12;
   PROJECT_FILE_EXT     = '.udawproj';
 
 function ProjectToString(ADoc: TProjectDocument): string;
@@ -162,6 +170,7 @@ end;
 function ProjectToString(ADoc: TProjectDocument): string;
 var
   sb: TStringBuilder;
+  tp: TTempoPoint;
 begin
   sb := TStringBuilder.Create;
   try
@@ -170,9 +179,16 @@ begin
     sb.Append('NAME ').Append(QuoteStr(ADoc.Name)).AppendLine;
     if ADoc.Author <> '' then
       sb.Append('AUTHOR ').Append(QuoteStr(ADoc.Author)).AppendLine;
+    sb.Append('EXPORT ').Append(ADoc.ExportSettings.VideoBitrateKbps).Append(' ')
+      .Append(ADoc.ExportSettings.MaxWidth).Append(' ')
+      .Append(ADoc.ExportSettings.AudioBitrateKbps).AppendLine;
+    sb.Append('SCORESPREAD ').Append(FloatToStr(ADoc.ScoreSpread, TFormatSettings.Invariant)).AppendLine;
     sb.Append('CREATED ').Append(Iso(ADoc.CreatedUTC)).AppendLine;
     sb.Append('MODIFIED ').Append(Iso(ADoc.ModifiedUTC)).AppendLine;
     sb.Append('TEMPO ').Append(FloatToStr(ADoc.TempoBPM, TFormatSettings.Invariant)).AppendLine;
+    for tp in ADoc.TempoMap do
+      sb.Append('TEMPOPT ').Append(FloatToStr(tp.Seconds, TFormatSettings.Invariant)).Append(' ')
+        .Append(FloatToStr(tp.Bpm, TFormatSettings.Invariant)).AppendLine;
     sb.Append('TIMESIG ').Append(ADoc.TimeSigNum).Append(' ').Append(ADoc.TimeSigDen).AppendLine;
     sb.Append('SAMPLERATE ').Append(ADoc.SampleRate).AppendLine;
     sb.Append('CHANNELS ').Append(ADoc.Channels).AppendLine;
@@ -185,18 +201,30 @@ begin
     sb.Append('MIXER-BEGIN').AppendLine;
     sb.Append(MixerToString(ADoc.Mixer));
     sb.Append('MIXER-END').AppendLine;
+    sb.Append('TRKMIXER-BEGIN').AppendLine;
+    sb.Append(MixerToString(ADoc.TrackerMixer));
+    sb.Append('TRKMIXER-END').AppendLine;
     sb.Append('TRACKER-BEGIN').AppendLine;
     sb.Append(TrackerModuleToString(ADoc.Tracker));
     sb.Append('TRACKER-END').AppendLine;
     sb.Append('MIDI-BEGIN').AppendLine;
     sb.Append(MidiProjectToString(ADoc.Midi));
     sb.Append('MIDI-END').AppendLine;
+    sb.Append('PATTERNS-BEGIN').AppendLine;
+    sb.Append(PatternLibraryToString(ADoc.Patterns));
+    sb.Append('PATTERNS-END').AppendLine;
+    sb.Append('DRUMKIT-BEGIN').AppendLine;
+    sb.Append(DrumKitToString(ADoc.DrumKit));
+    sb.Append('DRUMKIT-END').AppendLine;
     sb.Append('AISPEC-BEGIN').AppendLine;
     sb.Append(SongSpecToString(ADoc.SongSpec, ADoc.Lyrics));
     sb.Append('AISPEC-END').AppendLine;
     sb.Append('WINDOWS-BEGIN').AppendLine;
     sb.Append(WindowLayoutToString(ADoc.Windows));
     sb.Append('WINDOWS-END').AppendLine;
+    sb.Append('DIALOGS-BEGIN').AppendLine;
+    sb.Append(DialogPathsToString(ADoc.DialogPaths));
+    sb.Append('DIALOGS-END').AppendLine;
     Result := sb.ToString;
   finally
     sb.Free;
@@ -208,6 +236,7 @@ var
   lines: TStringList;
   li, ver, num, den, sr, chans: Integer;
   num2: Double;
+  tpt: TTempoPoint;
   raw, line, tok: string;
   doc: TProjectDocument;
   haveHeader: Boolean;
@@ -216,19 +245,30 @@ var
   haveTimeline: Boolean;
   inMixer: Boolean;
   haveMixer: Boolean;
+  inTrkMixer: Boolean;
+  haveTrkMixer: Boolean;
   inTracker: Boolean;
   haveTracker: Boolean;
   inMidi: Boolean;
   haveMidi: Boolean;
+  inPatterns: Boolean;
+  havePatterns: Boolean;
+  inDrumKit: Boolean;
+  haveDrumKit: Boolean;
   inAISpec: Boolean;
   haveAISpec: Boolean;
   inWindows: Boolean;
   haveWindows: Boolean;
+  inDialogs, haveDialogs: Boolean;
+  dialogLines: TStringList;
   graphLines: TStringList;
   timelineLines: TStringList;
   mixerLines: TStringList;
   trackerLines: TStringList;
+  trkMixerLines: TStringList;
   midiLines: TStringList;
+  patternLines: TStringList;
+  drumKitLines: TStringList;
   aiSpecLines: TStringList;
   windowsLines: TStringList;
   parsedSpec: TSongSpec;
@@ -236,15 +276,20 @@ var
   guid: TGUID;
   dt: TDateTime;
   fs: TFormatSettings;
+  expSet: TExportSettings;
 begin
   lines := TStringList.Create;
   graphLines := TStringList.Create;
   timelineLines := TStringList.Create;
   mixerLines := TStringList.Create;
   trackerLines := TStringList.Create;
+  trkMixerLines := TStringList.Create;
   midiLines := TStringList.Create;
+  patternLines := TStringList.Create;
+  drumKitLines := TStringList.Create;
   aiSpecLines := TStringList.Create;
   windowsLines := TStringList.Create;
+  dialogLines := TStringList.Create;
   doc := nil;
   try
     lines.Text := AText;
@@ -254,14 +299,22 @@ begin
     haveTimeline := False;
     inMixer := False;
     haveMixer := False;
+    inTrkMixer := False;
+    haveTrkMixer := False;
     inTracker := False;
     haveTracker := False;
     inMidi := False;
     haveMidi := False;
+    inPatterns := False;
+    havePatterns := False;
+    inDrumKit := False;
+    haveDrumKit := False;
     inAISpec := False;
     haveAISpec := False;
     inWindows := False;
     haveWindows := False;
+    inDialogs := False;
+    haveDialogs := False;
     fs := TFormatSettings.Invariant;
 
     for li := 0 to lines.Count - 1 do
@@ -301,6 +354,17 @@ begin
         Continue;
       end;
 
+      if inTrkMixer then
+      begin
+        if SameText(Trim(raw), 'TRKMIXER-END') then
+        begin
+          inTrkMixer := False;
+          Continue;
+        end;
+        trkMixerLines.Add(raw);
+        Continue;
+      end;
+
       if inTracker then
       begin
         if SameText(Trim(raw), 'TRACKER-END') then
@@ -323,6 +387,28 @@ begin
         Continue;
       end;
 
+      if inPatterns then
+      begin
+        if SameText(Trim(raw), 'PATTERNS-END') then
+        begin
+          inPatterns := False;
+          Continue;
+        end;
+        patternLines.Add(raw);
+        Continue;
+      end;
+
+      if inDrumKit then
+      begin
+        if SameText(Trim(raw), 'DRUMKIT-END') then
+        begin
+          inDrumKit := False;
+          Continue;
+        end;
+        drumKitLines.Add(raw);
+        Continue;
+      end;
+
       if inAISpec then
       begin
         if SameText(Trim(raw), 'AISPEC-END') then
@@ -331,6 +417,17 @@ begin
           Continue;
         end;
         aiSpecLines.Add(raw);
+        Continue;
+      end;
+
+      if inDialogs then
+      begin
+        if SameText(Trim(raw), 'DIALOGS-END') then
+        begin
+          inDialogs := False;
+          Continue;
+        end;
+        dialogLines.Add(raw);
         Continue;
       end;
 
@@ -382,6 +479,29 @@ begin
         doc.Name := TakeQuoted(line)
       else if SameText(tok, 'AUTHOR') then
         doc.Author := TakeQuoted(line)
+      else if SameText(tok, 'EXPORT') then
+      begin
+        tok := TakeToken(line);
+        if not TryStrToInt(tok, num) then
+          RaiseUDAW(errConfig, PROJECT_SUBSYS, 'EXPORT: bad video bitrate');
+        tok := TakeToken(line);
+        if not TryStrToInt(tok, den) then
+          RaiseUDAW(errConfig, PROJECT_SUBSYS, 'EXPORT: bad maximum width');
+        if (Trim(line) = '') then num2 := 0
+        else if not TryStrToInt(Trim(line), sr) then
+          RaiseUDAW(errConfig, PROJECT_SUBSYS, 'EXPORT: bad audio bitrate')
+        else num2 := sr;
+        expSet.VideoBitrateKbps := num;
+        expSet.MaxWidth := den;
+        expSet.AudioBitrateKbps := Round(num2);
+        doc.ExportSettings := expSet;
+      end
+      else if SameText(tok, 'SCORESPREAD') then
+      begin
+        if not TryStrToFloat(Trim(line), num2, TFormatSettings.Invariant) then
+          RaiseUDAW(errConfig, PROJECT_SUBSYS, 'SCORESPREAD: bad number');
+        doc.ScoreSpread := num2;
+      end
       else if SameText(tok, 'CREATED') then
       begin
         if not ParseIso(Trim(line), dt) then
@@ -399,6 +519,18 @@ begin
         if not TryStrToFloat(Trim(line), num2, fs) then
           RaiseUDAW(errConfig, PROJECT_SUBSYS, 'TEMPO: not a number');
         doc.TempoBPM := num2;
+      end
+      else if SameText(tok, 'TEMPOPT') then
+      begin
+        { one tempo change after time 0: seconds, then BPM }
+        tok := TakeToken(line);
+        if not TryStrToFloat(tok, num2, fs) then
+          RaiseUDAW(errConfig, PROJECT_SUBSYS, 'TEMPOPT: bad time');
+        tpt.Seconds := num2;
+        if not TryStrToFloat(Trim(line), num2, fs) then
+          RaiseUDAW(errConfig, PROJECT_SUBSYS, 'TEMPOPT: bad tempo');
+        tpt.Bpm := num2;
+        doc.TempoMap := doc.TempoMap + [tpt];
       end
       else if SameText(tok, 'TIMESIG') then
       begin
@@ -439,6 +571,12 @@ begin
         haveMixer := True;
         mixerLines.Clear;
       end
+      else if SameText(tok, 'TRKMIXER-BEGIN') then
+      begin
+        inTrkMixer := True;
+        haveTrkMixer := True;
+        trkMixerLines.Clear;
+      end
       else if SameText(tok, 'TRACKER-BEGIN') then
       begin
         inTracker := True;
@@ -451,11 +589,29 @@ begin
         haveMidi := True;
         midiLines.Clear;
       end
+      else if SameText(tok, 'PATTERNS-BEGIN') then
+      begin
+        inPatterns := True;
+        havePatterns := True;
+        patternLines.Clear;
+      end
+      else if SameText(tok, 'DRUMKIT-BEGIN') then
+      begin
+        inDrumKit := True;
+        haveDrumKit := True;
+        drumKitLines.Clear;
+      end
       else if SameText(tok, 'AISPEC-BEGIN') then
       begin
         inAISpec := True;
         haveAISpec := True;
         aiSpecLines.Clear;
+      end
+      else if SameText(tok, 'DIALOGS-BEGIN') then
+      begin
+        inDialogs := True;
+        haveDialogs := True;
+        dialogLines.Clear;
       end
       else if SameText(tok, 'WINDOWS-BEGIN') then
       begin
@@ -475,14 +631,22 @@ begin
       RaiseUDAW(errConfig, PROJECT_SUBSYS, 'TIMELINE-BEGIN without a matching TIMELINE-END');
     if inMixer then
       RaiseUDAW(errConfig, PROJECT_SUBSYS, 'MIXER-BEGIN without a matching MIXER-END');
+    if inTrkMixer then
+      RaiseUDAW(errConfig, PROJECT_SUBSYS, 'TRKMIXER-BEGIN without a matching TRKMIXER-END');
     if inTracker then
       RaiseUDAW(errConfig, PROJECT_SUBSYS, 'TRACKER-BEGIN without a matching TRACKER-END');
     if inMidi then
       RaiseUDAW(errConfig, PROJECT_SUBSYS, 'MIDI-BEGIN without a matching MIDI-END');
+    if inPatterns then
+      RaiseUDAW(errConfig, PROJECT_SUBSYS, 'PATTERNS-BEGIN without a matching PATTERNS-END');
+    if inDrumKit then
+      RaiseUDAW(errConfig, PROJECT_SUBSYS, 'DRUMKIT-BEGIN without a matching DRUMKIT-END');
     if inAISpec then
       RaiseUDAW(errConfig, PROJECT_SUBSYS, 'AISPEC-BEGIN without a matching AISPEC-END');
     if inWindows then
       RaiseUDAW(errConfig, PROJECT_SUBSYS, 'WINDOWS-BEGIN without a matching WINDOWS-END');
+    if inDialogs then
+      RaiseUDAW(errConfig, PROJECT_SUBSYS, 'DIALOGS-BEGIN without a matching DIALOGS-END');
 
     doc.ReplaceGraph(GraphFromString(graphLines.Text));
     if haveTimeline then
@@ -501,13 +665,26 @@ begin
       doc.ReplaceMixer(MixerFromString(mixerLines.Text))
     else
       doc.Mixer.EnsureMaster;
+    if haveTrkMixer then
+      doc.ReplaceTrackerMixer(MixerFromString(trkMixerLines.Text))
+    else
+      doc.TrackerMixer.EnsureMaster;
     if haveTracker then
       doc.ReplaceTracker(TrackerModuleFromString(trackerLines.Text))
     else
       doc.Tracker.InitDefault;
+    { the Tracker mixer always has its TRK-CHN strip per channel and the master EQ once loaded, with
+      every saved fader / pan / insert / EQ band kept }
+    EnsureTrackerMixerStrips(doc.TrackerMixer, doc.Tracker.Channels, doc.Tracker);
     if haveMidi then
       doc.ReplaceMidi(MidiProjectFromString(midiLines.Text));
     { else: the empty TMidiProject created in the constructor is kept }
+    if havePatterns then
+      doc.ReplacePatterns(PatternLibraryFromString(patternLines.Text));
+    { else: the empty TPatternLibrary created in the constructor is kept }
+    if haveDrumKit then
+      doc.ReplaceDrumKit(DrumKitFromString(drumKitLines.Text));
+    { else: the undefined, empty kit created in the constructor is kept }
     if haveAISpec then
     begin
       SongSpecFromString(aiSpecLines.Text, parsedSpec, parsedLyrics);
@@ -518,14 +695,21 @@ begin
     if haveWindows then
       doc.ReplaceWindows(WindowLayoutFromString(windowsLines.Text));
     { else: the empty TWindowLayout created in the constructor is kept }
+    if haveDialogs then
+      doc.ReplaceDialogPaths(DialogPathsFromString(dialogLines.Text));
+    { else: the empty list created in the constructor is kept }
     doc.ClearDirty;
     Result := doc;
     doc := nil;
   finally
+    dialogLines.Free;
     windowsLines.Free;
     aiSpecLines.Free;
+    patternLines.Free;
+    drumKitLines.Free;
     midiLines.Free;
     trackerLines.Free;
+    trkMixerLines.Free;
     mixerLines.Free;
     timelineLines.Free;
     graphLines.Free;

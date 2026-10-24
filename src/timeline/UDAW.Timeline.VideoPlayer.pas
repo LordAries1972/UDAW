@@ -37,6 +37,7 @@ type
     Prepare: Boolean;       // a Prepare call is waiting for this to be handled
     Path: string;
     WantSeconds: Double;    // source time at PostTick
+    Rate: Double;           // how fast the picture must run (1 = its own fps; follows the Timeline tempo)
     PostTick: UInt64;
     Host: HWND;
   end;
@@ -57,6 +58,11 @@ type
     FStretchBPM: Double;
     FRenderedPath: string;                      // pre-rendered picture (effects applied), '' = play the clips
     FRenderedStart, FRenderedDuration: Double;
+    FWarpFunc: TFunc<Double, Double, Double>;
+    FRateFunc: TFunc<Double, Double>;
+    FLastRate: Double;
+    function ClipSeconds(AClip: TTimelineClip; APlayheadSeconds: Double): Double;
+    function ClipRate(APlayheadSeconds: Double): Double;
     function ActiveClip(ATl: TTimeline; ASeconds: Double; out ASrc: TMediaSource): TTimelineClip;
     function FileOk(ASrc: TMediaSource): Boolean;
     function GetLastError: string;
@@ -80,11 +86,21 @@ type
     function RenderedActive: Boolean;
     { The host window changed size: have the renderer re-fit the picture. }
     procedure HostResized;
+    { Shows the picture in another window (the pop-out video window) or back in the
+      original one; the renderer re-attaches to the new window at once. }
+    procedure SetHost(AHost: TWinControl);
+    { The video's own size in pixels, False until a picture has been opened. }
+    function NativeVideoSize(out AWidth, AHeight: Integer): Boolean;
     { Timeline tempo that clips with a SourceBPM are conformed to (same rule as
       their sound). A reversed or tempo-conformed picture cannot run through the
       forward player, so it follows the playhead as a stepped still picture
       (about ten per second) instead of being shown at the wrong speed/direction. }
     property StretchBPM: Double read FStretchBPM write FStretchBPM;
+    { The Timeline tempo drives the picture's speed like the sound's: WarpFunc(clipStart, t) is
+      how many seconds of the clip's media have run by timeline second t (tempo changes make
+      it differ from t - clipStart); RateFunc(t) is the speed factor at t. }
+    property WarpFunc: TFunc<Double, Double, Double> read FWarpFunc write FWarpFunc;
+    property RateFunc: TFunc<Double, Double> read FRateFunc write FRateFunc;
     property LastError: string read GetLastError;
   end;
 
@@ -206,10 +222,12 @@ type
     FSeeking: IMediaSeeking;
     FDisplay: IMFVideoDisplayControl;
     FHostWnd: HWND;
+    NativeW, NativeH: Integer;          // the open video's own size, set on the worker, read by the UI
     FOpenPath: string;
     FRunning: Boolean;
     FRunStartTick: UInt64;
     FRunStartPos: Double;
+    FAppliedRate: Double;           // the renderer's current playback rate (IMediaSeeking.SetRate)
     FLastSeekTick: UInt64;
     FLastPollTick: UInt64;
     FStillPos: Double;
@@ -218,6 +236,7 @@ type
     procedure ShutdownPlayer;
     procedure OpenItem(const APath: string; AHost: HWND);
     procedure FitVideo;
+    procedure ApplyRate(ARate: Double);
     procedure SeekTo(ASeconds: Double);
     procedure SeekPlay(ASeconds: Double);
     procedure SeekStill(ASeconds: Double; ATick: UInt64);
@@ -229,7 +248,7 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure Post(AActive, APlaying: Boolean; const APath: string;
-      AWantSeconds: Double; AHost: HWND);
+      AWantSeconds: Double; AHost: HWND; ARate: Double = 1.0);
     function Prepare(AActive: Boolean; const APath: string;
       AWantSeconds: Double; AHost: HWND): Boolean;
     procedure RequestUpdate;
@@ -280,10 +299,11 @@ begin
 end;
 
 procedure TMfVideoWorker.Post(AActive, APlaying: Boolean; const APath: string;
-  AWantSeconds: Double; AHost: HWND);
+  AWantSeconds: Double; AHost: HWND; ARate: Double);
 begin
   FLock.Enter;
   try
+    FTarget.Rate := ARate;
     FTarget.Active := AActive;
     FTarget.Playing := APlaying;
     FTarget.Path := APath;
@@ -304,6 +324,7 @@ begin
   try
     FTarget.Active := AActive;
     FTarget.Playing := False;
+    FTarget.Rate := 1.0;
     FTarget.Prepare := True;
     FTarget.Path := APath;
     FTarget.WantSeconds := AWantSeconds;
@@ -376,9 +397,42 @@ end;
 procedure TMfVideoWorker.FitVideo;
 var
   rc: TRect;
+  nat: TSize;
+  hostW, hostH, drawW, drawH: Integer;
 begin
   if (FDisplay = nil) or (FHostWnd = 0) then Exit;
   Winapi.Windows.GetClientRect(FHostWnd, rc);
+  nat.cx := 0;
+  nat.cy := 0;
+  if (FDisplay.GetNativeVideoSize(@nat, nil) >= 0) and (nat.cx > 0) and (nat.cy > 0) then
+  begin
+    NativeW := nat.cx;
+    NativeH := nat.cy;
+  end;
+  Winapi.Windows.GetClientRect(FHostWnd, rc);
+  { aspect-fit the picture and pin it to the TOP of the host (centred sideways), instead of
+    letting the renderer centre it vertically }
+  nat.cx := 0;
+  nat.cy := 0;
+  if (FDisplay.GetNativeVideoSize(@nat, nil) >= 0) and (nat.cx > 0) and (nat.cy > 0) and
+     (rc.Right > rc.Left) and (rc.Bottom > rc.Top) then
+  begin
+    hostW := rc.Right - rc.Left;
+    hostH := rc.Bottom - rc.Top;
+    if hostW * nat.cy <= hostH * nat.cx then
+    begin
+      drawW := hostW;
+      drawH := hostW * nat.cy div nat.cx;
+    end
+    else
+    begin
+      drawH := hostH;
+      drawW := hostH * nat.cx div nat.cy;
+    end;
+    rc.Left := rc.Left + (hostW - drawW) div 2;
+    rc.Right := rc.Left + drawW;
+    rc.Bottom := rc.Top + drawH;
+  end;
   FDisplay.SetVideoPosition(nil, @rc);
   FDisplay.RepaintVideo;
 end;
@@ -428,6 +482,7 @@ begin
 
   FControl := FGraph as IMediaControl;
   FSeeking := FGraph as IMediaSeeking;
+  FAppliedRate := 1.0;
   { The sound comes from the clip's audio channel - the picture is silent. }
   if Supports(FGraph, IBasicAudio, audio) then audio.put_Volume(MUTED_VOLUME);
 
@@ -442,6 +497,16 @@ begin
   FitVideo;
   FOpenPath := APath;
   SetError('');
+end;
+
+{ the picture runs at ARate x its own frame rate, so it stays with audio that follows the
+  Timeline tempo; a renderer that refuses a rate is kept in step by the drift re-seek }
+procedure TMfVideoWorker.ApplyRate(ARate: Double);
+begin
+  if ARate < 0.25 then ARate := 0.25 else if ARate > 4.0 then ARate := 4.0;
+  if (FSeeking <> nil) and (Abs(ARate - FAppliedRate) > 0.0005) then
+    FSeeking.SetRate(ARate);
+  FAppliedRate := ARate;
 end;
 
 procedure TMfVideoWorker.SeekTo(ASeconds: Double);
@@ -494,7 +559,7 @@ var
   t: TVideoTarget;
   doUpdate: Boolean;
   tick: UInt64;
-  want, est, have: Double;
+  want, est, have, rate, est0: Double;
 begin
   FLock.Enter;
   try
@@ -527,19 +592,32 @@ begin
     if doUpdate then FitVideo;
 
     tick := GetTickCount64;
+    rate := t.Rate;
+    if rate < 0.25 then rate := 0.25 else if rate > 4.0 then rate := 4.0;
     want := t.WantSeconds;
     if t.Playing then
-      want := want + (tick - t.PostTick) / 1000;
+      want := want + (tick - t.PostTick) / 1000 * rate;
 
     if t.Playing then
     begin
       if not FRunning then
-        SeekPlay(want)
+      begin
+        ApplyRate(rate);
+        SeekPlay(want);
+      end
       else
       begin
+        { the tempo changed: carry the running position over to the new speed }
+        if Abs(rate - FAppliedRate) > 0.005 then
+        begin
+          est0 := FRunStartPos + (tick - FRunStartTick) / 1000 * FAppliedRate;
+          FRunStartPos := est0;
+          FRunStartTick := tick;
+          ApplyRate(rate);
+        end;
         { free check: has the playhead jumped away from where the running
           picture should be (loop, relocate, clip change)? }
-        est := FRunStartPos + (tick - FRunStartTick) / 1000;
+        est := FRunStartPos + (tick - FRunStartTick) / 1000 * FAppliedRate;
         if Abs(est - want) > JUMP_LIMIT_SECONDS then
           SeekPlay(want)
         else if (tick - FLastSeekTick > SETTLE_MS) and (tick - FLastPollTick >= POLL_INTERVAL_MS) then
@@ -631,6 +709,19 @@ begin
   end;
 end;
 
+function TTimelineVideoPlayer.ClipSeconds(AClip: TTimelineClip; APlayheadSeconds: Double): Double;
+begin
+  Result := AClip.VideoSourceSecondsAt(APlayheadSeconds, FStretchBPM);
+  if Assigned(FWarpFunc) and (not AClip.Reversed) then
+    Result := Result + (FWarpFunc(AClip.StartSeconds, APlayheadSeconds) - (APlayheadSeconds - AClip.StartSeconds));
+end;
+
+function TTimelineVideoPlayer.ClipRate(APlayheadSeconds: Double): Double;
+begin
+  if Assigned(FRateFunc) then Result := FRateFunc(APlayheadSeconds) else Result := 1.0;
+  if Result <= 0 then Result := 1.0;
+end;
+
 procedure TTimelineVideoPlayer.Sync(ATl: TTimeline; APlayheadSeconds: Double;
   APlaying: Boolean; ADirection: Integer);
 var
@@ -638,7 +729,7 @@ var
   src: TMediaSource;
   tick: UInt64;
   playing: Boolean;
-  seconds: Double;
+  seconds, rate: Double;
 begin
   if ATl = nil then Exit;
   tick := GetTickCount64;
@@ -681,10 +772,12 @@ begin
   end;
   playing := APlaying and (ADirection > 0) and (not clip.Reversed) and
     (clip.ConformFactor(FStretchBPM) = 1.0);
+  rate := ClipRate(APlayheadSeconds);
   if FLastActive and (FLastClipId = clip.Id) and (FLastPlaying = playing) and
-     (tick - FLastPostTick < REPOST_INTERVAL_MS) then Exit;
+     (Abs(rate - FLastRate) < 0.005) and (tick - FLastPostTick < REPOST_INTERVAL_MS) then Exit;
   TMfVideoWorker(FWorker).Post(True, playing, src.Path,
-    clip.VideoSourceSecondsAt(APlayheadSeconds, FStretchBPM), FHost.Handle);
+    ClipSeconds(clip, APlayheadSeconds), FHost.Handle, rate);
+  FLastRate := rate;
   FLastActive := True;
   FLastClipId := clip.Id;
   FLastPlaying := playing;
@@ -713,7 +806,7 @@ begin
     TMfVideoWorker(FWorker).Post(False, False, '', 0, 0)
   else
     TMfVideoWorker(FWorker).Prepare(True, src.Path,
-      clip.VideoSourceSecondsAt(APlayheadSeconds, FStretchBPM), FHost.Handle);
+      ClipSeconds(clip, APlayheadSeconds), FHost.Handle);
 end;
 
 procedure TTimelineVideoPlayer.Stop;
@@ -741,6 +834,22 @@ end;
 procedure TTimelineVideoPlayer.HostResized;
 begin
   TMfVideoWorker(FWorker).RequestUpdate;
+end;
+
+procedure TTimelineVideoPlayer.SetHost(AHost: TWinControl);
+begin
+  if (AHost = nil) or (AHost = FHost) then Exit;
+  FHost := AHost;
+  FLastActive := False;             // forces the next Sync to post the target again, to the new window
+  FLastClipId := -1;
+  TMfVideoWorker(FWorker).RequestUpdate;
+end;
+
+function TTimelineVideoPlayer.NativeVideoSize(out AWidth, AHeight: Integer): Boolean;
+begin
+  AWidth := TMfVideoWorker(FWorker).NativeW;
+  AHeight := TMfVideoWorker(FWorker).NativeH;
+  Result := (AWidth > 0) and (AHeight > 0);
 end;
 
 { ========================== TVideoThumbnailer ========================= }

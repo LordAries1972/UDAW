@@ -1076,6 +1076,67 @@ begin
   end;
 end;
 
+{ Clip Stage (clip launcher): TTimelinePlayer.SetTrackLaunch overrides one
+  track's playback from its activation time onward - it loops the launched
+  slice of itself (or goes silent) while the playhead, and the arrangement the
+  override replaces, carry on. }
+procedure Test_Playback_ClipStageLaunch;
+const
+  CENTER = 0.70710678;
+var
+  tl: TTimeline;
+  srcA, srcB: TMediaSource;
+  trk: TTimelineTrack;
+  player: TTimelinePlayer;
+  buf: TAudioBuffer;
+
+  function FirstSampleAt(ASeconds: Double): Single;
+  begin
+    tl.PlayheadSeconds := ASeconds;
+    buf.Configure(2, 8, 48000);
+    player.RenderBlock(buf);
+    Result := buf.ChannelPtr(0)[0];
+  end;
+
+begin
+  tl := TTimeline.Create;
+  player := nil;
+  buf := nil;
+  try
+    srcA := tl.AddSource('a.wav', 48000, 1, 48000);
+    srcB := tl.AddSource('b.wav', 48000, 1, 48000);
+    trk := tl.AddTrack(tkAudio, 'T');
+    tl.AddClip(trk.Id, srcA.Id, 'A', 0.0, 0.0, 1.0);   // 0..1 s = 0.25
+    tl.AddClip(trk.Id, srcB.Id, 'B', 1.0, 0.0, 1.0);   // 1..2 s = 0.75
+    player := TTimelinePlayer.Create(tl);
+    player.InjectForTest(srcA.Id, MakeConstantDecoded(1, 48000, 48000, 0.25));
+    player.InjectForTest(srcB.Id, MakeConstantDecoded(1, 48000, 48000, 0.75));
+    player.Prepare(48000, 256, 2);
+    buf := TAudioBuffer.Create(2, 8, 48000);
+
+    CheckNear(0.75 * CENTER, FirstSampleAt(1.5), 1e-4, 'no launch: the arrangement plays clip B at 1.5 s');
+
+    player.SetTrackLaunch(trk.Id, tlmLoop, 0.0, 1.0, 0.0);
+    CheckNear(0.25 * CENTER, FirstSampleAt(1.5), 1e-4,
+      'launched slice [0,1) loops: 1.5 s reads 0.5 s into clip A, not clip B');
+    CheckNear(0.25 * CENTER, FirstSampleAt(3.25), 1e-4, 'the slice keeps repeating on later laps');
+
+    player.SetTrackLaunch(trk.Id, tlmLoop, 0.0, 1.0, 10.0);
+    CheckNear(0.75 * CENTER, FirstSampleAt(1.5), 1e-4,
+      'a queued launch (activation still in the future) leaves the arrangement untouched');
+
+    player.SetTrackLaunch(trk.Id, tlmSilent, 0.0, 0.0, 0.0);
+    CheckNear(0.0, FirstSampleAt(1.5), 1e-6, 'a silent launch stops the track');
+
+    player.ClearTrackLaunches;
+    CheckNear(0.75 * CENTER, FirstSampleAt(1.5), 1e-4, 'back to arrangement restores clip B');
+  finally
+    buf.Free;
+    player.Free;
+    tl.Free;
+  end;
+end;
+
 procedure Test_Playback_MuteAndSolo;
 var
   tl: TTimeline;
@@ -1228,6 +1289,109 @@ begin
   finally clip.Free; end;
 end;
 
+{ ---- tempo map: piecewise seconds <-> beats, snap, serialization, undo ---- }
+
+procedure Test_TempoMap_Math;
+var
+  g: TGridContext;
+  mapped: TGridContext;
+  pts: TTempoPoints;
+  b: Integer;
+begin
+  g := TGridContext.Make(120, 4, 4, 48000);                 // 0.5 s per beat
+  SetLength(pts, 1);
+  pts[0].Seconds := 4.0;                                    // 8 beats at 120
+  pts[0].Bpm := 60;                                         // then 1 s per beat
+  mapped := g;
+  mapped.Map := pts;
+  { before the change: unchanged }
+  CheckNear(2.0, SecondsToBeats(mapped, 1.0), 1e-9, 'beats before the change');
+  CheckNear(8.0, SecondsToBeats(mapped, 4.0), 1e-9, 'beats at the change');
+  { after: one beat per second }
+  CheckNear(10.0, SecondsToBeats(mapped, 6.0), 1e-9, 'beats after the change');
+  CheckNear(6.0, BeatsToSeconds(mapped, 10.0), 1e-9, 'seconds after the change');
+  CheckNear(1.0, BeatsToSeconds(mapped, 2.0), 1e-9, 'seconds before the change');
+  { round trip across the change }
+  for b := 0 to 40 do
+    CheckNear(b / 2.0, SecondsToBeats(mapped, BeatsToSeconds(mapped, b / 2.0)), 1e-9, 'round trip');
+  { an empty map is the old constant-tempo arithmetic }
+  CheckNear(10.0, SecondsToBeats(g, 5.0), 1e-12, 'constant tempo unchanged');
+  { bars: 4/4, bar = 4 beats }
+  CheckNear(2.0, SecondsToBars(mapped, 4.0), 1e-9, 'bars at the change');
+  { beat snap lands on real beat lines on both sides of the change }
+  CheckNear(1.0, SnapSeconds(mapped, 0.9, smBeat), 1e-9, 'snap before');
+  CheckNear(7.0, SnapSeconds(mapped, 6.8, smBeat), 1e-9, 'snap after');
+  CheckNear(4.0, SnapSeconds(mapped, 3.9, smBar), 1e-9, 'bar snap at the change');
+  CheckNear(8.0, SnapSeconds(mapped, 7.4, smBar), 1e-9, 'bar snap after the change');
+  CheckNear(8.0, GridLineSeconds(mapped, smBar, 3), 1e-9, 'bar line 3');
+  CheckNear(120.0, mapped.TempoAt(3.9), 1e-12, 'tempo before');
+  CheckNear(60.0, mapped.TempoAt(4.0), 1e-12, 'tempo from the change');
+end;
+
+procedure Test_TempoMap_ProjectRoundTrip;
+var
+  doc, back, cl: TProjectDocument;
+  pts: TTempoPoints;
+  text: string;
+begin
+  doc := TProjectDocument.Create;
+  try
+    doc.TempoBPM := 100;
+    SetLength(pts, 3);
+    pts[0].Seconds := 16.5; pts[0].Bpm := 140;
+    pts[1].Seconds := 8.25; pts[1].Bpm := 90;       // out of order on purpose
+    pts[2].Seconds := 0;    pts[2].Bpm := 77;       // time 0 is the base tempo: dropped
+    doc.TempoMap := pts;
+    CheckEqualInt(2, Length(doc.TempoMap), 'sorted, time-0 point dropped');
+    CheckNear(8.25, doc.TempoMap[0].Seconds, 1e-12, 'sorted first');
+    text := ProjectToString(doc);
+    back := ProjectFromString(text);
+    try
+      CheckEqualInt(2, Length(back.TempoMap), 'tempo points survive save / load');
+      CheckNear(8.25, back.TempoMap[0].Seconds, 1e-9, 'point 0 time');
+      CheckNear(90, back.TempoMap[0].Bpm, 1e-9, 'point 0 tempo');
+      CheckNear(16.5, back.TempoMap[1].Seconds, 1e-9, 'point 1 time');
+      CheckNear(140, back.TempoMap[1].Bpm, 1e-9, 'point 1 tempo');
+      CheckNear(100, back.TempoBPM, 1e-9, 'base tempo');
+      CheckNear(140, back.GridContext.TempoAt(20), 1e-9, 'grid carries the map');
+    finally
+      back.Free;
+    end;
+    cl := doc.Clone;
+    try
+      CheckEqualInt(2, Length(cl.TempoMap), 'clone copies the tempo map');
+    finally
+      cl.Free;
+    end;
+  finally
+    doc.Free;
+  end;
+end;
+
+procedure Test_TempoMap_Command;
+var
+  doc: TProjectDocument;
+  mgr: TCommandManager;
+  pts: TTempoPoints;
+begin
+  doc := TProjectDocument.Create;
+  mgr := TCommandManager.Create;
+  try
+    SetLength(pts, 1);
+    pts[0].Seconds := 5; pts[0].Bpm := 150;
+    mgr.Perform(TSetTempoMapCommand.Create(doc, pts, 'Add tempo change'));
+    CheckEqualInt(1, Length(doc.TempoMap), 'tempo change added');
+    mgr.Undo;
+    CheckEqualInt(0, Length(doc.TempoMap), 'undo removes it');
+    mgr.Redo;
+    CheckEqualInt(1, Length(doc.TempoMap), 'redo restores it');
+    CheckNear(150, doc.TempoMap[0].Bpm, 1e-9, 'tempo restored');
+  finally
+    mgr.Free;
+    doc.Free;
+  end;
+end;
+
 procedure RegisterPhase7Tests;
 begin
   RegisterTest('timeline.model', 'clip effects indication', Test_ClipEffects);
@@ -1235,6 +1399,9 @@ begin
   RegisterTest('timeline.time', 'beats and bars',             @Test_Time_BeatsAndBars);
   RegisterTest('timeline.time', 'grid spacing and snap',      @Test_Time_GridSpacingAndSnap);
   RegisterTest('timeline.time', 'bar/beat + timecode format', @Test_Time_Formatting);
+  RegisterTest('timeline.time', 'tempo map math + snap',    @Test_TempoMap_Math);
+  RegisterTest('timeline.time', 'tempo map project round-trip', @Test_TempoMap_ProjectRoundTrip);
+  RegisterTest('timeline.time', 'tempo map undo / redo',    @Test_TempoMap_Command);
 
   RegisterTest('timeline.waveform', 'exact bounds + pyramid', @Test_Waveform_ExactBoundsAndPyramid);
   RegisterTest('timeline.waveform', 'ramp + display columns', @Test_Waveform_RampAndColumns);
@@ -1265,6 +1432,7 @@ begin
 
   RegisterTest('timeline.playback', 'clip audible at gain/pan',    @Test_Playback_ClipAudibleAtGain);
   RegisterTest('timeline.playback', 'track mute + solo',           @Test_Playback_MuteAndSolo);
+  RegisterTest('timeline.playback', 'clip stage launch override',  @Test_Playback_ClipStageLaunch);
   RegisterTest('timeline.playback', 'clip + track dB gain combine',@Test_Playback_ClipGainDbAndTrackGainDb);
   RegisterTest('timeline.playback', 'silent outside clip range',   @Test_Playback_SilentBeforeAndAfterClip);
   RegisterTest('timeline.playback', 'playhead advances',           @Test_Playback_AdvancesPlayhead);

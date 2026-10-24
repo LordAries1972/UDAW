@@ -68,6 +68,10 @@ type
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 constructor TFFT.Create(ASize: Integer);
 var
   i, j, rev, bit: Integer;
@@ -93,9 +97,9 @@ begin
     FBitRev[i] := rev;
   end;
 
-  SetLength(FCosT, FSize div 2);
-  SetLength(FSinT, FSize div 2);
-  for i := 0 to (FSize div 2) - 1 do
+  SetLength(FCosT, FSize shr 1);
+  SetLength(FSinT, FSize shr 1);
+  for i := 0 to (FSize shr 1) - 1 do
   begin
     ang := -DSP_TWO_PI * i / FSize;   // forward sign
     FCosT[i] := Cos(ang);
@@ -105,16 +109,22 @@ end;
 
 procedure TFFT.Transform(var ARe, AIm: array of Double; AInverse: Boolean);
 var
-  i, j, len, half, step, k, tw: Integer;
+  i, j, k, len, half, step, tw, n: Integer;
   ur, ui, tr, ti, sgn, invn: Double;
+  pr, pim, qr, qi: PDouble;      // butterfly top/bottom row pointers
+  br: PInteger;
+  cosT, sinT: PDouble;
 begin
   if (Length(ARe) < FSize) or (Length(AIm) < FSize) then
     RaiseUDAW(errInvalidArgument, DSP_SUBSYS, 'TFFT.Transform: array shorter than Size');
 
+  n := FSize;
+  br := @FBitRev[0];
+
   { bit-reversal permutation }
-  for i := 0 to FSize - 1 do
+  for i := 0 to n - 1 do
   begin
-    j := FBitRev[i];
+    j := br[i];
     if j > i then
     begin
       tr := ARe[i]; ARe[i] := ARe[j]; ARe[j] := tr;
@@ -123,28 +133,49 @@ begin
   end;
 
   if AInverse then sgn := -1.0 else sgn := 1.0;
+  cosT := @FCosT[0];
+  sinT := @FSinT[0];
 
-  len := 2;
-  while len <= FSize do
+  { stage len=2: twiddle is exactly 1, so no multiplies }
+  pr := @ARe[0];
+  pim := @AIm[0];
+  i := 0;
+  while i < n do
   begin
-    half := len div 2;
-    step := FSize div len;
+    tr := pr[1];
+    ti := pim[1];
+    pr[1] := pr[0] - tr;
+    pim[1] := pim[0] - ti;
+    pr[0] := pr[0] + tr;
+    pim[0] := pim[0] + ti;
+    Inc(pr, 2);
+    Inc(pim, 2);
+    Inc(i, 2);
+  end;
+
+  len := 4;
+  while len <= n do
+  begin
+    half := len shr 1;        // len is a power of two
+    step := n div len;
     i := 0;
-    while i < FSize do
+    while i < n do
     begin
-      k := 0;
+      pr := @ARe[i];
+      pim := @AIm[i];
+      qr := pr + half;
+      qi := pim + half;
       tw := 0;
-      while k < half do
+      for k := 0 to half - 1 do
       begin
-        ur := FCosT[tw];
-        ui := sgn * FSinT[tw];
-        tr := ur * ARe[i + k + half] - ui * AIm[i + k + half];
-        ti := ur * AIm[i + k + half] + ui * ARe[i + k + half];
-        ARe[i + k + half] := ARe[i + k] - tr;
-        AIm[i + k + half] := AIm[i + k] - ti;
-        ARe[i + k] := ARe[i + k] + tr;
-        AIm[i + k] := AIm[i + k] + ti;
-        Inc(k);
+        ur := cosT[tw];
+        ui := sgn * sinT[tw];
+        tr := ur * qr[k] - ui * qi[k];
+        ti := ur * qi[k] + ui * qr[k];
+        qr[k] := pr[k] - tr;
+        qi[k] := pim[k] - ti;
+        pr[k] := pr[k] + tr;
+        pim[k] := pim[k] + ti;
         Inc(tw, step);
       end;
       Inc(i, len);
@@ -154,11 +185,13 @@ begin
 
   if AInverse then
   begin
-    invn := 1.0 / FSize;
-    for i := 0 to FSize - 1 do
+    invn := 1.0 / n;
+    pr := @ARe[0];
+    pim := @AIm[0];
+    for i := 0 to n - 1 do
     begin
-      ARe[i] := ARe[i] * invn;
-      AIm[i] := AIm[i] * invn;
+      pr[i] := pr[i] * invn;
+      pim[i] := pim[i] * invn;
     end;
   end;
 end;
@@ -181,7 +214,7 @@ var
 begin
   if Length(ATime) < FSize then
     RaiseUDAW(errInvalidArgument, DSP_SUBSYS, 'TFFT.RealForward: time array shorter than Size');
-  nb := FSize div 2 + 1;
+  nb := (FSize shr 1) + 1;
   if (Length(AOutRe) < nb) or (Length(AOutIm) < nb) then
     RaiseUDAW(errInvalidArgument, DSP_SUBSYS, 'TFFT.RealForward: output arrays too small');
 
@@ -206,7 +239,7 @@ var
   re, im: array of Double;
   i, nb: Integer;
 begin
-  nb := FSize div 2 + 1;
+  nb := (FSize shr 1) + 1;
   if (Length(AInRe) < nb) or (Length(AInIm) < nb) then
     RaiseUDAW(errInvalidArgument, DSP_SUBSYS, 'TFFT.RealInverse: input arrays too small');
   if Length(AOutTime) < FSize then
@@ -235,7 +268,7 @@ procedure TFFT.MagnitudeSpectrum(const ARe, AIm: array of Double;
 var
   i, nb: Integer;
 begin
-  nb := FSize div 2 + 1;
+  nb := (FSize shr 1) + 1;
   for i := 0 to nb - 1 do
     AMag[i] := Sqrt(ARe[i] * ARe[i] + AIm[i] * AIm[i]);
 end;
@@ -246,8 +279,8 @@ var
   i, nb: Integer;
   m, ref: Double;
 begin
-  nb := FSize div 2 + 1;
-  ref := FSize / 2.0;
+  nb := (FSize shr 1) + 1;
+  ref := FSize * 0.5;
   for i := 0 to nb - 1 do
   begin
     m := Sqrt(ARe[i] * ARe[i] + AIm[i] * AIm[i]) / ref;
@@ -255,7 +288,7 @@ begin
       ADb[i] := AFloorDb
     else
     begin
-      ADb[i] := 20.0 * Log10(m);
+      ADb[i] := 20.0 * FastLog10(m);
       if ADb[i] < AFloorDb then ADb[i] := AFloorDb;
     end;
   end;
@@ -266,9 +299,9 @@ procedure TFFT.PhaseSpectrum(const ARe, AIm: array of Double;
 var
   i, nb: Integer;
 begin
-  nb := FSize div 2 + 1;
+  nb := (FSize shr 1) + 1;
   for i := 0 to nb - 1 do
-    APhase[i] := ArcTan2(AIm[i], ARe[i]);
+    APhase[i] := FastArcTan2(AIm[i], ARe[i]);
 end;
 
 procedure TFFT.AnalyzeDb(const ATime: array of Single; AWindow: TWindowKind;
@@ -279,7 +312,7 @@ var
   i, nb: Integer;
   cg, m, ref: Double;
 begin
-  nb := FSize div 2 + 1;
+  nb := (FSize shr 1) + 1;
   if Length(ADb) < nb then
     RaiseUDAW(errInvalidArgument, DSP_SUBSYS, 'TFFT.AnalyzeDb: output too small');
   SetLength(windowed, FSize);
@@ -299,14 +332,14 @@ begin
   SetLength(im, nb);
   RealForward(windowed, re, im);
 
-  ref := (FSize / 2.0) * cg;
+  ref := (FSize * 0.5) * cg;
   for i := 0 to nb - 1 do
   begin
     m := Sqrt(re[i] * re[i] + im[i] * im[i]) / ref;
     if m <= 1.0E-12 then
       ADb[i] := -240.0
     else
-      ADb[i] := 20.0 * Log10(m);
+      ADb[i] := 20.0 * FastLog10(m);
   end;
 end;
 
@@ -319,12 +352,12 @@ function TFFT.HzToBin(AHz, ASampleRate: Double): Integer;
 begin
   Result := Round(AHz * FSize / ASampleRate);
   if Result < 0 then Result := 0;
-  if Result > FSize div 2 then Result := FSize div 2;
+  if Result > (FSize shr 1) then Result := FSize shr 1;
 end;
 
 function TFFT.SpectrumBins: Integer;
 begin
-  Result := FSize div 2 + 1;
+  Result := (FSize shr 1) + 1;
 end;
 
 end.

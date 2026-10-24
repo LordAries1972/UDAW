@@ -16,7 +16,7 @@ interface
 
 uses
   SysUtils, Math,
-  UDAW.Types, UDAW.Errors;
+  UDAW.Types, UDAW.Errors, UDAW.DSP.MathTables;
 
 const
   AUDIO_SUBSYS = 'Audio';
@@ -85,7 +85,7 @@ function ClampBufferFrames(AFrames: Integer): Integer;
 function LinearToDb(ALinear: Double): Double;
 function DbToLinear(ADb: Double): Double;
 
-function ClampSample(AValue: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+function ClampSample(AValue: Single): Single; inline;
 
 { Convert an interleaved device block to planar float.
   ADst must be at least [ANumChannels] x [>= ANumFrames].
@@ -222,7 +222,7 @@ begin
   if ALinear <= 1.0E-12 then
     Result := -240.0
   else
-    Result := 20.0 * Log10(ALinear);
+    Result := FastLinToDb(ALinear);
 end;
 
 function DbToLinear(ADb: Double): Double;
@@ -230,7 +230,7 @@ begin
   if ADb <= -240.0 then
     Result := 0.0
   else
-    Result := Power(10.0, ADb / 20.0);
+    Result := FastDbToLin(ADb);
 end;
 
 function ClampSample(AValue: Single): Single;

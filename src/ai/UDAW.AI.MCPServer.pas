@@ -65,6 +65,7 @@ type
     FOnGetCommands: TMcpGetCommandsFunc;
     FOnGetBrowserRoots: TMcpGetBrowserRootsFunc;
     FOnTransport: TAITransportFunc;
+    FOnUICommand: TAIUICommandFunc;
     FAuthToken: string;
     FTlsPort: Integer;
     FTlsBindAddress: string;
@@ -92,6 +93,8 @@ type
     property OnGetCommands: TMcpGetCommandsFunc read FOnGetCommands write FOnGetCommands;
     property OnGetBrowserRoots: TMcpGetBrowserRootsFunc read FOnGetBrowserRoots write FOnGetBrowserRoots;
     property OnTransport: TAITransportFunc read FOnTransport write FOnTransport;
+    { menu / toolbar commands, selection, playhead and range: owned by the window }
+    property OnUICommand: TAIUICommandFunc read FOnUICommand write FOnUICommand;
     { Bearer token every HTTP client must present ("Authorization: Bearer
       <token>"). Empty = no authentication, which Start only permits when
       bound to loopback. }
@@ -218,7 +221,7 @@ end;
 
 function TUDAWMcpServer.BuildToolsListJSON: string;
 var
-  o, arr, t, schema, props, p, req: TJSONValue;
+  o, arr, t, schema, props, p, req, schemaItems: TJSONValue;
   k: TAIToolKind;
   entries, parts: TArray<string>;
   e: string;
@@ -249,6 +252,13 @@ begin
           if Length(parts) < 4 then Continue;
           p := JSONObject;
           p.AddPair('type', JSONString(parts[1]));
+          if parts[1] = 'array' then
+          begin
+            { JSON Schema wants the element type; every array parameter here is a list of numbers }
+            schemaItems := JSONObject;
+            schemaItems.AddPair('type', JSONString('number'));
+            p.AddPair('items', schemaItems);
+          end;
           p.AddPair('description', JSONString(parts[3]));
           props.AddPair(parts[0], p);
           if parts[2] = 'req' then
@@ -367,6 +377,7 @@ begin
   dispatcher := TAIToolDispatcher.Create(doc, cmds);
   try
     dispatcher.OnTransport := FOnTransport;
+    dispatcher.OnUICommand := FOnUICommand;
     if Assigned(FOnGetBrowserRoots) then
       dispatcher.OnGetBrowserRoots := FOnGetBrowserRoots;
     Result := dispatcher.Execute(calls[0], AResultText);

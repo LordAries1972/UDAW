@@ -269,6 +269,7 @@ var
   instr: TTrackerInstrument;
   pat: TTrackerPattern;
   line: string;
+  fx: TTrackerChannelFx;
 begin
   sb := TStringBuilder.Create;
   try
@@ -279,6 +280,14 @@ begin
     sb.Append('BPM ').Append(AModule.InitialBPM).AppendLine;
     sb.Append('GLOBALVOL ').Append(FloatId(AModule.GlobalVolume)).AppendLine;
     sb.Append('RESTART ').Append(AModule.RestartPos).AppendLine;
+    for i := 0 to AModule.Channels - 1 do
+    begin
+      fx := AModule.GetChannelFx(i);
+      if AModule.ChannelMuted(i) or (fx.Kind <> '') then
+        sb.Append('CHFX ').Append(i).Append(' ').Append(Ord(AModule.ChannelMuted(i)))
+          .Append(' ').Append(QuoteStr(fx.Kind)).Append(' ').Append(QuoteStr(fx.Name))
+          .Append(' ').Append(QuoteStr(fx.Params)).AppendLine;
+    end;
 
     sb.Append('ORDER');
     for i := 0 to AModule.OrderLength - 1 do
@@ -344,6 +353,7 @@ var
   isVolEnv: Boolean;
   orderTmp: array of Integer;
   restartTmp: Integer;
+  fxKind, fxName: string;
 
   procedure EnsureInstr(AId: Integer);
   begin
@@ -393,6 +403,17 @@ begin
       else if SameText(tok, 'SPEED') then m.InitialSpeed := ClampInt(StrToIntDef(Trim(line), TRK_DEFAULT_SPEED), TRK_MIN_SPEED, TRK_MAX_SPEED)
       else if SameText(tok, 'BPM') then m.InitialBPM := ClampInt(StrToIntDef(Trim(line), TRK_DEFAULT_BPM), TRK_MIN_BPM, TRK_MAX_BPM)
       else if SameText(tok, 'GLOBALVOL') then m.GlobalVolume := ParseFloat(Trim(line), 1.0)
+      else if SameText(tok, 'CHFX') then
+      begin
+        tok := TakeToken(line);
+        if TryStrToInt(tok, i) then
+        begin
+          m.SetChannelMuted(i, TakeToken(line) = '1');
+          fxKind := TakeQuoted(line);
+          fxName := TakeQuoted(line);
+          m.SetChannelFx(i, fxKind, TakeQuoted(line), fxName);
+        end;
+      end
       else if SameText(tok, 'RESTART') then restartTmp := StrToIntDef(Trim(line), 0)
       else if SameText(tok, 'ORDER') then
       begin

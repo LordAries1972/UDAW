@@ -1,4 +1,4 @@
-﻿unit UDAW.Timeline.Playback;
+unit UDAW.Timeline.Playback;
 {$I udaw.inc}
 {$POINTERMATH ON}
 
@@ -41,13 +41,17 @@ uses {$IFDEF FPC}UDAW.Compat,{$ENDIF}
   UDAW.Errors, UDAW.Audio.Types, UDAW.Audio.Buffer, UDAW.Audio.Source,
   UDAW.DSP.Interpolation, UDAW.DSP.Math, UDAW.DSP.TimeStretch,
   UDAW.Codec.WAV, UDAW.Codec.MP3, UDAW.Codec.MP4, UDAW.Codec.FLAC,
-  UDAW.Jobs, UDAW.Timeline.Model, UDAW.Mixer.Model, UDAW.Mixer.Engine,
+  UDAW.Jobs, UDAW.Timeline.Time, UDAW.Timeline.Model, UDAW.Timeline.TrackerSource, UDAW.Mixer.Model, UDAW.Mixer.Engine,
   UDAW.MIDI.Sequence, UDAW.MIDI.Serialization, UDAW.MIDI.Engine;
 
 var
   { Settings > "Conform clip tempo by resampling": every new TTimelinePlayer
     (live Play and export alike) starts with this tempo-conform method. }
   TimelineResampleTempo: Boolean = False;
+  { Set by the UI: called from the UI thread between the long steps of
+    EnsureSourcesLoaded (decoding, waiting on the stretch workers) so the rest of the
+    program keeps painting and responding; it may raise to cancel the job. }
+  TimelinePumpHook: TProc = nil;
 
 type
   TDecodedSource = class
@@ -60,6 +64,19 @@ type
   end;
 
   TTimelinePlayer = class;
+
+  { Clip Stage override for one track (see TTimelinePlayer.SetTrackLaunch):
+    from ActivateAt onward the track ignores the arrangement and loops the
+    [StartSeconds, StartSeconds + LengthSeconds) slice of itself (tlmLoop), or
+    is silent (tlmSilent). }
+  TTrackLaunchMode = (tlmLoop, tlmSilent);
+  TTrackLaunch = record
+    TrackId: Integer;
+    Mode: TTrackLaunchMode;
+    StartSeconds, LengthSeconds, ActivateAt: Double;
+    { False: the slice plays once and then the track goes silent; True: it repeats (a Continuous scene) }
+    Repeating: Boolean;
+  end;
 
   { Background job: decodes every timeline source and builds the tempo-stretched
     clips (TTimelinePlayer.EnsureSourcesLoaded) off the UI thread, reporting
@@ -92,6 +109,11 @@ type
                                      // shared with FMixerProvider so a mixer-linked track's dry
                                      // render lines up sample-for-sample with the direct path
     FBlockAnySoloed: Boolean;
+    FPeakIds: array[0..127] of Integer;   // RT writes, UI reads: per-track peak of the last block (see TrackPeak)
+    FPeakVals: array[0..127] of Single;
+    FMidiDryIds: array[0..127] of Integer;      // MIDI lanes routed through a Mixer strip: the lane id ...
+    FMidiDryL, FMidiDryR: array[0..127] of TArray<Single>;   // ... and its dry synth output for this block
+    FMidiPeaks: array[0..127] of Single;   // per-track peak of the MIDI synth output in the last block (RenderMidiBlock)
     FLinkedTrackIds: TDictionary<Integer, Boolean>;   // track ids fed to the mixer instead of summed directly
     FTempoFunc: TFunc<Double>;   // live current tempo (BPM), read fresh every block - see SetTempoTracking
     FBaseTempoBPM: Double;       // tempo in effect when Play was pressed; ratio to FTempoFunc() is the varispeed rate
@@ -107,22 +129,34 @@ type
     FMidiAccumL, FMidiAccumR: TArray<Single>;
     FMetroOn: Boolean;
     FMetroBpm, FMetroGain: Double;
+    FMetroCtx: TGridContext;     // click grid when the project has a tempo map (4/4 beats)
+    FMetroMapped: Boolean;
+    FStretchCtx: TGridContext;   // tempo at a clip's start decides its conform factor
+    FStretchMapped: Boolean;
+    FMidiCtx: TGridContext;      // quarter-note grid with the tempo map, for MIDI clips
+    FMidiMapped: Boolean;
     FMetroBeats: Integer;
     FStretchBPM: Double;                                  // project tempo clips are conformed to (0 = off)
     FStretchResample: Boolean;                            // conform by plain resampling (pitch follows tempo) instead of the phase vocoder
     FStretchOwned: TObjectDictionary<string, TDecodedSource>;   // 'sourceId|factor' -> stretched copy, owned
     FClipStretch: TDictionary<Integer, TDecodedSource>;   // clip id -> entry of FStretchOwned (not owned)
     FOnStatus: TProc<string>;
+    FLaunch: array[0..127] of TTrackLaunch;   // Clip Stage overrides; UI writes, RT reads
+    FLaunchCount: Integer;
+    FLoopLimit: Double;     // the end of the last segment: a looping clip repeats until here
     procedure Status(const AText: string);
+    function LaunchedTime(ATrackId: Integer; ATime: Double; out ASilent: Boolean): Double;
     procedure BuildStretchedClips(AOnProgress: TProc<Double>);
     function ClipStretchFactor(AClip: TTimelineClip): Double;
     function CurrentPlaybackRate: Double;
     function DecodeSource(ASrc: TMediaSource): TDecodedSource;
+    function DecodeSourceCore(ASrc: TMediaSource): TDecodedSource;
     function TapAt(ADecoded: TDecodedSource; AChannel: Integer; APos: Double): Single;
     function RenderTrackSample(ATrack: TTimelineTrack; AAnySoloed: Boolean;
       ATimeSeconds: Double; AApplyTrackGainPan: Boolean; out AL, AR: Single): Boolean;
     procedure RefreshLinkedTracks;
-    procedure RenderMidiBlock(AFrameCount: Integer; AAnySoloed: Boolean);
+    procedure RenderMidiBlock(AFrameCount: Integer; AAnySoloed, AMixerActive: Boolean);
+    function CopyMidiDry(ATrackId: Integer; ABuffer: TAudioBuffer): Boolean;
   public
     constructor Create(ATimeline: TTimeline);
     destructor Destroy; override;
@@ -151,12 +185,35 @@ type
       speed. 0 disables stretching. The stretch is built once per load, so a
       tempo change takes effect on the next Play/export. }
     procedure SetStretchTempo(ABPM: Double);
+    { Linear peak (after track gain and pan) the track played in the last block, for the
+      Timeline's LED meters; 0 for a track that is silent, not summed here (mixer-linked,
+      MIDI, video) or unknown. }
+    function TrackPeak(ATrackId: Integer): Single;
+    { Seconds of a clip's media consumed between timeline seconds AFrom and ATo when the
+      audio follows the tempo map (UI-thread use, for the video picture). }
+    function WarpedElapsed(AFrom, ATo: Double): Double;
+    { Playback speed factor at timeline second ATime: the live tempo-follow rate times the
+      tempo map's factor there - what both the audio and the video picture run at. }
+    function VideoRate(ATime: Double): Double;
+    { Renders one lane, dry (no lane gain / pan), from timeline second AStartSec for ALengthSec
+      into a stereo planar buffer at ASampleRate - every clip in place, with its fades, gain,
+      loop, reverse and tempo conform. AProgress(0..1) is called now and then; returning False
+      stops the render (result False, nothing usable). Sources must be loaded first
+      (EnsureSourcesLoaded). UI-thread use. }
+    function RenderLaneToPlanar(ATrack: TTimelineTrack; AStartSec, ALengthSec: Double;
+      ASampleRate: Integer; out APlanar: TAudioPlanar; const AProgress: TFunc<Double, Boolean>): Boolean;
     { Click track: a short accented click on every beat (downbeat higher),
       mixed in after the tracks under the same master gain. Rendered from the
       block's timeline seconds, so it stays locked to the playhead through
       loops and seeks. }
     procedure SetMetronome(AEnabled: Boolean; ABpm: Double; ABeatsPerBar: Integer;
       AGainDb: Double);
+    { the clicks follow the project's tempo changes (an empty map = constant tempo) }
+    procedure SetMetronomeMap(const AMap: TTempoPoints);
+    { the project's base tempo and tempo changes: metronome clicks follow them, audio clips
+      conform to the tempo in force where they start, and MIDI clips play at the project's
+      tempo relative to the tempo they started at (an empty map changes nothing) }
+    procedure SetTempoMap(ABaseBpm: Double; const AMap: TTempoPoints);
     { Tempo conform method. Default (False) = phase vocoder, pitch preserved.
       True = plain resampling: the clip is shrunk/stretched like tape, so pitch
       follows tempo (Settings > "Conform tempo by resampling"). The class-level
@@ -245,9 +302,25 @@ type
       distinct transport mode rather than a variant of the loop feature. }
     property Direction: Integer read FDirection write FDirection;
     property PingPong: Boolean read FPingPong write FPingPong;
+
+    { Clip Stage (clip launcher): override one track's playback independently of
+      the arrangement. From AActivateAt (timeline seconds - the launch
+      quantum) the track loops its own [AStart, AStart + ALength) slice, so
+      the arrangement content of a section plays as a repeating clip; the
+      playhead and every other track carry on as before. Replaces any earlier
+      override of the same track. Safe to call from the UI thread while the
+      engine runs: the payload is written before the entry is published. }
+    procedure SetTrackLaunch(ATrackId: Integer; AMode: TTrackLaunchMode;
+      AStart, ALength, AActivateAt: Double; ARepeating: Boolean = True);
+    { Back to arrangement: drops every Clip Stage override. }
+    procedure ClearTrackLaunches;
   end;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 const
   SUBSYS = 'Timeline.Playback';
@@ -285,12 +358,75 @@ begin
   Result := True;
 end;
 
+{ Where on its own timeline a launched track reads at ATime: untouched before
+  the launch lands and for an un-launched track; once active, the launched
+  slice repeats, or the track reports silent. }
+function TTimelinePlayer.LaunchedTime(ATrackId: Integer; ATime: Double;
+  out ASilent: Boolean): Double;
+var
+  k: Integer;
+  d: Double;
+begin
+  ASilent := False;
+  Result := ATime;
+  for k := 0 to FLaunchCount - 1 do
+    if FLaunch[k].TrackId = ATrackId then
+    begin
+      if ATime < FLaunch[k].ActivateAt then Exit;
+      if FLaunch[k].Mode = tlmSilent then
+        ASilent := True
+      else if FLaunch[k].LengthSeconds > 0 then
+      begin
+        d := ATime - FLaunch[k].ActivateAt;
+        if (not FLaunch[k].Repeating) and (d >= FLaunch[k].LengthSeconds) then
+        begin
+          ASilent := True;   // a one-shot scene has run to the end of its region
+          Exit;
+        end;
+        Result := FLaunch[k].StartSeconds +
+          (d - Floor(d / FLaunch[k].LengthSeconds) * FLaunch[k].LengthSeconds);
+      end;
+      Exit;
+    end;
+end;
+
+procedure TTimelinePlayer.SetTrackLaunch(ATrackId: Integer; AMode: TTrackLaunchMode;
+  AStart, ALength, AActivateAt: Double; ARepeating: Boolean);
+var
+  k: Integer;
+begin
+  for k := 0 to FLaunchCount - 1 do
+    if FLaunch[k].TrackId = ATrackId then
+    begin
+      FLaunch[k].Mode := AMode;
+      FLaunch[k].StartSeconds := AStart;
+      FLaunch[k].LengthSeconds := ALength;
+      FLaunch[k].ActivateAt := AActivateAt;
+      FLaunch[k].Repeating := ARepeating;
+      Exit;
+    end;
+  if FLaunchCount >= Length(FLaunch) then Exit;
+  FLaunch[FLaunchCount].TrackId := ATrackId;
+  FLaunch[FLaunchCount].Mode := AMode;
+  FLaunch[FLaunchCount].StartSeconds := AStart;
+  FLaunch[FLaunchCount].LengthSeconds := ALength;
+  FLaunch[FLaunchCount].ActivateAt := AActivateAt;
+  FLaunch[FLaunchCount].Repeating := ARepeating;
+  MemoryBarrier;
+  Inc(FLaunchCount);
+end;
+
+procedure TTimelinePlayer.ClearTrackLaunches;
+begin
+  FLaunchCount := 0;
+end;
+
 { TTimelineClip.GainAt already applies its own dB->linear conversion
   internally (UDAW.Timeline.Model.DbToGain), but that helper is private to
   that unit - this is the same formula for the track-level dB gain. }
 function DbToLinear(ADb: Double): Double;
 begin
-  Result := Power(10.0, ADb / 20.0);
+  Result := FastExp10(ADb / 20.0);
 end;
 
 type
@@ -395,6 +531,72 @@ begin
   FTempoFunc := AFunc;
 end;
 
+{ How many seconds of audio a clip has consumed between timeline seconds AFrom and ATo when
+  playback speed follows the tempo map: every stretch of timeline time counts at
+  (tempo in force / tempo at the start). Varispeed - pitch follows, like tape. Without a
+  tempo map this is just ATo - AFrom. Read on the audio thread: it only looks at the map
+  copy SetTempoMap made. }
+function TTimelinePlayer.WarpedElapsed(AFrom, ATo: Double): Double;
+var
+  cur, nxt, f: Double;
+  i: Integer;
+begin
+  Result := ATo - AFrom;
+  if (not FMidiMapped) or (FMidiCtx.Tempo <= 0) or (ATo <= AFrom) then Exit;
+  Result := 0;
+  cur := AFrom;
+  while cur < ATo do
+  begin
+    f := FMidiCtx.TempoAt(cur) / FMidiCtx.Tempo;
+    nxt := ATo;
+    for i := 0 to High(FMidiCtx.Map) do
+      if FMidiCtx.Map[i].Seconds > cur then
+      begin
+        if FMidiCtx.Map[i].Seconds < nxt then nxt := FMidiCtx.Map[i].Seconds;
+        Break;
+      end;
+    Result := Result + f * (nxt - cur);
+    cur := nxt;
+  end;
+end;
+
+function TTimelinePlayer.RenderLaneToPlanar(ATrack: TTimelineTrack; AStartSec, ALengthSec: Double;
+  ASampleRate: Integer; out APlanar: TAudioPlanar; const AProgress: TFunc<Double, Boolean>): Boolean;
+var
+  frames, i: Integer;
+  l, r: Single;
+  t: Double;
+begin
+  Result := False;
+  APlanar := nil;
+  frames := Round(ALengthSec * ASampleRate);
+  if (ATrack = nil) or (frames <= 0) or (ASampleRate <= 0) then Exit;
+  SetLength(APlanar, 2);
+  SetLength(APlanar[0], frames);
+  SetLength(APlanar[1], frames);
+  for i := 0 to frames - 1 do
+  begin
+    if (i and $3FFF = 0) and Assigned(AProgress) and not AProgress(i / frames) then
+    begin
+      APlanar := nil;
+      Exit;
+    end;
+    t := AStartSec + i / ASampleRate;
+    if RenderTrackSample(ATrack, False, t, False, l, r) then
+    begin
+      APlanar[0][i] := l;
+      APlanar[1][i] := r;
+    end;
+  end;
+  Result := True;
+end;
+
+function TTimelinePlayer.VideoRate(ATime: Double): Double;
+begin
+  Result := CurrentPlaybackRate;
+  if FMidiMapped and (FMidiCtx.Tempo > 0) then Result := Result * (FMidiCtx.TempoAt(ATime) / FMidiCtx.Tempo);
+end;
+
 function TTimelinePlayer.CurrentPlaybackRate: Double;
 var
   bpm: Double;
@@ -421,13 +623,49 @@ begin
   end;
 end;
 
+{ Decoding one big file is a single blocking call: run it on a worker while this (UI)
+  thread keeps pumping messages through TimelinePumpHook, so the program stays alive and
+  Esc can cancel. If the hook raises (Esc), the worker's result is freed when it finishes. }
 function TTimelinePlayer.DecodeSource(ASrc: TMediaSource): TDecodedSource;
+var
+  task: ITask;
+  res: TDecodedSource;
+  abandoned: Boolean;
+begin
+  if (not Assigned(TimelinePumpHook)) or (TThread.CurrentThread.ThreadID <> MainThreadID) then
+    Exit(DecodeSourceCore(ASrc));
+  res := nil;
+  abandoned := False;
+  task := TTask.Run(
+    procedure
+    var
+      r: TDecodedSource;
+    begin
+      r := DecodeSourceCore(ASrc);
+      if abandoned then r.Free else res := r;
+    end);
+  try
+    while task.Status in [TTaskStatus.Created, TTaskStatus.WaitingToRun, TTaskStatus.Running] do
+    begin
+      Sleep(10);
+      TimelinePumpHook();
+    end;
+  except
+    abandoned := True;
+    raise;
+  end;
+  Result := res;
+end;
+
+function TTimelinePlayer.DecodeSourceCore(ASrc: TMediaSource): TDecodedSource;
 var
   planar: TAudioPlanar;
   ch, sr: Integer;
   mp3Res: TMP3DecodeResult;
   mp4Res: TMP4DecodeResult;
   flacRes: TFLACDecodeResult;
+  trkFrames: Integer;
+  trkBpm: Double;
 begin
   Result := TDecodedSource.Create;
   try
@@ -471,6 +709,18 @@ begin
       Result.SampleRate := flacRes.SampleRate;
       Result.Data := flacRes.Pcm;
       Result.FrameCount := Integer(flacRes.TotalFrames);
+    end
+    else if TrackerSniffFile(ASrc.Path) then
+    begin
+      if not TrackerRenderFile(ASrc.Path, planar, trkFrames, trkBpm) then
+      begin
+        Result.Failed := True;
+        Exit;
+      end;
+      Result.Channels := Length(planar);
+      Result.SampleRate := TRACKER_SOURCE_RATE;
+      Result.Data := planar;
+      Result.FrameCount := trkFrames;
     end
     else if FileLooksLikeWav(ASrc.Path) then
     begin
@@ -545,11 +795,41 @@ begin
   FMetroBeats := Max(ABeatsPerBar, 1);
   FMetroGain := DbToLinear(AGainDb);
   FMetroOn := AEnabled;
+  FMetroCtx.Tempo := FMetroBpm;
+end;
+
+procedure TTimelinePlayer.SetMetronomeMap(const AMap: TTempoPoints);
+begin
+  FMetroCtx := TGridContext.Make(FMetroBpm, 4, 4, 48000);
+  FMetroCtx.Map := Copy(AMap);
+  FMetroMapped := Length(AMap) > 0;
+end;
+
+procedure TTimelinePlayer.SetTempoMap(ABaseBpm: Double; const AMap: TTempoPoints);
+begin
+  if ABaseBpm <= 0 then ABaseBpm := 120;
+  SetMetronomeMap(AMap);
+  FStretchCtx := TGridContext.Make(ABaseBpm, 4, 4, 48000);
+  FStretchCtx.Map := Copy(AMap);
+  FStretchMapped := Length(AMap) > 0;
+  FMidiCtx := TGridContext.Make(ABaseBpm, 4, 4, 48000);
+  FMidiCtx.Map := Copy(AMap);
+  FMidiMapped := Length(AMap) > 0;
+end;
+
+function TTimelinePlayer.TrackPeak(ATrackId: Integer): Single;
+var
+  k: Integer;
+begin
+  Result := 0;
+  for k := 0 to 127 do
+    if FPeakIds[k] = ATrackId then Exit(FPeakVals[k]);
 end;
 
 procedure TTimelinePlayer.SetStretchTempo(ABPM: Double);
 begin
   if ABPM < 0 then ABPM := 0;
+  FStretchCtx.Tempo := ABPM;
   { No cache flush: BuildStretchedClips compares each clip's stretch factor
     with its cached copy, so only clips whose factor really changed are redone
     and superseded copies are freed there. }
@@ -563,7 +843,10 @@ function TTimelinePlayer.ClipStretchFactor(AClip: TTimelineClip): Double;
 begin
   Result := 0;
   if (FStretchBPM <= 0) or AClip.IsMidiClip or (AClip.SourceBPM <= 0) then Exit;
-  Result := AClip.SourceBPM / FStretchBPM;
+  if FStretchMapped then
+    Result := AClip.SourceBPM / Max(1.0, FStretchCtx.TempoAt(AClip.StartSeconds))
+  else
+    Result := AClip.SourceBPM / FStretchBPM;
   if (Abs(Result - 1.0) < 0.001) or (Result < 0.25) or (Result > 4.0) then Result := 0;
 end;
 
@@ -614,11 +897,15 @@ var
   o: TObjectDictionary<string, TDecodedSource>;
   s: TDictionary<Integer, TDecodedSource>;
   b: Double;
+  sc: TGridContext;
+  sm: Boolean;
 begin
   c := FCache; FCache := AOther.FCache; AOther.FCache := c;
   o := FStretchOwned; FStretchOwned := AOther.FStretchOwned; AOther.FStretchOwned := o;
   s := FClipStretch; FClipStretch := AOther.FClipStretch; AOther.FClipStretch := s;
   b := FStretchBPM; FStretchBPM := AOther.FStretchBPM; AOther.FStretchBPM := b;
+  sc := FStretchCtx; FStretchCtx := AOther.FStretchCtx; AOther.FStretchCtx := sc;
+  sm := FStretchMapped; FStretchMapped := AOther.FStretchMapped; AOther.FStretchMapped := sm;
 end;
 
 { Brings every clip's stretched copy up to date. Already-correct copies are
@@ -786,6 +1073,7 @@ begin
           if Assigned(AOnProgress) then AOnProgress(d / total);
           if d >= total then Break;
           TThread.Sleep(50);
+          if Assigned(TimelinePumpHook) then TimelinePumpHook();
         until False;
       except
         TInterlocked.Exchange(cancelFlag, 1);
@@ -888,16 +1176,36 @@ var
   clip: TTimelineClip;
   src: TMediaSource;
   dec, stretched: TDecodedSource;
-  srcSec, srcPos, gain: Double;
+  srcSec, srcPos, gain, gainT, d: Double;
   sL, sR: Single;
   tl_, tr_: Single;
+  launchSilent: Boolean;
 begin
   AL := 0; AR := 0;
   Result := False;
   if ATrack.Muted then Exit;
   if AAnySoloed and not ATrack.Soloed then Exit;
+  if FLaunchCount > 0 then
+  begin
+    ATimeSeconds := LaunchedTime(ATrack.Id, ATimeSeconds, launchSilent);
+    if launchSilent then Exit;
+  end;
 
+  gainT := ATimeSeconds;
   clip := ATrack.ClipAtSeconds(ATimeSeconds);
+  if (clip = nil) and (FLoopLimit > 0) then
+  begin
+    { a clip set to loop keeps repeating its audio after its own end, up to the last segment of the
+      Timeline: the position wraps back into the clip, and the gain stays at its body level so the
+      seam of the loop is not faded }
+    clip := ATrack.LoopFillClipAt(ATimeSeconds, FLoopLimit);
+    if clip <> nil then
+    begin
+      d := ATimeSeconds - clip.StartSeconds;
+      ATimeSeconds := clip.StartSeconds + (d - Floor(d / clip.LengthSeconds) * clip.LengthSeconds);
+      gainT := clip.StartSeconds + clip.LengthSeconds * 0.5;
+    end;
+  end;
   if (clip = nil) or clip.Muted then Exit;
 
   src := FTimeline.SourceById(clip.SourceId);
@@ -916,6 +1224,10 @@ begin
       (Multiplying the whole position by Factor cancelled the stretch out.) }
     srcSec := srcSec - clip.SourceOffsetSeconds * (1.0 - stretched.Factor);
   end;
+  { tempo changes on the Timeline: from the clip's start, the audio plays faster / slower in
+    step with the tempo in force (frequency follows) - the clip keeps its position }
+  if FMidiMapped and (not clip.Reversed) then
+    srcSec := srcSec + (WarpedElapsed(clip.StartSeconds, ATimeSeconds) - (ATimeSeconds - clip.StartSeconds));
   if clip.Loop and (dec.FrameCount > 0) and (dec.SampleRate > 0) then
   begin
     srcSec := srcSec - Floor(srcSec * dec.SampleRate / dec.FrameCount) *
@@ -927,7 +1239,7 @@ begin
   sL := TapAt(dec, 0, srcPos);
   if dec.Channels >= 2 then sR := TapAt(dec, 1, srcPos) else sR := sL;
 
-  gain := clip.GainAt(ATimeSeconds);
+  gain := clip.GainAt(gainT);
   if AApplyTrackGainPan then
   begin
     gain := gain * DbToLinear(ATrack.GainDb);
@@ -960,18 +1272,49 @@ end;
   a block that straddles a clip boundary rounds to whichever clip is active
   at its start - the same block-rate granularity RenderTrackSample's own
   Pass 3 caller already accepts for track mute/solo. }
-procedure TTimelinePlayer.RenderMidiBlock(AFrameCount: Integer; AAnySoloed: Boolean);
+{ copies a MIDI lane's dry synth output (rendered this block for a Mixer strip) into the strip's
+  input buffer; False when that lane has none this block }
+function TTimelinePlayer.CopyMidiDry(ATrackId: Integer; ABuffer: TAudioBuffer): Boolean;
+var
+  k, i, n: Integer;
+  pL, pR: PSingle;
+begin
+  Result := False;
+  for k := 0 to 127 do
+    if FMidiDryIds[k] = ATrackId then
+    begin
+      n := Min(ABuffer.FrameCount, Length(FMidiDryL[k]));
+      pL := PSingle(ABuffer.ChannelPtr(0));
+      if ABuffer.ChannelCount >= 2 then pR := PSingle(ABuffer.ChannelPtr(1)) else pR := pL;
+      for i := 0 to n - 1 do
+      begin
+        pL[i] := pL[i] + FMidiDryL[k][i];
+        if pR <> pL then pR[i] := pR[i] + FMidiDryR[k][i];
+      end;
+      Exit(True);
+    end;
+end;
+
+procedure TTimelinePlayer.RenderMidiBlock(AFrameCount: Integer; AAnySoloed, AMixerActive: Boolean);
 var
   ti, i, activeClipId, midiClipId: Integer;
   trk: TTimelineTrack;
   clip: TTimelineClip;
   seq: TMidiSequence;
   eng: TMidiPlaybackEngine;
-  localSeconds, gain: Double;
+  localSeconds, gain, t0, refBpm: Double;
   tl_, tr_: Single;
   pL, pR: PSingle;
-  wantSeek: Boolean;
+  wantSeek, launchSilent: Boolean;
+  strip: TMixStrip;
+  k: Integer;
+  pk: Single;
 begin
+  for k := 0 to 127 do
+  begin
+    FMidiPeaks[k] := 0;
+    FMidiDryIds[k] := 0;
+  end;
   if Length(FMidiAccumL) < AFrameCount then
   begin
     SetLength(FMidiAccumL, AFrameCount);
@@ -996,7 +1339,13 @@ begin
     if trk.Muted then Continue;
     if AAnySoloed and not trk.Soloed then Continue;
 
-    clip := trk.ClipAtSeconds(FBlockTimes[0]);
+    { Clip Stage: a launched track reads its own looped slice instead of the
+      arrangement position }
+    t0 := FBlockTimes[0];
+    launchSilent := False;
+    if FLaunchCount > 0 then t0 := LaunchedTime(trk.Id, t0, launchSilent);
+    clip := nil;
+    if not launchSilent then clip := trk.ClipAtSeconds(t0);
     activeClipId := 0;
     if (clip <> nil) and clip.IsMidiClip and not clip.Muted then
       activeClipId := clip.Id;
@@ -1020,7 +1369,22 @@ begin
       FMidiEngines.Add(activeClipId, eng);
     end;
 
-    localSeconds := (FBlockTimes[0] - clip.StartSeconds) + clip.SourceOffsetSeconds;
+    if FMidiMapped then
+    begin
+      { musical position: quarter notes since the clip started, at the tempo the clip is
+        referenced to (its Source BPM, else the tempo where it starts) }
+      refBpm := clip.SourceBPM;
+      if refBpm <= 0 then refBpm := FMidiCtx.TempoAt(clip.StartSeconds);
+      refBpm := Max(1.0, refBpm);
+      localSeconds := (SecondsToBeats(FMidiCtx, t0) - SecondsToBeats(FMidiCtx, clip.StartSeconds)) *
+        60.0 / refBpm + clip.SourceOffsetSeconds;
+      eng.Rate := FMidiCtx.TempoAt(t0) / refBpm;
+    end
+    else
+    begin
+      localSeconds := (t0 - clip.StartSeconds) + clip.SourceOffsetSeconds;
+      eng.Rate := 1.0;
+    end;
 
     { just switched onto this clip (was a different clip, or nothing) -
       seek and start fresh; otherwise let it run continuously, only
@@ -1039,15 +1403,61 @@ begin
     FMidiScratch.Clear;
     eng.Render(FMidiScratch);
 
-    gain := clip.GainAt(FBlockTimes[0]) * DbToLinear(trk.GainDb);
-    PanGains(Single(trk.Pan), plConstantPower, tl_, tr_);
+    { a MIDI lane with a Mixer strip, while the mixer is running, is mixed THERE: its dry synth
+      output goes to the strip (fader, pan, mute, inserts, sends, meters, routing) instead of
+      straight to the output }
+    if AMixerActive and (ti < 128) and FLinkedTrackIds.ContainsKey(trk.Id) then
+    begin
+      gain := clip.GainAt(t0);
+      pL := PSingle(FMidiScratch.ChannelPtr(0));
+      pR := PSingle(FMidiScratch.ChannelPtr(1));
+      if Length(FMidiDryL[ti]) < AFrameCount then
+      begin
+        SetLength(FMidiDryL[ti], AFrameCount);
+        SetLength(FMidiDryR[ti], AFrameCount);
+      end;
+      for i := 0 to AFrameCount - 1 do
+      begin
+        FMidiDryL[ti][i] := Single(pL[i] * gain);
+        FMidiDryR[ti][i] := Single(pR[i] * gain);
+      end;
+      FMidiDryIds[ti] := trk.Id;
+      Continue;
+    end;
+
+    { not routed through the mixer: the strip's fader / pan / mute (if the lane has a strip)
+      or the lane's own gain and pan }
+    strip := nil;
+    if FMixerModel <> nil then
+      for k := 0 to FMixerModel.StripCount - 1 do
+        if (FMixerModel.GetStrip(k).Kind = skAudioTrack) and
+           (FMixerModel.GetStrip(k).InputSourceId = trk.Id) then
+        begin
+          strip := FMixerModel.GetStrip(k);
+          Break;
+        end;
+    if strip <> nil then
+    begin
+      if strip.Muted then Continue;
+      gain := clip.GainAt(t0) * DbToLinear(strip.FaderDb);
+      PanGains(Single(strip.Pan), plConstantPower, tl_, tr_);
+    end
+    else
+    begin
+      gain := clip.GainAt(t0) * DbToLinear(trk.GainDb);
+      PanGains(Single(trk.Pan), plConstantPower, tl_, tr_);
+    end;
     pL := PSingle(FMidiScratch.ChannelPtr(0));
     pR := PSingle(FMidiScratch.ChannelPtr(1));
+    pk := 0;
     for i := 0 to AFrameCount - 1 do
     begin
       FMidiAccumL[i] := FMidiAccumL[i] + Single(pL[i] * gain * tl_);
       FMidiAccumR[i] := FMidiAccumR[i] + Single(pR[i] * gain * tr_);
+      if Abs(pL[i] * gain * tl_) > pk then pk := Abs(pL[i] * gain * tl_);
+      if Abs(pR[i] * gain * tr_) > pk then pk := Abs(pR[i] * gain * tr_);
     end;
+    if ti < 128 then FMidiPeaks[ti] := pk;
   end;
 
   if Assigned(FLiveMidiMonitor) then
@@ -1078,6 +1488,8 @@ var
   rate: Double;
   metroBeat: Int64;
   metroT, metroF, metroV: Double;
+  blockPk: array[0..127] of Single;
+  pk: Single;
 begin
   AOut.Clear;
   nOut := AOut.ChannelCount;
@@ -1094,6 +1506,7 @@ begin
       Break;
     end;
   FBlockAnySoloed := anySoloed;
+  FLoopLimit := FTimeline.LastClipEndSeconds;
 
   { region loop (Loop Start/End set on the ruler): wrap the read position -
     not the underlying model - back to LoopStartSeconds once it reaches
@@ -1132,6 +1545,8 @@ begin
     is rendered through TMixerProcessor instead of directly, so that strip's
     trim/fader/pan/inserts/sends/routing actually reach the output. }
   haveLinked := (FMixer <> nil) and FMixer.IsPrepared and (FLinkedTrackIds.Count > 0);
+  { MIDI lanes are rendered first: a lane with a strip hands its synth output to the mixer }
+  RenderMidiBlock(n, anySoloed, haveLinked);
   if haveLinked then
   begin
     if (FMixScratch = nil) or (FMixScratch.ChannelCount <> nOut) or
@@ -1157,11 +1572,12 @@ begin
     plus the live MIDI monitor (see AttachMidi/AttachLiveMidiMonitor) -
     computed once per block, not per frame, since a MIDI synth renders a
     whole block at a time. }
-  RenderMidiBlock(n, anySoloed);
+
 
   { Pass 3: direct sum of every unlinked track, plus the mixer's contribution
     from Pass 2 and the MIDI contribution from Pass 2b, all under the same
     Timeline master-volume ramp. }
+  for ti := 0 to 127 do blockPk[ti] := 0;
   for i := 0 to n - 1 do
   begin
     accL := 0; accR := 0;
@@ -1173,6 +1589,12 @@ begin
       begin
         accL := accL + l;
         accR := accR + r;
+        if ti < 128 then
+        begin
+          pk := Abs(l);
+          if Abs(r) > pk then pk := Abs(r);
+          if pk > blockPk[ti] then blockPk[ti] := pk;
+        end;
       end;
     end;
     if mL <> nil then
@@ -1184,12 +1606,20 @@ begin
     accR := accR + FMidiAccumR[i];
     if FMetroOn and (FBlockTimes[i] >= 0) then
     begin
-      metroBeat := Floor(FBlockTimes[i] * FMetroBpm / 60.0);
-      metroT := FBlockTimes[i] - metroBeat * 60.0 / FMetroBpm;
+      if FMetroMapped then
+      begin
+        metroBeat := Floor(SecondsToBeats(FMetroCtx, FBlockTimes[i]));
+        metroT := FBlockTimes[i] - BeatsToSeconds(FMetroCtx, metroBeat);
+      end
+      else
+      begin
+        metroBeat := Floor(FBlockTimes[i] * FMetroBpm / 60.0);
+        metroT := FBlockTimes[i] - metroBeat * 60.0 / FMetroBpm;
+      end;
       if metroT < 0.04 then
       begin
         if metroBeat mod FMetroBeats = 0 then metroF := 1760.0 else metroF := 1100.0;
-        metroV := Sin(2.0 * Pi * metroF * metroT) * Exp(-metroT * 120.0) * FMetroGain;
+        metroV := FastSin(2.0 * Pi * metroF * metroT) * FastExp(-metroT * 120.0) * FMetroGain;
         accL := accL + metroV;
         accR := accR + metroV;
       end;
@@ -1199,6 +1629,14 @@ begin
     pR[i] := pR[i] + Single(accR * vol);
   end;
   FLastMasterVolLin := volTarget;
+  for ti := 0 to 127 do
+    if ti < FTimeline.TrackCount then
+    begin
+      FPeakIds[ti] := FTimeline.GetTrack(ti).Id;
+      FPeakVals[ti] := blockPk[ti];
+      if FMidiPeaks[ti] > FPeakVals[ti] then FPeakVals[ti] := FMidiPeaks[ti];
+    end
+    else FPeakIds[ti] := 0;
 
   newPlayhead := FTimeline.PlayheadSeconds + (AOut.FrameCount / FOutSampleRate) * FDirection * rate;
   if loopOn and (FDirection > 0) and (newPlayhead >= loopEnd) then
@@ -1218,7 +1656,7 @@ begin
   totalDur := FTimeline.LastClipEndSeconds;
   if FDirection > 0 then
   begin
-    if (not loopOn) and (totalDur > 0) and (newPlayhead >= totalDur) then
+    if (not loopOn) and (FLaunchCount = 0) and (totalDur > 0) and (newPlayhead >= totalDur) then
     begin
       newPlayhead := totalDur;
       if FPingPong then FDirection := -1 else FReachedEnd := True;
@@ -1328,6 +1766,12 @@ begin
   if (strip = nil) or (strip.InputSourceId = 0) then Exit;
   trk := FPlayer.FTimeline.TrackById(strip.InputSourceId);
   if trk = nil then Exit;
+  { a MIDI lane: the synth output the player rendered for this block }
+  if trk.Kind in [tkMidi, tkInstrument] then
+  begin
+    FPlayer.CopyMidiDry(trk.Id, ABuffer);
+    Exit;
+  end;
 
   n := ABuffer.FrameCount;
   if n > Length(FPlayer.FBlockTimes) then n := Length(FPlayer.FBlockTimes);

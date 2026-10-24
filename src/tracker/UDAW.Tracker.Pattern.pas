@@ -15,7 +15,7 @@ unit UDAW.Tracker.Pattern;
 interface
 
 uses
-  SysUtils, Math, Generics.Collections,
+  SysUtils, Math, Generics.Collections, SyncObjs,
   UDAW.Errors,
   UDAW.Tracker.Types, UDAW.Tracker.Instrument;
 
@@ -44,8 +44,19 @@ type
     property Channels: Integer read FChannels;
   end;
 
+  { A whole-channel effect (a DSP node kind + its "k=v;k=v" settings); Kind = '' means none. }
+  TTrackerChannelFx = record
+    Kind: string;
+    Params: string;
+    Name: string;
+  end;
+
   TTrackerModule = class
   private
+    FChanMuted: array of Boolean;
+    FChanFx: array of TTrackerChannelFx;
+    FFxRevision: Integer;
+    FFxLock: TCriticalSection;
     FName: string;
     FChannels: Integer;
     FInitialSpeed: Integer;
@@ -84,6 +95,14 @@ type
     procedure AppendOrder(APatternIndex: Integer);
 
     procedure SetChannels(AChannels: Integer);
+
+    { ---- per-channel mute and whole-channel effect (read by the player) ---- }
+    function ChannelMuted(AChannel: Integer): Boolean;
+    procedure SetChannelMuted(AChannel: Integer; AMuted: Boolean);
+    function GetChannelFx(AChannel: Integer): TTrackerChannelFx;
+    procedure SetChannelFx(AChannel: Integer; const AKind, AParams, AName: string);
+    { bumped on every effect change so the player knows to rebuild its nodes }
+    property FxRevision: Integer read FFxRevision;
 
     function Describe: string;
 
@@ -201,6 +220,7 @@ end;
 constructor TTrackerModule.Create;
 begin
   inherited Create;
+  FFxLock := TCriticalSection.Create;
   FPatterns := TObjectList<TTrackerPattern>.Create(True);
   FInstruments := TObjectList<TTrackerInstrument>.Create(True);
   FName := 'Untitled';
@@ -215,6 +235,7 @@ destructor TTrackerModule.Destroy;
 begin
   FInstruments.Free;
   FPatterns.Free;
+  FFxLock.Free;
   inherited Destroy;
 end;
 
@@ -224,6 +245,14 @@ begin
   FInstruments.Clear;
   SetLength(FOrder, 0);
   FRestartPos := 0;
+  FFxLock.Enter;
+  try
+    SetLength(FChanMuted, 0);
+    SetLength(FChanFx, 0);
+    Inc(FFxRevision);
+  finally
+    FFxLock.Leave;
+  end;
 end;
 
 procedure TTrackerModule.InitDefault;
@@ -245,6 +274,8 @@ begin
   Result.FGlobalVolume := FGlobalVolume;
   Result.FRestartPos := FRestartPos;
   Result.FOrder := Copy(FOrder);
+  Result.FChanMuted := Copy(FChanMuted);
+  Result.FChanFx := Copy(FChanFx);
   for i := 0 to FPatterns.Count - 1 do
     Result.FPatterns.Add(FPatterns[i].Clone);
   for i := 0 to FInstruments.Count - 1 do
@@ -374,6 +405,44 @@ begin
   FChannels := AChannels;
   for i := 0 to FPatterns.Count - 1 do
     FPatterns[i].SetChannels(AChannels);
+end;
+
+function TTrackerModule.ChannelMuted(AChannel: Integer): Boolean;
+begin
+  Result := (AChannel >= 0) and (AChannel < Length(FChanMuted)) and FChanMuted[AChannel];
+end;
+
+procedure TTrackerModule.SetChannelMuted(AChannel: Integer; AMuted: Boolean);
+begin
+  if (AChannel < 0) or (AChannel >= TRK_MAX_CHANNELS) then Exit;
+  if AChannel >= Length(FChanMuted) then SetLength(FChanMuted, AChannel + 1);
+  FChanMuted[AChannel] := AMuted;
+end;
+
+function TTrackerModule.GetChannelFx(AChannel: Integer): TTrackerChannelFx;
+begin
+  Result := Default(TTrackerChannelFx);
+  FFxLock.Enter;
+  try
+    if (AChannel >= 0) and (AChannel < Length(FChanFx)) then Result := FChanFx[AChannel];
+  finally
+    FFxLock.Leave;
+  end;
+end;
+
+procedure TTrackerModule.SetChannelFx(AChannel: Integer; const AKind, AParams, AName: string);
+begin
+  if (AChannel < 0) or (AChannel >= TRK_MAX_CHANNELS) then Exit;
+  FFxLock.Enter;
+  try
+    if AChannel >= Length(FChanFx) then SetLength(FChanFx, AChannel + 1);
+    FChanFx[AChannel].Kind := AKind;
+    FChanFx[AChannel].Params := AParams;
+    FChanFx[AChannel].Name := AName;
+    Inc(FFxRevision);
+  finally
+    FFxLock.Leave;
+  end;
 end;
 
 function TTrackerModule.Describe: string;

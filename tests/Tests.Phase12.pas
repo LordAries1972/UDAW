@@ -21,7 +21,7 @@ procedure RegisterPhase12Tests;
 implementation
 
 uses
-  SysUtils, Classes, Math,
+  SysUtils, Classes, Math, IOUtils,
   UDAW.Testing,
   UDAW.Errors,
   UDAW.Audio.Types,
@@ -29,7 +29,7 @@ uses
   UDAW.Tracker.Player,
   UDAW.Project.Document, UDAW.Project.Serialization, UDAW.Project.Commands,
   UDAW.Tracker.Commands,
-  UDAW.Codec.ProTracker;
+  UDAW.Codec.ProTracker, UDAW.Timeline.TrackerSource;
 
 const
   SR = 48000;
@@ -597,9 +597,44 @@ end;
 
 { ---------------- registration ---------------- }
 
+procedure Test_TrackerClipSource;
+var
+  data: TBytes;
+  path: string;
+  pcm: TAudioPlanar;
+  frames, i: Integer;
+  bpm, peak: Double;
+  fs: TFileStream;
+begin
+  data := BuildMod31(4, 1, [0], [Spec(0, 0, 0, 12, 1, 0, 0)]);
+  path := IncludeTrailingPathDelimiter(TPath.GetTempPath) + 'udaw-trackerclip-test.mod';
+  fs := TFileStream.Create(path, fmCreate);
+  try
+    fs.WriteBuffer(data[0], Length(data));
+  finally
+    fs.Free;
+  end;
+  try
+    Check(TrackerSniffFile(path), 'a module file is a tracker source');
+    Check(TrackerRenderFile(path, pcm, frames, bpm), 'module renders for the Timeline');
+    Check(frames > 0, 'rendered some audio');
+    CheckEqualInt(2, Length(pcm), 'stereo');
+    CheckNear(125.0, bpm, 1e-9, 'default 125 BPM / speed 6 is 125 beats per minute');
+    CheckNear(125.0, TrackerFileBpm(path), 1e-9, 'tempo without rendering');
+    peak := 0;
+    for i := 0 to frames - 1 do
+      if Abs(pcm[0][i]) > peak then peak := Abs(pcm[0][i]);
+    Check(peak > 0.01, 'the module is audible');
+    Check(peak <= 1.0, 'render stays inside full scale');
+  finally
+    DeleteFile(path);
+  end;
+end;
+
 procedure RegisterPhase12Tests;
 begin
   RegisterTest('mod.sniff', 'kind detection',            @Test_Sniff_Kinds);
+  RegisterTest('mod.timeline', 'module as a Timeline clip source', @Test_TrackerClipSource);
   RegisterTest('mod.import', '31-sample structure',      @Test_Import_Structure);
   RegisterTest('mod.import', '15-sample Soundtracker',   @Test_Import_15Sample);
   RegisterTest('mod.import', 'effect column mapping',    @Test_Effect_Mapping);

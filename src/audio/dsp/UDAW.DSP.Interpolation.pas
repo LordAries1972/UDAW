@@ -27,9 +27,9 @@ function InterpKindName(AKind: TInterpKind): string;
 
 { Core kernels. AFrac in [0,1). The x* are the four samples straddling the read
   point: xm1 = index-1, x0 = index, x1 = index+1, x2 = index+2. }
-function InterpLinear(AX0, AX1: Single; AFrac: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
-function InterpHermite4(AXm1, AX0, AX1, AX2: Single; AFrac: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
-function InterpLagrange3(AXm1, AX0, AX1, AX2: Single; AFrac: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+function InterpLinear(AX0, AX1: Single; AFrac: Single): Single; inline;
+function InterpHermite4(AXm1, AX0, AX1, AX2: Single; AFrac: Single): Single; inline;
+function InterpLagrange3(AXm1, AX0, AX1, AX2: Single; AFrac: Single): Single; inline;
 
 { Read ABuf at the (possibly fractional) position APos using AKind, clamping at
   the buffer edges. ABuf points at ALength contiguous Singles. }

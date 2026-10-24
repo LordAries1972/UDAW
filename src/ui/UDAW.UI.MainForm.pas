@@ -1,4 +1,4 @@
-﻿unit UDAW.UI.MainForm;
+unit UDAW.UI.MainForm;
 {$IFDEF FPC}{$MODE DELPHI}{$H+}{$ENDIF}
 
 { Phase 1 diagnostics / control panel.
@@ -19,14 +19,17 @@ uses
   {$ELSE}
   Winapi.ShellAPI, Winapi.Windows, Winapi.Messages,
   System.Types, System.UITypes,   // lets Point / MessageDlg inline-expand
-  FileCtrl,                       // SelectDirectory, for the Settings tab
+  System.Threading,               // TTask for JobAwait
+  FileCtrl,                      // SelectDirectory, for the Settings tab
   UDAW.UI.HelpForm,               // embedded-browser Help Centre window
+  UDAW.UI.ProjectStartForm,       // Project Startup screen (replaces the Project tab)
   UDAW.Web.HelpClient,            // TaurusTLS/Indy fetch for the Help Centre
-  UDAW.Licensing,                 // online registration (Settings > Registration)
+  // UDAW.Licensing,              // registration disabled: full version by default
   UDAW.Update,                    // online version/checksum check + self-update
   UDAW.Input.KeyHooks,            // Ctrl+Pause/Ctrl+Space global hotkeys
+  UDAW.GL.Canvas, UDAW.GL.Controls, UDAW.GL.Widgets, UDAW.GL.Menus, UDAW.UI.LogSink, UDAW.UI.FileDialog, // OpenGL 3.3 surfaces and icon bars (TGLView, TGLIconBar)
   {$ENDIF}
-  UDAW.UI.AboutForm, UDAW.UI.LogForm, UDAW.UI.BrowserWindow,
+  UDAW.UI.AboutForm, UDAW.UI.LogForm, UDAW.UI.MeterForm, UDAW.UI.SpectrumForm, UDAW.UI.FoleyForm, UDAW.UI.BrowserWindow,
   SysUtils, Classes, Math, Graphics, Controls, Forms, Dialogs, StdCtrls, ComCtrls,
   ExtCtrls, StrUtils, Menus,
   UDAW.App, UDAW.Types, UDAW.Errors, UDAW.Logging, UDAW.Jobs, UDAW.SecureStorage,
@@ -51,17 +54,17 @@ uses
   UDAW.MIDI.Engine, UDAW.MIDI.Serialization, UDAW.MIDI.Commands,
   UDAW.MIDI.Hardware, UDAW.MIDI.Capture,
   UDAW.Timeline.Time, UDAW.Timeline.Model, UDAW.Timeline.Serialization,
-  UDAW.Timeline.Commands, UDAW.Timeline.View, UDAW.Timeline.Waveform,
+  UDAW.Timeline.Commands, UDAW.Timeline.View, UDAW.Timeline.Waveform, UDAW.Timeline.TrackerSource,
   UDAW.Timeline.Playback, UDAW.Timeline.Export, UDAW.Media.Progress,
   UDAW.Media.Attribution,
   UDAW.Mixer.Model, UDAW.Mixer.Serialization, UDAW.Mixer.Engine, UDAW.Mixer.Commands,
   UDAW.Mixer.Automation, UDAW.Mixer.VST2, UDAW.Mixer.CLAP, UDAW.Mixer.VST3,
-  UDAW.Mixer.Modulation, UDAW.Timeline.SpectralFx, UDAW.DSP.AudioToMidi,
+  UDAW.Mixer.Modulation, UDAW.Timeline.SpectralFx, UDAW.Timeline.ExtraFx, UDAW.DSP.AudioToMidi,
   UDAW.Sequencer.Patterns, UDAW.Timeline.Warp, UDAW.Timeline.VideoPlayer, UDAW.UI.VST2Editor,
   UDAW.Timeline.VideoExport, UDAW.Video.Effects, UDAW.Timeline.VideoFxCache,
-  UDAW.UI.MixInsertParams, System.NetEncoding,
+  System.IOUtils, UDAW.UI.MixInsertParams, UDAW.UI.VideoForm, UDAW.UI.CapsuleProgress, UDAW.UI.MixerStrip, UDAW.UI.TimelineHeader, UDAW.UI.Score, UDAW.Drum.Machine, UDAW.Drum.KitModel, UDAW.UI.DrumInstrument, UDAW.UI.InstrumentEditor, UDAW.UI.EffectEditor, UDAW.UI.TrkFxPick, UDAW.Timeline.FxPresets, UDAW.Pattern.Model, UDAW.Pattern.Commands, UDAW.Mixer.PluginScan, UDAW.Scripting.Python, System.NetEncoding,
   UDAW.Tracker.Types, UDAW.Tracker.Instrument, UDAW.Tracker.Pattern,
-  UDAW.Tracker.Player, UDAW.Tracker.Commands,
+  UDAW.CrashTrace, UDAW.SystemInfo, UDAW.GL.InfoView, UDAW.UI.Display, UDAW.Tracker.Player, UDAW.Tracker.Commands, UDAW.Tracker.ScoreNotes, UDAW.Codec.TrackerLegacy, UDAW.UI.ScorePdf,
   UDAW.Recording.Types, UDAW.Recording.Engine, UDAW.Recording.Takes,
   UDAW.Recording.Recovery, UDAW.Recording.Commands,
   UDAW.Recording.Writer, UDAW.Audio.Ring,
@@ -92,6 +95,10 @@ const
   TRK_UI_IDLE_INTERVAL_MS = 500;
   TRK_UI_PLAY_INTERVAL_MS = 33;   // ~30 fps
   DEFAULT_TL_REFRESH_HZ = 20;     // Timeline redraws per second while playing (Settings > General)
+  WM_MIXSYNC = WM_APP + 41;       // posted when the mixer strip widgets need re-laying out (MixSyncStrips)
+  WM_TLSYNC  = WM_APP + 42;       // posted when the Timeline track-header widgets need re-building (TlHeaderSync)
+  WM_MIXPICK = WM_APP + 44;       // posted when an effect was picked from a strip's + FX menu (the editor opens once the menu has gone)
+  WM_DRUM_REFRESH = WM_APP + 43;   // posted when the drum instrument panels need rebuilding (after a panel's own click has finished)
 
 type
   { TPaintBox (TGraphicControl) does not publish OnMouseWheel, so the DFM/LFM
@@ -103,9 +110,27 @@ type
     property OnMouseWheel;
   end;
 
-  { What a pbMixer mouse-down/drag is currently doing - see
-    pbMixerMouseDown/MouseMove/MouseUp. }
-  TMixDragMode = (mdmNone, mdmFader, mdmPan, mdmReorderStrip, mdmReorderInsert);
+  { What the transient chooser under a mixer strip's + FX / + Send button picks. }
+  TMixPickKind = (pkFx, pkSend);
+
+  { one row of the right-hand browser panel: what a double-click does (see TlRightFill) }
+  TRightItem = record
+    Kind, Index: Integer;
+    Path: string;
+  end;
+
+  { One track's Clip Stage override: the scene (a Timeline region) it was
+    launched from, or silent when the scene has nothing for that track. }
+  TStageLaunch = record
+    TrackId: Integer;
+    SceneId: Integer;
+    Silent: Boolean;
+    Continuous: Boolean;   // the scene's flag: loop on and on instead of playing its region once
+    StartSec, LengthSec, ActivateAt: Double;
+  end;
+
+  { what a Timeline clip is, for the icon at its left end and the editor that icon opens }
+  TTlClipKind = (ckAudio, ckMidi, ckTracker, ckPattern, ckVideo);
 
   { Timeline range clipboard (Cut/Copy/Paste Selection) - everything that
     lives inside the copied time range, not only the audio: each clip slice
@@ -139,47 +164,63 @@ type
     Kind: TMediaKind;
   end;
 
+  { raised by UpdateStatusProgress when the user presses Esc during a status-bar job;
+    the job's own handler unwinds, the changes it made are already rolled back }
+  EJobCancelled = class(EAbort);
+
   TfrmMain = class(TForm)
+    mbMain: TGLMenuBar;
     mnuMain: TMainMenu;
-    pnlTop: TPanel;
-    lblHeader: TLabel;
-    pgc: TPageControl;
-    tabSystem: TTabSheet;
-    memSystem: TMemo;
-    pnlLogView: TPanel;
-    lvLog: TListView;
-    pnlLogButtons: TPanel;
-    cboLevel: TComboBox;
-    tabJobs: TTabSheet;
-    lvJobs: TListView;
-    tabAudio: TTabSheet;
-    pnlAudioMeters: TPanel;
-    lblOutL: TLabel;
-    lblOutR: TLabel;
-    lblAudioState: TLabel;
-    pbOutL: TProgressBar;
-    pbOutR: TProgressBar;
-    memAudio: TMemo;
-    tabDSP: TTabSheet;
-    pnlDspTop: TPanel;
-    lblDspSignal: TLabel;
-    cboDspSignal: TComboBox;
-    lblDspFilter: TLabel;
-    cboDspFilter: TComboBox;
-    lblDspWindow: TLabel;
-    cboDspWindow: TComboBox;
-    chkDspLive: TCheckBox;
-    pnlDspReadout: TPanel;
-    memDspReadout: TMemo;
-    pbSpectrum: TPaintBox;
-    tabGraph: TTabSheet;
-    pnlGraphTop: TPanel;
-    lblGraphPreset: TLabel;
-    cboGraphPreset: TComboBox;
-    chkGraphLive: TCheckBox;
-    pnlGraphReadout: TPanel;
-    memGraph: TMemo;
-    pbGraph: TPaintBox;
+    pnlTop: TGLPanel;
+    lblHeader: TGLLabel;
+    pgc: TGLPageControl;
+    tabSystem: TGLPage;
+    memSystem: TLogSink;
+    pnlSysTop: TGLPanel;
+    lblSysFilter, lblSysCount: TGLLabel;
+    edtSysFilter: TGLEdit;
+    btnSysRefresh, btnSysCopy: TGLButton;
+    ivSystem: TGLInfoView;
+    tabGlDisplay: TGLPage;
+    grpGlDisplay, grpGlInfo: TGLGroup;
+    lblGlMode, lblGlMonitor, lblGlRes, lblGlFpsWhen, lblGlStatus, lblGlNote: TGLLabel;
+    lblGlRenderer, lblGlVersion, lblGlMemory: TGLLabel;
+    cboGlMode, cboGlMonitor, cboGlRes, cboGlFpsWhen: TGLCombo;
+    chkGlFps: TGLCheck;
+    btnGlApply: TGLButton;
+    lblGlFps: TGLLabel;
+    tmrGlFps: TTimer;
+    pnlLogButtons: TGLPanel;
+    tabJobs: TGLPage;
+    lvJobs: TGLListView;
+    tabAudio: TGLPage;
+    pnlAudioMeters: TGLPanel;
+    lblOutL: TGLLabel;
+    lblOutR: TGLLabel;
+    lblAudioState: TGLLabel;
+    pbOutL: TGLProgress;
+    pbOutR: TGLProgress;
+    memAudio: TLogSink;
+    tabDSP: TGLPage;
+    pnlDspTop: TGLPanel;
+    lblDspSignal: TGLLabel;
+    cboDspSignal: TGLCombo;
+    lblDspFilter: TGLLabel;
+    cboDspFilter: TGLCombo;
+    lblDspWindow: TGLLabel;
+    cboDspWindow: TGLCombo;
+    chkDspLive: TGLCheck;
+    pnlDspReadout: TGLPanel;
+    memDspReadout: TLogSink;
+    pbSpectrum: TGLView;
+    tabGraph: TGLPage;
+    pnlGraphTop: TGLPanel;
+    lblGraphPreset: TGLLabel;
+    cboGraphPreset: TGLCombo;
+    chkGraphLive: TGLCheck;
+    pnlGraphReadout: TGLPanel;
+    memGraph: TLogSink;
+    pbGraph: TGLView;
     mnuSystem: TMenuItem;
     mnuSystemRefresh: TMenuItem;
     mnuSystemOpenConfigDir: TMenuItem;
@@ -189,8 +230,6 @@ type
     mnuEmitInfo: TMenuItem;
     mnuEmitWarn: TMenuItem;
     mnuEmitError: TMenuItem;
-    mnuLogSep1: TMenuItem;
-    mnuClearLogView: TMenuItem;
     mnuJobs: TMenuItem;
     mnuRunSelfTest: TMenuItem;
     mnuCancelJobs: TMenuItem;
@@ -210,7 +249,6 @@ type
     pmSystemRefresh: TMenuItem;
     pmSystemOpenConfigDir: TMenuItem;
     pmSystemOpenLogDir: TMenuItem;
-    pmLog: TPopupMenu;
     pmApplyLevel: TMenuItem;
     pmEmitInfo: TMenuItem;
     pmEmitWarn: TMenuItem;
@@ -232,27 +270,27 @@ type
     pmGraph: TPopupMenu;
     pmGraphBuild: TMenuItem;
     pmGraphPlay: TMenuItem;
-    tabProject: TTabSheet;
-    pnlProjectTop: TPanel;
-    lblProjectFile: TLabel;
-    lblProjectName: TLabel;
-    lblProjectAuthor: TLabel;
-    lblProjectTempo: TLabel;
-    lblProjectTimeSig: TLabel;
-    lblTimeSigSlash: TLabel;
-    lblProjectSampleRate: TLabel;
-    lblProjectChannels: TLabel;
-    lblAutosave: TLabel;
-    edtProjectName: TEdit;
-    edtProjectAuthor: TEdit;
-    edtProjectTempo: TEdit;
-    edtTimeSigNum: TEdit;
-    edtTimeSigDen: TEdit;
-    cboProjectSampleRate: TComboBox;
-    edtProjectChannels: TEdit;
-    cboAutosaveInterval: TComboBox;
-    pnlProjectReadout: TPanel;
-    memProject: TMemo;
+    tabSettingsProject: TGLPage;
+    pnlProjectTop: TGLPanel;
+    lblProjectFile: TGLLabel;
+    lblProjectName: TGLLabel;
+    lblProjectAuthor: TGLLabel;
+    lblProjectTempo: TGLLabel;
+    lblProjectTimeSig: TGLLabel;
+    lblTimeSigSlash: TGLLabel;
+    lblProjectSampleRate: TGLLabel;
+    lblProjectChannels: TGLLabel;
+    lblAutosave: TGLLabel;
+    edtProjectName: TGLEdit;
+    edtProjectAuthor: TGLEdit;
+    edtProjectTempo: TGLEdit;
+    edtTimeSigNum: TGLEdit;
+    edtTimeSigDen: TGLEdit;
+    cboProjectSampleRate: TGLCombo;
+    edtProjectChannels: TGLEdit;
+    cboAutosaveInterval: TGLCombo;
+    pnlProjectReadout: TGLPanel;
+    memProject: TLogSink;
     mnuProject: TMenuItem;
     mnuProjectFile: TMenuItem;
     mnuProjectNew: TMenuItem;
@@ -289,14 +327,14 @@ type
     pmProjectSep4: TMenuItem;
     pmProjectAutosaveNow: TMenuItem;
     pmProjectRecover: TMenuItem;
-    dlgSaveProject: TSaveDialog;
-    dlgOpenProject: TOpenDialog;
-    tabWav: TTabSheet;
-    pnlWavTop: TPanel;
-    lblWavFormat: TLabel;
-    chkWavLoop: TCheckBox;
-    cboWavFormat: TComboBox;
-    memWav: TMemo;
+    dlgSaveProject: TGLSaveDialog;
+    dlgOpenProject: TGLOpenDialog;
+    tabWav: TGLPage;
+    pnlWavTop: TGLPanel;
+    lblWavFormat: TGLLabel;
+    chkWavLoop: TGLCheck;
+    cboWavFormat: TGLCombo;
+    memWav: TLogSink;
     mnuWav: TMenuItem;
     mnuWavImport: TMenuItem;
     mnuWavPlay: TMenuItem;
@@ -309,13 +347,13 @@ type
     pmWavSep1: TMenuItem;
     pmWavExportTone: TMenuItem;
     pmWavRoundTrip: TMenuItem;
-    dlgOpenWav: TOpenDialog;
-    dlgSaveWav: TSaveDialog;
-    tabMP3: TTabSheet;
-    pnlMp3Top: TPanel;
-    lblMp3Bitrate: TLabel;
-    cboMp3Bitrate: TComboBox;
-    memMp3: TMemo;
+    dlgOpenWav: TGLOpenDialog;
+    dlgSaveWav: TGLSaveDialog;
+    tabMP3: TGLPage;
+    pnlMp3Top: TGLPanel;
+    lblMp3Bitrate: TGLLabel;
+    cboMp3Bitrate: TGLCombo;
+    memMp3: TLogSink;
     mnuMp3: TMenuItem;
     mnuMp3Import: TMenuItem;
     mnuMp3ReadTags: TMenuItem;
@@ -336,13 +374,13 @@ type
     pmMp3Sep2: TMenuItem;
     pmMp3Play: TMenuItem;
     pmMp3Stop: TMenuItem;
-    dlgOpenMp3: TOpenDialog;
-    dlgSaveMp3: TSaveDialog;
-    tabMP4: TTabSheet;
-    pnlMp4Top: TPanel;
-    lblMp4Fmt: TLabel;
-    cboMp4Fmt: TComboBox;
-    memMp4: TMemo;
+    dlgOpenMp3: TGLOpenDialog;
+    dlgSaveMp3: TGLSaveDialog;
+    tabMP4: TGLPage;
+    pnlMp4Top: TGLPanel;
+    lblMp4Fmt: TGLLabel;
+    cboMp4Fmt: TGLCombo;
+    memMp4: TLogSink;
     mnuMp4: TMenuItem;
     mnuMp4Probe: TMenuItem;
     mnuMp4Import: TMenuItem;
@@ -354,6 +392,10 @@ type
     mnuMp4Play: TMenuItem;
     mnuMp4Stop: TMenuItem;
     mnuHelpAboutUdawSep: TMenuItem;
+    mnuScripts: TMenuItem;
+    mnuScriptRun: TMenuItem;
+    mnuScriptFolder: TMenuItem;
+    dlgOpenPy: TGLOpenDialog;
     mnuHelpAboutUdaw: TMenuItem;
     pmMp4: TPopupMenu;
     pmMp4Probe: TMenuItem;
@@ -365,23 +407,31 @@ type
     pmMp4Sep2: TMenuItem;
     pmMp4Play: TMenuItem;
     pmMp4Stop: TMenuItem;
-    tabMIDI: TTabSheet;
-    pnlMidiTop: TPanel;
-    lblMidiClip: TLabel;
-    lblMidiNote: TLabel;
-    lblMidiGrid: TLabel;
-    cboMidiClip: TComboBox;
-    edtMidiNote: TEdit;
-    edtMidiStart: TEdit;
-    edtMidiLen: TEdit;
-    edtMidiVel: TEdit;
-    cboMidiGrid: TComboBox;
-    lblMidiScale: TLabel;
-    cboMidiScaleRoot: TComboBox;
-    cboMidiScaleType: TComboBox;
-    chkMidiScaleHighlight: TCheckBox;
-    pbPianoRoll: TPaintBox;
-    memMidi: TMemo;
+    tabMIDI: TGLPage;
+    pnlMidiTop: TGLPanel;
+    lblMidiClip: TGLLabel;
+    lblMidiNote: TGLLabel;
+    lblMidiGrid: TGLLabel;
+    cboMidiClip: TGLCombo;
+    lblMidiTrack: TGLLabel;
+    cboMidiTrack: TGLCombo;
+    edtMidiNote: TGLEdit;
+    edtMidiStart: TGLEdit;
+    edtMidiLen: TGLEdit;
+    edtMidiVel: TGLEdit;
+    cboMidiGrid: TGLCombo;
+    lblMidiScale: TGLLabel;
+    cboMidiScaleRoot: TGLCombo;
+    cboMidiScaleType: TGLCombo;
+    chkMidiScaleHighlight: TGLCheck;
+    chkMidiChords: TGLCheck;
+    bvlMidiSep1: TGLBevel;
+    bvlMidiSep2: TGLBevel;
+    btnMidiDetectChords: TGLButton;
+    pbPianoRoll: TGLView;
+    sbMidiH: TGLScrollBar;
+    sbMidiV: TGLScrollBar;
+    memMidi: TLogSink;
     mnuMidi: TMenuItem;
     mnuMidiClip: TMenuItem;
     mnuMidiAddClip: TMenuItem;
@@ -416,125 +466,146 @@ type
     pmMidiSep2: TMenuItem;
     pmMidiPlay: TMenuItem;
     pmMidiStop: TMenuItem;
-    dlgOpenMp4: TOpenDialog;
-    dlgSaveMp4: TSaveDialog;
-    dlgOpenMidi: TOpenDialog;
-    dlgSaveMidi: TSaveDialog;
-    tabSettings: TTabSheet;
-    pgcSettings, pgcDiagnostics: TPageControl;
-    tabSettingsGeneral, tabSettingsDiagnostics: TTabSheet;
-    tabRegistration: TTabSheet;
-    grpRegStatus, grpRegCredentials, grpRegUpdate: TGroupBox;
+    dlgOpenMp4: TGLOpenDialog;
+    dlgSaveMp4: TGLSaveDialog;
+    dlgOpenMidi: TGLOpenDialog;
+    dlgSaveMidi: TGLSaveDialog;
+    tabSettings: TGLPage;
+    pgcSettings, pgcDiagnostics: TGLPageControl;
+    tabSettingsGeneral, tabSettingsDiagnostics: TGLPage;
+    tabRegistration: TGLPage;
+    grpRegStatus, grpRegCredentials, grpRegUpdate: TGLGroup;
     lblRegStatus, lblRegDetail, lblRegUsername, lblRegPassword, lblRegSerial,
-      lblRegHint, lblRegVersion, lblRegUpdateStatus: TLabel;
-    edtRegUsername, edtRegPassword, edtRegSerial: TEdit;
-    btnRegRegister, btnRegUnregister, btnRegCheckUpdate, btnRegInstallUpdate: TButton;
-    lblSettingsStatus: TLabel;
-    sbSettings: TScrollBox;
+      lblRegHint, lblRegVersion, lblRegUpdateStatus: TGLLabel;
+    edtRegUsername, edtRegPassword, edtRegSerial: TGLEdit;
+    btnRegRegister, btnRegUnregister, btnRegCheckUpdate, btnRegInstallUpdate: TGLButton;
+    lblSettingsStatus: TGLLabel;
+    sbSettings: TGLScrollBox;
     mnuSettings: TMenuItem;
     mnuSettingsSave: TMenuItem;
     mnuSettingsReload: TMenuItem;
     pmSettings: TPopupMenu;
     pmSettingsSave: TMenuItem;
     pmSettingsReload: TMenuItem;
-    grpStartup: TGroupBox;
-    lblSetBackend: TLabel;
-    cboSetBackend: TComboBox;
-    lblSetRate: TLabel;
-    cboSetRate: TComboBox;
-    lblSetBuffer: TLabel;
-    cboSetBuffer: TComboBox;
-    lblSetOutCh: TLabel;
-    edSetOutCh: TEdit;
-    lblSetInCh: TLabel;
-    edSetInCh: TEdit;
-    lblSetInDevice: TLabel;
-    cboSetInDevice: TComboBox;
-    chkSetAutostart: TCheckBox;
-    chkSetCapture: TCheckBox;
-    chkSetExclusive: TCheckBox;
-    chkSetTempoAuto: TCheckBox;
-    chkSetTempoResample: TCheckBox;
-    chkSetHints: TCheckBox;
-    lblSetLogLevel: TLabel;
-    cboSetLogLevel: TComboBox;
-    cboSetTlRefresh: TComboBox;
-    lblSetTlRefresh: TLabel;
-    lblSetLocale: TLabel;
-    edSetLocale: TEdit;
-    lblSetTheme: TLabel;
-    cboSetTheme: TComboBox;
-    lblThemeInfo: TLabel;
-    grpDirs: TGroupBox;
-    lblDirProjects: TLabel;
-    edDirProjects: TEdit;
-    btnDirProjects: TButton;
-    lblDirAudioLib: TLabel;
-    edDirAudioLib: TEdit;
-    btnDirAudioLib: TButton;
-    lblDirSfx: TLabel;
-    edDirSfx: TEdit;
-    btnDirSfx: TButton;
-    lblDirExport: TLabel;
-    edDirExport: TEdit;
-    btnDirExport: TButton;
-    lblDirRecordings: TLabel;
-    edDirRecordings: TEdit;
-    btnDirRecordings: TButton;
-    lblDirTemp, lblDirCache: TLabel;
-    edDirTemp, edDirCache: TEdit;
-    btnDirTemp, btnDirCache: TButton;
-    grpSystemPaths: TGroupBox;
-    memSysPaths: TMemo;
-    grpColorTheme: TGroupBox;
-    lblColorTheme: TLabel;
-    cboColorTheme: TComboBox;
-    btnColorThemeSave: TButton;
-    btnColorThemeReset: TButton;
-    btnColorThemeExport: TButton;
-    btnColorThemeImport: TButton;
-    lblColorThemeStatus: TLabel;
-    grpMidiDevices: TGroupBox;
-    lblSetMidiIn: TLabel;
-    lblSetMidiOut: TLabel;
-    cboSetMidiInDevice: TComboBox;
-    cboSetMidiOutDevice: TComboBox;
-    btnSetMidiRefresh: TButton;
-    btnSetMidiPanic: TButton;
-    lblSetMidiStatus: TLabel;
-    tabColors: TTabSheet;
-    lblFadeDisplay: TLabel;
-    cboFadeDisplay: TComboBox;
-    tabKeyHooks: TTabSheet;
-    lvKeyHooks: TListView;
-    lblKeyHooksHint: TLabel;
-    pnlColorsTop: TPanel;
-    lblColorsTitle: TLabel;
-    lbColorSwatches: TListBox;
-    pbColorPreview: TPaintBox;
-    btnColorPick: TButton;
-    btnColorsSave: TButton;
-    btnColorsResetTheme: TButton;
-    lblColorsStatus: TLabel;
-    lblColorsHint: TLabel;
-    tabTimeline: TTabSheet;
-    pnlTimelineTop: TPanel;
-    lblTlTempo: TLabel;
-    edtTlTempo: TEdit;
-    chkTlMetronome: TCheckBox;
-    lblTlSnap: TLabel;
-    lblTlPos: TLabel;
-    lblTlPosCaption: TLabel;
-    lblTlMasterCaption: TLabel;
-    bvlTlSep1: TBevel;
-    bvlTlSep2: TBevel;
-    bvlTlSep3: TBevel;
-    cboTlSnap: TComboBox;
-    lblTlMasterVol: TLabel;
-    tbTlMasterVol: TTrackBar;
+    grpStartup: TGLGroup;
+    lblSetBackend: TGLLabel;
+    cboSetBackend: TGLCombo;
+    lblSetRate: TGLLabel;
+    cboSetRate: TGLCombo;
+    lblSetBuffer: TGLLabel;
+    cboSetBuffer: TGLCombo;
+    lblSetOutCh: TGLLabel;
+    edSetOutCh: TGLEdit;
+    lblSetInCh: TGLLabel;
+    edSetInCh: TGLEdit;
+    lblSetInDevice: TGLLabel;
+    cboSetInDevice: TGLCombo;
+    chkSetAutostart: TGLCheck;
+    chkSetCapture: TGLCheck;
+    chkSetExclusive: TGLCheck;
+    chkSetTempoAuto: TGLCheck;
+    chkSetShowStart: TGLCheck;
+    chkSetTempoResample: TGLCheck;
+    chkSetHints: TGLCheck;
+    lblSetLogLevel: TGLLabel;
+    cboSetLogLevel: TGLCombo;
+    cboSetTlRefresh: TGLCombo;
+    lblSetTlRefresh: TGLLabel;
+    lblSetLocale: TGLLabel;
+    edSetLocale: TGLEdit;
+    lblSetTheme: TGLLabel;
+    cboSetTheme: TGLCombo;
+    lblThemeInfo: TGLLabel;
+    grpDirs: TGLGroup;
+    lblDirProjects: TGLLabel;
+    edDirProjects: TGLEdit;
+    btnDirProjects: TGLButton;
+    lblDirAudioLib: TGLLabel;
+    edDirAudioLib: TGLEdit;
+    btnDirAudioLib: TGLButton;
+    lblDirSfx: TGLLabel;
+    edDirSfx: TGLEdit;
+    btnDirSfx: TGLButton;
+    lblDirExport: TGLLabel;
+    edDirExport: TGLEdit;
+    btnDirExport: TGLButton;
+    lblDirRecordings: TGLLabel;
+    edDirRecordings: TGLEdit;
+    btnDirRecordings: TGLButton;
+    lblDirTemp, lblDirCache, lblDirScripts, lblDirPresets: TGLLabel;
+    edDirTemp, edDirCache, edDirScripts, edDirPresets: TGLEdit;
+    btnDirTemp, btnDirCache, btnDirScripts, btnDirPresets: TGLButton;
+    grpSystemPaths: TGLGroup;
+    memSysPaths: TLogSink;
+    lblSysConfig: TGLLabel;
+    edSysConfig: TGLEdit;
+    lblSysData: TGLLabel;
+    edSysData: TGLEdit;
+    lblSysCache: TGLLabel;
+    edSysCache: TGLEdit;
+    lblSysLogs: TGLLabel;
+    edSysLogs: TGLEdit;
+    lblSysTemp: TGLLabel;
+    edSysTemp: TGLEdit;
+    lblSysCfgFile: TGLLabel;
+    edSysCfgFile: TGLEdit;
+    lblSysExe: TGLLabel;
+    edSysExe: TGLEdit;
+    grpColorTheme: TGLGroup;
+    lblColorTheme: TGLLabel;
+    cboColorTheme: TGLCombo;
+    btnColorThemeSave: TGLButton;
+    btnColorThemeReset: TGLButton;
+    btnColorThemeExport: TGLButton;
+    btnColorThemeImport: TGLButton;
+    lblColorThemeStatus: TGLLabel;
+    grpMidiDevices: TGLGroup;
+    grpExport: TGLGroup;
+    lblExpBitrate, lblExpWidth, lblExpAuthor, lblExpNote: TGLLabel;
+    lblExpAudio: TGLLabel;
+    cboExpBitrate, cboExpWidth, cboExpAudio: TGLCombo;
+    edExpAuthor: TGLEdit;
+    lblSetMidiIn: TGLLabel;
+    lblSetMidiOut: TGLLabel;
+    cboSetMidiInDevice: TGLCombo;
+    cboSetMidiOutDevice: TGLCombo;
+    btnSetMidiRefresh: TGLButton;
+    btnSetMidiPanic: TGLButton;
+    lblSetMidiStatus: TGLLabel;
+    tabColors: TGLPage;
+    lblFadeDisplay: TGLLabel;
+    cboFadeDisplay: TGLCombo;
+    tabKeyHooks: TGLPage;
+    lvKeyHooks: TGLListView;
+    lblKeyHooksHint: TGLLabel;
+    pnlColorsTop: TGLPanel;
+    lblColorsTitle: TGLLabel;
+    lbColorSwatches: TGLList;
+    pbColorPreview: TGLView;
+    btnColorPick: TGLButton;
+    btnColorsSave: TGLButton;
+    btnColorsResetTheme: TGLButton;
+    lblColorsStatus: TGLLabel;
+    lblColorsHint: TGLLabel;
+    tabTimeline: TGLPage;
+    pnlTimelineTop: TGLPanel;
+    lblTlTempo: TGLLabel;
+    edtTlTempo: TGLEdit;
+    lblTlSnap: TGLLabel;
+    ibTlTransport: TGLIconBar;
+    lblTlTime: TGLLabel;
+    lblTlTimeCap: TGLLabel;
+    lblTlBars: TGLLabel;
+    lblTlBarsCap: TGLLabel;
+    bvlTlSep1: TGLBevel;
+    bvlTlSep2: TGLBevel;
+    bvlTlSep3: TGLBevel;
+    cboTlSnap: TGLCombo;
+    lblTlMasterVol: TGLLabel;
+    tbTlMasterVol: TGLTrackBar;
     mnuTimeline: TMenuItem;
     mnuTlExport, pmTlExport: TMenuItem;
-    dlgTimelineExport: TSaveDialog;
+    dlgTimelineExport: TGLSaveDialog;
     mnuTlBuild: TMenuItem;
     mnuTlDemo: TMenuItem;
     mnuTlAddTrack: TMenuItem;
@@ -552,6 +623,9 @@ type
     mnuTlImportMod: TMenuItem;
     mnuTlImportXm: TMenuItem;
     mnuTlImportMptm: TMenuItem;
+    mnuTlImportLegacy: TMenuItem;
+    pmTlImportLegacy: TMenuItem;
+    mnuTrkImportLegacy: TMenuItem;
     mnuTlImportSep2: TMenuItem;
     mnuTlImportAls: TMenuItem;
     mnuTlImportFlp: TMenuItem;
@@ -572,6 +646,15 @@ type
     mnuTlCut: TMenuItem;
     mnuTlCopy: TMenuItem;
     mnuTlPaste: TMenuItem;
+    mnuTlLockClip: TMenuItem;
+    pmTlLockClip: TMenuItem;
+    mnuTlClampTo: TMenuItem;
+    mnuTlClampLast: TMenuItem;
+    mnuTlClampNext: TMenuItem;
+    pmTlClampTo: TMenuItem;
+    pmTlClampLast: TMenuItem;
+    pmTlClampNext: TMenuItem;
+    pmMkLock: TMenuItem;
     mnuTlEditSepSel: TMenuItem;
     mnuTlCutSelection: TMenuItem;
     mnuTlCopySelection: TMenuItem;
@@ -585,33 +668,114 @@ type
     pmTlClipTempo: TMenuItem;
     mnuTlEditSep4: TMenuItem;
     mnuTlEffects: TMenuItem;
-    mnuTlVideoEffects, mnuTlVfxGrpDissolve, mnuTlVfxCrossfade, mnuTlVfxDipblack, mnuTlVfxDipwhite, mnuTlVfxBlurdissolve: TMenuItem;
-    mnuTlVfxPixeldissolve, mnuTlVfxGrpWipe, mnuTlVfxWipeleft, mnuTlVfxWiperight, mnuTlVfxWipeup, mnuTlVfxWipedown: TMenuItem;
-    mnuTlVfxClock, mnuTlVfxBarndoor, mnuTlVfxCircleopen, mnuTlVfxCircleclose, mnuTlVfxGrpSlideandZoom, mnuTlVfxSlideleft: TMenuItem;
-    mnuTlVfxSlideright, mnuTlVfxSlideup, mnuTlVfxSlidedown, mnuTlVfxZoomin, mnuTlVfxZoomout, mnuTlVfxGlitchtrans: TMenuItem;
-    mnuTlVfxGrpFade, mnuTlVfxFadein, mnuTlVfxFadeout, mnuTlVfxFlash, mnuTlVfxGrpBlurandSharpen, mnuTlVfxBlur: TMenuItem;
-    mnuTlVfxSharpen, mnuTlVfxPixelate, mnuTlVfxGrpColour, mnuTlVfxBw, mnuTlVfxSepia, mnuTlVfxInvert: TMenuItem;
-    mnuTlVfxDuotone, mnuTlVfxTint, mnuTlVfxWarm, mnuTlVfxCool, mnuTlVfxBrighten, mnuTlVfxDarken: TMenuItem;
-    mnuTlVfxContrast, mnuTlVfxVivid, mnuTlVfxDesaturate, mnuTlVfxPosterize, mnuTlVfxGrpStyle, mnuTlVfxVignette: TMenuItem;
-    mnuTlVfxGrain, mnuTlVfxScanlines, mnuTlVfxSketch, mnuTlVfxEmboss, mnuTlVfxGrpDistort, mnuTlVfxGlitch: TMenuItem;
-    mnuTlVfxRgbsplit, mnuTlVfxMirror, mnuTlVfxFlipv, mnuTlVfxGrpMotion, mnuTlVfxShake, mnuTlVfxSlowzoom: TMenuItem;
-    mnuTlVfxSpin, mnuTlVfxPulse, mnuTlVfxSep, mnuTlVfxRemove: TMenuItem;
-    pmTlVideoEffects, pmTlVfxGrpDissolve, pmTlVfxCrossfade, pmTlVfxDipblack, pmTlVfxDipwhite, pmTlVfxBlurdissolve: TMenuItem;
-    pmTlVfxPixeldissolve, pmTlVfxGrpWipe, pmTlVfxWipeleft, pmTlVfxWiperight, pmTlVfxWipeup, pmTlVfxWipedown: TMenuItem;
-    pmTlVfxClock, pmTlVfxBarndoor, pmTlVfxCircleopen, pmTlVfxCircleclose, pmTlVfxGrpSlideandZoom, pmTlVfxSlideleft: TMenuItem;
-    pmTlVfxSlideright, pmTlVfxSlideup, pmTlVfxSlidedown, pmTlVfxZoomin, pmTlVfxZoomout, pmTlVfxGlitchtrans: TMenuItem;
-    pmTlVfxGrpFade, pmTlVfxFadein, pmTlVfxFadeout, pmTlVfxFlash, pmTlVfxGrpBlurandSharpen, pmTlVfxBlur: TMenuItem;
-    pmTlVfxSharpen, pmTlVfxPixelate, pmTlVfxGrpColour, pmTlVfxBw, pmTlVfxSepia, pmTlVfxInvert: TMenuItem;
-    pmTlVfxDuotone, pmTlVfxTint, pmTlVfxWarm, pmTlVfxCool, pmTlVfxBrighten, pmTlVfxDarken: TMenuItem;
-    pmTlVfxContrast, pmTlVfxVivid, pmTlVfxDesaturate, pmTlVfxPosterize, pmTlVfxGrpStyle, pmTlVfxVignette: TMenuItem;
-    pmTlVfxGrain, pmTlVfxScanlines, pmTlVfxSketch, pmTlVfxEmboss, pmTlVfxGrpDistort, pmTlVfxGlitch: TMenuItem;
-    pmTlVfxRgbsplit, pmTlVfxMirror, pmTlVfxFlipv, pmTlVfxGrpMotion, pmTlVfxShake, pmTlVfxSlowzoom: TMenuItem;
-    pmTlVfxSpin, pmTlVfxPulse, pmTlVfxSep, pmTlVfxRemove: TMenuItem;
+    mnuTlVideoEffects, mnuTlVfxTransitions, mnuTlVfxGrpDissolve, mnuTlVfxCrossfade, mnuTlVfxDipblack, mnuTlVfxDipwhite,
+    mnuTlVfxBlurdissolve, mnuTlVfxPixeldissolve, mnuTlVfxAdditive, mnuTlVfxNonadditive, mnuTlVfxDitherdissolve, mnuTlVfxBurnaway,
+    mnuTlVfxGrpIris, mnuTlVfxCircleopen, mnuTlVfxCircleclose, mnuTlVfxIrisbox, mnuTlVfxIrisdiamond, mnuTlVfxIrisoval,
+    mnuTlVfxIriscross, mnuTlVfxGrpWipe, mnuTlVfxWipeleft, mnuTlVfxWiperight, mnuTlVfxWipeup, mnuTlVfxWipedown,
+    mnuTlVfxClock, mnuTlVfxBarndoor, mnuTlVfxBandwipe, mnuTlVfxVenetian, mnuTlVfxVenetianv, mnuTlVfxCheckerwipe,
+    mnuTlVfxDiagwipe, mnuTlVfxDiagwipe2, mnuTlVfxPinwheel, mnuTlVfxFanwipe, mnuTlVfxSpiralwipe, mnuTlVfxZigzagwipe,
+    mnuTlVfxXwipe, mnuTlVfxBlockwipe, mnuTlVfxInsetwipe, mnuTlVfxLumawipe, mnuTlVfxGrpMotion, mnuTlVfxSlideleft,
+    mnuTlVfxSlideright, mnuTlVfxSlideup, mnuTlVfxSlidedown, mnuTlVfxZoomin, mnuTlVfxZoomout, mnuTlVfxGlitchtrans,
+    mnuTlVfxCoverleft, mnuTlVfxCoverright, mnuTlVfxCoverup, mnuTlVfxCoverdown, mnuTlVfxSplith, mnuTlVfxSplitv,
+    mnuTlVfxSqueezeh, mnuTlVfxSqueezev, mnuTlVfxCardflipx, mnuTlVfxCardflipy, mnuTlVfxSpintrans, mnuTlVfxWhippan,
+    mnuTlVfxRippletrans, mnuTlVfxSwirltrans, mnuTlVfxZoomblurtrans, mnuTlVfxBandslide, mnuTlVfxGrpShape, mnuTlVfxShapeheart,
+    mnuTlVfxShapestar, mnuTlVfxShapetriup, mnuTlVfxShapetridown, mnuTlVfxShapetrileft, mnuTlVfxShapetriright, mnuTlVfxShapepentagon,
+    mnuTlVfxShapehexagon, mnuTlVfxFilters, mnuTlVfxGrpFade, mnuTlVfxFadein, mnuTlVfxFadeout, mnuTlVfxFlash,
+    mnuTlVfxBlurin, mnuTlVfxBlurout, mnuTlVfxGrpBlur, mnuTlVfxBlur, mnuTlVfxPixelate, mnuTlVfxGaussian,
+    mnuTlVfxMotionblur, mnuTlVfxDirectionalblur, mnuTlVfxRadialblur, mnuTlVfxZoomblur, mnuTlVfxLensblur, mnuTlVfxTiltshift,
+    mnuTlVfxPrismblur, mnuTlVfxSoftfocus, mnuTlVfxGrpSharpen, mnuTlVfxSharpen, mnuTlVfxUnsharp, mnuTlVfxUltrasharp,
+    mnuTlVfxSharpenedge, mnuTlVfxEdgeenhance, mnuTlVfxClarity, mnuTlVfxTexturepop, mnuTlVfxGrpColour, mnuTlVfxBw,
+    mnuTlVfxSepia, mnuTlVfxInvert, mnuTlVfxDuotone, mnuTlVfxTint, mnuTlVfxWarm, mnuTlVfxCool,
+    mnuTlVfxBrighten, mnuTlVfxDarken, mnuTlVfxContrast, mnuTlVfxVivid, mnuTlVfxDesaturate, mnuTlVfxPosterize,
+    mnuTlVfxHueshift, mnuTlVfxHuecycle, mnuTlVfxExposure, mnuTlVfxGamma, mnuTlVfxAutolevels, mnuTlVfxWhitebalance,
+    mnuTlVfxSwaprb, mnuTlVfxSolarize, mnuTlVfxThreshold, mnuTlVfxBleach, mnuTlVfxCrossprocess, mnuTlVfxTealorange,
+    mnuTlVfxSplittone, mnuTlVfxFalsecolor, mnuTlVfxThermal, mnuTlVfxNightvision, mnuTlVfxContrastpop, mnuTlVfxColorcompress,
+    mnuTlVfxMatte, mnuTlVfxCyanotype, mnuTlVfxColorpalette, mnuTlVfxDespill, mnuTlVfxFilmlook, mnuTlVfxGrpLight,
+    mnuTlVfxVignette, mnuTlVfxGlow, mnuTlVfxBloom, mnuTlVfxHalation, mnuTlVfxCinematichaze, mnuTlVfxLightrays,
+    mnuTlVfxLensflare, mnuTlVfxStarglow, mnuTlVfxSpotlight, mnuTlVfxLightleak, mnuTlVfxStrobe, mnuTlVfxFlicker,
+    mnuTlVfxGrpStylize, mnuTlVfxSketch, mnuTlVfxEmboss, mnuTlVfxEdgedetect, mnuTlVfxPencil, mnuTlVfxCartoon,
+    mnuTlVfxOilpaint, mnuTlVfxWatercolor, mnuTlVfxHalftone, mnuTlVfxAnaglyph, mnuTlVfxAbstraction, mnuTlVfxXray,
+    mnuTlVfxDither, mnuTlVfxShrink, mnuTlVfxGrow, mnuTlVfxJpegdamage, mnuTlVfxGrpTexture, mnuTlVfxGrain,
+    mnuTlVfxScanlines, mnuTlVfxNoise, mnuTlVfxFilmdamage, mnuTlVfxOldfilm, mnuTlVfxCanvas, mnuTlVfxCrt,
+    mnuTlVfxGrpTransform, mnuTlVfxMirror, mnuTlVfxFlipv, mnuTlVfxFliph, mnuTlVfxMirrorv, mnuTlVfxMirror4,
+    mnuTlVfxKaleido, mnuTlVfxTile, mnuTlVfxRot90, mnuTlVfxRot180, mnuTlVfxRot270, mnuTlVfxZoomcrop,
+    mnuTlVfxKeystone, mnuTlVfxGrpWarp, mnuTlVfxBulge, mnuTlVfxPinch, mnuTlVfxBarrel, mnuTlVfxFisheye,
+    mnuTlVfxSwirl, mnuTlVfxVortex, mnuTlVfxRipple, mnuTlVfxWave, mnuTlVfxMagnify, mnuTlVfxHeathaze,
+    mnuTlVfxUnderwater, mnuTlVfxGrpGlitch, mnuTlVfxGlitch, mnuTlVfxRgbsplit, mnuTlVfxChromatic, mnuTlVfxVhs,
+    mnuTlVfxBlockglitch, mnuTlVfxTvstatic, mnuTlVfxInterlace, mnuTlVfxGrpRevival, mnuTlVfxDenoise, mnuTlVfxDespeckle,
+    mnuTlVfxDeadpixel, mnuTlVfxDeband, mnuTlVfxDehaze, mnuTlVfxGrpBeauty, mnuTlVfxSoftskin, mnuTlVfxGlamour,
+    mnuTlVfxGrpGenerate, mnuTlVfxLetterbox, mnuTlVfxBorder, mnuTlVfxGradient, mnuTlVfxGrid, mnuTlVfxColorbars,
+    mnuTlVfxCheckerboard, mnuTlVfxSolid, mnuTlVfxFastnoise, mnuTlVfxGrpCameraMotion, mnuTlVfxShake, mnuTlVfxSlowzoom,
+    mnuTlVfxSpin, mnuTlVfxPulse, mnuTlVfxSlowzoomout, mnuTlVfxPanleft, mnuTlVfxPanright, mnuTlVfxPanup,
+    mnuTlVfxPandown, mnuTlVfxKenburns, mnuTlVfxDutch, mnuTlVfxHandheld, mnuTlVfxBounce, mnuTlVfxEarthquake,
+    mnuTlVfxSep, mnuTlVfxRemove: TMenuItem;
+    pmTlVideoEffects, pmTlVfxTransitions, pmTlVfxGrpDissolve, pmTlVfxCrossfade, pmTlVfxDipblack, pmTlVfxDipwhite,
+    pmTlVfxBlurdissolve, pmTlVfxPixeldissolve, pmTlVfxAdditive, pmTlVfxNonadditive, pmTlVfxDitherdissolve, pmTlVfxBurnaway,
+    pmTlVfxGrpIris, pmTlVfxCircleopen, pmTlVfxCircleclose, pmTlVfxIrisbox, pmTlVfxIrisdiamond, pmTlVfxIrisoval,
+    pmTlVfxIriscross, pmTlVfxGrpWipe, pmTlVfxWipeleft, pmTlVfxWiperight, pmTlVfxWipeup, pmTlVfxWipedown,
+    pmTlVfxClock, pmTlVfxBarndoor, pmTlVfxBandwipe, pmTlVfxVenetian, pmTlVfxVenetianv, pmTlVfxCheckerwipe,
+    pmTlVfxDiagwipe, pmTlVfxDiagwipe2, pmTlVfxPinwheel, pmTlVfxFanwipe, pmTlVfxSpiralwipe, pmTlVfxZigzagwipe,
+    pmTlVfxXwipe, pmTlVfxBlockwipe, pmTlVfxInsetwipe, pmTlVfxLumawipe, pmTlVfxGrpMotion, pmTlVfxSlideleft,
+    pmTlVfxSlideright, pmTlVfxSlideup, pmTlVfxSlidedown, pmTlVfxZoomin, pmTlVfxZoomout, pmTlVfxGlitchtrans,
+    pmTlVfxCoverleft, pmTlVfxCoverright, pmTlVfxCoverup, pmTlVfxCoverdown, pmTlVfxSplith, pmTlVfxSplitv,
+    pmTlVfxSqueezeh, pmTlVfxSqueezev, pmTlVfxCardflipx, pmTlVfxCardflipy, pmTlVfxSpintrans, pmTlVfxWhippan,
+    pmTlVfxRippletrans, pmTlVfxSwirltrans, pmTlVfxZoomblurtrans, pmTlVfxBandslide, pmTlVfxGrpShape, pmTlVfxShapeheart,
+    pmTlVfxShapestar, pmTlVfxShapetriup, pmTlVfxShapetridown, pmTlVfxShapetrileft, pmTlVfxShapetriright, pmTlVfxShapepentagon,
+    pmTlVfxShapehexagon, pmTlVfxFilters, pmTlVfxGrpFade, pmTlVfxFadein, pmTlVfxFadeout, pmTlVfxFlash,
+    pmTlVfxBlurin, pmTlVfxBlurout, pmTlVfxGrpBlur, pmTlVfxBlur, pmTlVfxPixelate, pmTlVfxGaussian,
+    pmTlVfxMotionblur, pmTlVfxDirectionalblur, pmTlVfxRadialblur, pmTlVfxZoomblur, pmTlVfxLensblur, pmTlVfxTiltshift,
+    pmTlVfxPrismblur, pmTlVfxSoftfocus, pmTlVfxGrpSharpen, pmTlVfxSharpen, pmTlVfxUnsharp, pmTlVfxUltrasharp,
+    pmTlVfxSharpenedge, pmTlVfxEdgeenhance, pmTlVfxClarity, pmTlVfxTexturepop, pmTlVfxGrpColour, pmTlVfxBw,
+    pmTlVfxSepia, pmTlVfxInvert, pmTlVfxDuotone, pmTlVfxTint, pmTlVfxWarm, pmTlVfxCool,
+    pmTlVfxBrighten, pmTlVfxDarken, pmTlVfxContrast, pmTlVfxVivid, pmTlVfxDesaturate, pmTlVfxPosterize,
+    pmTlVfxHueshift, pmTlVfxHuecycle, pmTlVfxExposure, pmTlVfxGamma, pmTlVfxAutolevels, pmTlVfxWhitebalance,
+    pmTlVfxSwaprb, pmTlVfxSolarize, pmTlVfxThreshold, pmTlVfxBleach, pmTlVfxCrossprocess, pmTlVfxTealorange,
+    pmTlVfxSplittone, pmTlVfxFalsecolor, pmTlVfxThermal, pmTlVfxNightvision, pmTlVfxContrastpop, pmTlVfxColorcompress,
+    pmTlVfxMatte, pmTlVfxCyanotype, pmTlVfxColorpalette, pmTlVfxDespill, pmTlVfxFilmlook, pmTlVfxGrpLight,
+    pmTlVfxVignette, pmTlVfxGlow, pmTlVfxBloom, pmTlVfxHalation, pmTlVfxCinematichaze, pmTlVfxLightrays,
+    pmTlVfxLensflare, pmTlVfxStarglow, pmTlVfxSpotlight, pmTlVfxLightleak, pmTlVfxStrobe, pmTlVfxFlicker,
+    pmTlVfxGrpStylize, pmTlVfxSketch, pmTlVfxEmboss, pmTlVfxEdgedetect, pmTlVfxPencil, pmTlVfxCartoon,
+    pmTlVfxOilpaint, pmTlVfxWatercolor, pmTlVfxHalftone, pmTlVfxAnaglyph, pmTlVfxAbstraction, pmTlVfxXray,
+    pmTlVfxDither, pmTlVfxShrink, pmTlVfxGrow, pmTlVfxJpegdamage, pmTlVfxGrpTexture, pmTlVfxGrain,
+    pmTlVfxScanlines, pmTlVfxNoise, pmTlVfxFilmdamage, pmTlVfxOldfilm, pmTlVfxCanvas, pmTlVfxCrt,
+    pmTlVfxGrpTransform, pmTlVfxMirror, pmTlVfxFlipv, pmTlVfxFliph, pmTlVfxMirrorv, pmTlVfxMirror4,
+    pmTlVfxKaleido, pmTlVfxTile, pmTlVfxRot90, pmTlVfxRot180, pmTlVfxRot270, pmTlVfxZoomcrop,
+    pmTlVfxKeystone, pmTlVfxGrpWarp, pmTlVfxBulge, pmTlVfxPinch, pmTlVfxBarrel, pmTlVfxFisheye,
+    pmTlVfxSwirl, pmTlVfxVortex, pmTlVfxRipple, pmTlVfxWave, pmTlVfxMagnify, pmTlVfxHeathaze,
+    pmTlVfxUnderwater, pmTlVfxGrpGlitch, pmTlVfxGlitch, pmTlVfxRgbsplit, pmTlVfxChromatic, pmTlVfxVhs,
+    pmTlVfxBlockglitch, pmTlVfxTvstatic, pmTlVfxInterlace, pmTlVfxGrpRevival, pmTlVfxDenoise, pmTlVfxDespeckle,
+    pmTlVfxDeadpixel, pmTlVfxDeband, pmTlVfxDehaze, pmTlVfxGrpBeauty, pmTlVfxSoftskin, pmTlVfxGlamour,
+    pmTlVfxGrpGenerate, pmTlVfxLetterbox, pmTlVfxBorder, pmTlVfxGradient, pmTlVfxGrid, pmTlVfxColorbars,
+    pmTlVfxCheckerboard, pmTlVfxSolid, pmTlVfxFastnoise, pmTlVfxGrpCameraMotion, pmTlVfxShake, pmTlVfxSlowzoom,
+    pmTlVfxSpin, pmTlVfxPulse, pmTlVfxSlowzoomout, pmTlVfxPanleft, pmTlVfxPanright, pmTlVfxPanup,
+    pmTlVfxPandown, pmTlVfxKenburns, pmTlVfxDutch, pmTlVfxHandheld, pmTlVfxBounce, pmTlVfxEarthquake,
+    pmTlVfxSep, pmTlVfxRemove: TMenuItem;
     mnuTlFxFadeIn, mnuTlFxFadeOut, pmTlFxFadeIn, pmTlFxFadeOut: TMenuItem;
     mnuTlFxBalance, mnuTlFxBassEnhance, mnuTlFxDCOffsetRemover, mnuTlFxExciter, mnuTlFxHighPassFilter, mnuTlFxLowPassFilter, mnuTlFxMakeMono, mnuTlFxMultibandCompressor, mnuTlFxNotchFilter, mnuTlFxPitchShift, mnuTlFxPresenceBoost, mnuTlFxStereoWidener, mnuTlFxTransientShaper, mnuTlFxTrebleBoost, pmTlFxBalance, pmTlFxBassEnhance, pmTlFxDCOffsetRemover, pmTlFxExciter, pmTlFxHighPassFilter, pmTlFxLowPassFilter, pmTlFxMakeMono, pmTlFxMultibandCompressor, pmTlFxNotchFilter, pmTlFxPitchShift, pmTlFxPresenceBoost, pmTlFxStereoWidener, pmTlFxTransientShaper, pmTlFxTrebleBoost: TMenuItem;
     mnuTlFxAmplify, mnuTlFxDeEsser, mnuTlFxDelay, mnuTlFxExpander, mnuTlFxFoldback, mnuTlFxGate, mnuTlFxHardClip, mnuTlFxLimiter, mnuTlFxPingPongDelay, pmTlFxAmplify, pmTlFxDeEsser, pmTlFxDelay, pmTlFxExpander, pmTlFxFoldback, pmTlFxGate, pmTlFxHardClip, pmTlFxLimiter, pmTlFxPingPongDelay: TMenuItem;
     mnuTlFxNoiseReduction, mnuTlFxAutoTune, mnuTlFxConvolutionReverb, mnuTlFxSplitStems, mnuTlFxAudioToMidi, pmTlFxNoiseReduction, pmTlFxAutoTune, pmTlFxConvolutionReverb, pmTlFxSplitStems, pmTlFxAudioToMidi: TMenuItem;
     mnuTlFxTube, mnuTlFxSoftClip, pmTlFxTube, pmTlFxSoftClip: TMenuItem;
+    mnuTlFxLoudnessNormalize, mnuTlFxBandPassFilter, mnuTlFxLoFi, mnuTlFxRingModulator, mnuTlFxVibrato, mnuTlFxEcho,
+    mnuTlFxSlapbackDelay, mnuTlFxHallReverb, mnuTlFxRoomReverb, mnuTlFxPlateReverb, mnuTlFxSwapChannels, mnuTlFxInvertPhase,
+    mnuTlFxDeHummer50, mnuTlFxDeHummer60, mnuTlFxDeClicker, mnuTlFxDeClipper, mnuTlFxGrpVoice, mnuTlFxVocalChannel,
+    mnuTlFxDialogueLeveler, mnuTlFxTelephone, pmTlFxLoudnessNormalize, pmTlFxBandPassFilter, pmTlFxLoFi, pmTlFxRingModulator,
+    pmTlFxVibrato, pmTlFxEcho, pmTlFxSlapbackDelay, pmTlFxHallReverb, pmTlFxRoomReverb, pmTlFxPlateReverb,
+    pmTlFxSwapChannels, pmTlFxInvertPhase, pmTlFxDeHummer50, pmTlFxDeHummer60, pmTlFxDeClicker, pmTlFxDeClipper,
+    pmTlFxGrpVoice, pmTlFxVocalChannel, pmTlFxDialogueLeveler, pmTlFxTelephone: TMenuItem;
+    mnuTlFxGrpVolume, mnuTlFxGrpDynamics, mnuTlFxGrpEQ, mnuTlFxGrpDistortion, mnuTlFxGrpModulation, mnuTlFxGrpTimeSpace, mnuTlFxGrpPitch, mnuTlFxGrpStereo, mnuTlFxGrpRestore, mnuTlFxGrpTools, pmTlFxGrpVolume, pmTlFxGrpDynamics, pmTlFxGrpEQ, pmTlFxGrpDistortion, pmTlFxGrpModulation, pmTlFxGrpTimeSpace, pmTlFxGrpPitch, pmTlFxGrpStereo, pmTlFxGrpRestore, pmTlFxGrpTools, mnuTlFxSepUndo, pmTlFxSepUndo, mnuTlFxPlugin, pmTlFxPlugin, mnuTlFxEditLane, pmTlFxEditLane: TMenuItem;
+    mnuTlFxStereoFixer, mnuTlFxMidSideBalance, mnuTlFxHeadphoneCrossfeed, mnuTlFxLFEFilter, mnuTlFxSubBassSynth, mnuTlFxFrequencyShifter, mnuTlFxAutoWah, mnuTlFxRobotVoice, mnuTlFxMegaphone, mnuTlFxUnderwater, mnuTlFxTapeStop, mnuTlFxTranceGate, mnuTlFxRotarySpeaker, mnuTlFxVinylCrackle, mnuTlFxCombFilter, mnuTlFxPeakNormalize: TMenuItem;
+    pmTlFxStereoFixer, pmTlFxMidSideBalance, pmTlFxHeadphoneCrossfeed, pmTlFxLFEFilter, pmTlFxSubBassSynth, pmTlFxFrequencyShifter, pmTlFxAutoWah, pmTlFxRobotVoice, pmTlFxMegaphone, pmTlFxUnderwater, pmTlFxTapeStop, pmTlFxTranceGate, pmTlFxRotarySpeaker, pmTlFxVinylCrackle, pmTlFxCombFilter, pmTlFxPeakNormalize: TMenuItem;
+    mnuTlFxVocoder, pmTlFxVocoder: TMenuItem;
+    mnuTlFxWahWah, mnuTlFxAutoFilter, mnuTlFxVowelAh, mnuTlFxVowelEh, mnuTlFxVowelEe, mnuTlFxVowelOh, mnuTlFxVowelOo, mnuTlFxTiltBrighter, mnuTlFxTiltDarker, mnuTlFxHaasWidener, mnuTlFxMonoBass, mnuTlFxVocalRemover, mnuTlFxTapeWowFlutter, mnuTlFxAMRadio, mnuTlFxFuzz, mnuTlFxOctaveUpRectifier, mnuTlFxStringEnsemble, mnuTlFxStutter, mnuTlFxMultiTapDelay, mnuTlFxTapeDelay, mnuTlFxParallelCompression: TMenuItem;
+    pmTlFxWahWah, pmTlFxAutoFilter, pmTlFxVowelAh, pmTlFxVowelEh, pmTlFxVowelEe, pmTlFxVowelOh, pmTlFxVowelOo, pmTlFxTiltBrighter, pmTlFxTiltDarker, pmTlFxHaasWidener, pmTlFxMonoBass, pmTlFxVocalRemover, pmTlFxTapeWowFlutter, pmTlFxAMRadio, pmTlFxFuzz, pmTlFxOctaveUpRectifier, pmTlFxStringEnsemble, pmTlFxStutter, pmTlFxMultiTapDelay, pmTlFxTapeDelay, pmTlFxParallelCompression: TMenuItem;
+    mnuTlFxGrpToneFilters, pmTlFxGrpToneFilters: TMenuItem;
+    mnuTlFxLoudnessReport, pmTlFxLoudnessReport: TMenuItem;
+    mnuMixMeters, mnuTlMeters, pmMixMeters, mnuTlFoley: TMenuItem;
+    mnuTlFxVoiceIsolation, mnuTlFxMusicSeparator, mnuTlFxSplitSpeechMusic: TMenuItem;
+    pmTlFxVoiceIsolation, pmTlFxMusicSeparator, pmTlFxSplitSpeechMusic: TMenuItem;
+    mnuTlFxDePopper, mnuTlFxAdaptiveNoiseReduction, mnuTlFxLevelRider, mnuTlFxDialogRider, mnuTlFxTruePeakLimiter, mnuTlFxOversampledSaturation, mnuTlFxFadeInSCurve, mnuTlFxFadeInEqualPower, mnuTlFxFadeInExponential, mnuTlFxFadeInLogarithmic, mnuTlFxFadeOutSCurve, mnuTlFxFadeOutEqualPower, mnuTlFxFadeOutExponential, mnuTlFxFadeOutLogarithmic: TMenuItem;
+    pmTlFxDePopper, pmTlFxAdaptiveNoiseReduction, pmTlFxLevelRider, pmTlFxDialogRider, pmTlFxTruePeakLimiter, pmTlFxOversampledSaturation, pmTlFxFadeInSCurve, pmTlFxFadeInEqualPower, pmTlFxFadeInExponential, pmTlFxFadeInLogarithmic, pmTlFxFadeOutSCurve, pmTlFxFadeOutEqualPower, pmTlFxFadeOutExponential, pmTlFxFadeOutLogarithmic: TMenuItem;
+    mnuTlFxGrpCreative, mnuTlFxGrpStereoBass, pmTlFxGrpCreative, pmTlFxGrpStereoBass: TMenuItem;
     mnuTlFxCompressor: TMenuItem;
     mnuTlFxReverb: TMenuItem;
     mnuTlFxChorus: TMenuItem;
@@ -655,6 +819,92 @@ type
     mnuTlExportFlac: TMenuItem;
     mnuTlExportSep: TMenuItem;
     pmTlEffect: TPopupMenu;
+    pnlTlDock: TGLPanel;
+    pgcDock: TGLPageControl;
+    splTlDock: TGLSplitter;
+    pnlTlViews: TGLPanel;
+    pnlTlMode: TGLPanel;
+    tsTlMode: TGLTabStrip;
+    pnlTlRight: TGLPanel;
+    tsTlRight: TGLTabStrip;
+    edtTlRightSearch: TGLEdit;
+    lblTlRightHint: TGLLabel;
+    trTlRight: TGLTree;
+    tabScore: TGLPage;
+    tabInst: TGLPage;
+    lblDrumTitle: TGLLabel;
+    lblDrumHint: TGLLabel;
+    pbDrumPads: TGLView;
+    sbDrumPanels: TGLScrollBox;
+    lblDrumEmpty: TGLLabel;
+    pbDrumMap: TGLView;
+    sbDrumRange: TGLScrollBar;
+    tabPattern: TGLPage;
+    pnlPatTop: TGLPanel;
+    cboPatSel: TGLCombo;
+    ibPatFile: TGLIconBar;
+    ibPatPlay: TGLIconBar;
+    ibPatPlace: TGLIconBar;
+    lblPatName: TGLLabel;
+    edtPatName: TGLEdit;
+    lblPatLen: TGLLabel;
+    ibPatLen: TGLIconBar;
+    lblPatLenVal: TGLLabel;
+    lblPatBars: TGLLabel;
+    tsPatRes: TGLTabStrip;
+    cboPatAdd: TGLCombo;
+    ibPatRow: TGLIconBar;
+    ibPatTools: TGLIconBar;
+    lblPatInfo: TGLLabel;
+    sbPatV: TGLScrollBar;
+    sbPatH: TGLScrollBar;
+    pbPattern: TGLView;
+    dlgOpenPattern: TGLOpenDialog;
+    dlgSavePattern: TGLSaveDialog;
+    pnlScoreParts: TGLPanel;
+    pnlScorePartsHead: TGLPanel;
+    pnlScorePartsFoot: TGLPanel;
+    pnlKeyHooksFoot: TGLPanel;
+    lblScoreParts: TGLLabel;
+    lblScoreCount: TGLLabel;
+    btnScoreSel: TGLButton;
+    btnScoreFull: TGLButton;
+    btnScoreChords: TGLButton;
+    btnScoreTab: TGLButton;
+    lstScoreParts: TGLList;
+    btnScoreAll: TGLButton;
+    btnScoreNone: TGLButton;
+    pnlScoreTop: TGLPanel;
+    tsScoreClef: TGLTabStrip;
+    lblScoreQuant: TGLLabel;
+    cboScoreQuant: TGLCombo;
+    ibScoreTools: TGLIconBar;
+    pnlScoreTrk: TGLPanel;
+    lblScoreTrk: TGLLabel;
+    tsScoreTrkBy: TGLTabStrip;
+    lstScoreTrk: TGLList;
+    btnScoreTrkAll: TGLButton;
+    btnScoreTrkNone: TGLButton;
+    dlgOpenTrkAny: TGLOpenDialog;
+    dlgSaveScorePdf: TGLSaveDialog;
+    lblScoreZoom: TGLLabel;
+    sbScore: TGLScrollBar;
+    sbScoreH: TGLScrollBar;
+    pbScore: TGLView;
+    lblTlArr: TGLLabel;
+    ibTlTools: TGLIconBar;
+    bvlTlSep5: TGLBevel;
+    pnlTlHeaders: TTlHeaderHost;
+    ibTlStage: TGLIconBar;
+    mnuTlDock, mnuTlDockMixer, mnuTlDockPiano, mnuTlDockTracker, mnuTlDockRecord,
+      mnuTlDockSep, mnuTlDockHide: TMenuItem;
+    pmTlMarker: TPopupMenu;
+    pmMkRename, pmMkDelete: TMenuItem;
+    bvlTlSep4: TGLBevel;
+    cboTlStageQuant: TGLCombo;
+    pmTlStage: TPopupMenu;
+    pmStgDeleteSegment, pmStgCopySegment, pmStgPasteSegment, pmStgLooping, pmStgContinuous: TMenuItem;
+    pmStgLaunch, pmStgSep, pmStgAdd, pmStgRename, pmStgSetRange, pmStgDelete: TMenuItem;
     pmTlEffTitle: TMenuItem;
     pmTlEffSepA: TMenuItem;
     pmTlEffEdit: TMenuItem;
@@ -724,6 +974,7 @@ type
     pmTlEditCat: TMenuItem;
     pmTlAddTrack: TMenuItem;
     pmTlRenameTrack: TMenuItem;
+    pmTlCreateScore, pmTlSepTools: TMenuItem;
     pmTlSep6: TMenuItem;
     pmTlLoop: TMenuItem;
     pmTlLoopStart: TMenuItem;
@@ -773,54 +1024,51 @@ type
     pmTlrUndo: TMenuItem;
     pmTlrRedo: TMenuItem;
     pmTlrHistory: TMenuItem;
-    pnlTimelineReadout: TPanel;
-    memTimeline: TMemo;
-    sbTlHorz: TScrollBar;
-    sbTlVert: TScrollBar;
-    pbTimeline: TWheelPaintBox;
-    pbTlMeters: TPaintBox;
-    pnlTlVideo: TPanel;
-    pnlTlVideoFx: TPanel;        // shows the effect-processed picture over the video pane while the playhead is inside an effect
-    pbTlVideoFx: TPaintBox;
-    tabRecording: TTabSheet;
-    pnlRecTop: TPanel;
-    lblRecChannels: TLabel;
-    cboRecChannels: TComboBox;
-    lblRecFormat: TLabel;
-    cboRecFormat: TComboBox;
-    lblRecDuration: TLabel;
-    edtRecDuration: TEdit;
-    lblRecPunch: TLabel;
-    cboRecPunch: TComboBox;
-    lblRecPunchIn: TLabel;
-    edtRecPunchIn: TEdit;
-    lblRecPunchOut: TLabel;
-    edtRecPunchOut: TEdit;
-    lblRecPreRoll: TLabel;
-    edtRecPreRoll: TEdit;
-    lblRecCountIn: TLabel;
-    edtRecCountIn: TEdit;
-    chkRecLoop: TCheckBox;
-    lblRecLoopStart: TLabel;
-    edtRecLoopStart: TEdit;
-    lblRecLoopEnd: TLabel;
-    edtRecLoopEnd: TEdit;
-    chkRecMonitor: TCheckBox;
-    btnRecArm: TButton;
-    btnRecCommit: TButton;
-    btnRecScan: TButton;
-    btnRecSaved: TButton;
-    btnRecSaveTake: TButton;
-    btnRecAddTakeToTimeline: TButton;
-    btnRecCommitComp: TButton;
-    btnRecResetComp: TButton;
-    lblRecDestination: TLabel;
-    lblRecMicState: TLabel;
-    dlgRecSaved: TOpenDialog;
-    dlgRecSaveTake: TSaveDialog;
-    pnlRecReadout: TPanel;
-    memRec: TMemo;
-    pbRecTakes: TPaintBox;
+    memTimeline: TLogSink;
+    sbTlHorz: TGLScrollBar;
+    sbTlVert: TGLScrollBar;
+    pbTimeline: TGLView;
+    pbTlMeters: TGLView;
+    pnlTlVideo: TGLPanel;
+    pnlTlVideoFx: TGLPanel;        // shows the effect-processed picture over the video pane while the playhead is inside an effect
+    pbTlVideoFx: TGLView;
+    tabRecording: TGLPage;
+    sbRecording: TGLScrollBox;
+    grpRecSetup: TGLGroup;
+    grpRecControl: TGLGroup;
+    grpRecTakes: TGLGroup;
+    lblRecFormat: TGLLabel;
+    cboRecFormat: TGLCombo;
+    lblRecPunch: TGLLabel;
+    cboRecPunch: TGLCombo;
+    lblRecPunchIn: TGLLabel;
+    edtRecPunchIn: TGLEdit;
+    lblRecPunchOut: TGLLabel;
+    edtRecPunchOut: TGLEdit;
+    lblRecPreRoll: TGLLabel;
+    edtRecPreRoll: TGLEdit;
+    lblRecCountIn: TGLLabel;
+    edtRecCountIn: TGLEdit;
+    chkRecLoop: TGLCheck;
+    lblRecLoopStart: TGLLabel;
+    edtRecLoopStart: TGLEdit;
+    lblRecLoopEnd: TGLLabel;
+    edtRecLoopEnd: TGLEdit;
+    chkRecMonitor: TGLCheck;
+    btnRecArm: TGLButton;
+    btnRecCommit: TGLButton;
+    btnRecScan: TGLButton;
+    btnRecSaved: TGLButton;
+    btnRecSaveTake: TGLButton;
+    btnRecAddTakeToTimeline: TGLButton;
+    btnRecCommitComp: TGLButton;
+    btnRecResetComp: TGLButton;
+    lblRecDestination: TGLLabel;
+    lblRecMicState: TGLLabel;
+    dlgRecSaved: TGLOpenDialog;
+    dlgRecSaveTake: TGLSaveDialog;
+    memRec: TLogSink;
+    pbRecTakes: TGLView;
     mnuRecording: TMenuItem;
     mnuRecArm: TMenuItem;
     mnuRecCommit: TMenuItem;
@@ -829,20 +1077,20 @@ type
     pmRecArm: TMenuItem;
     pmRecCommit: TMenuItem;
     pmRecScan: TMenuItem;
-    tabSecure: TTabSheet;
-    lblSecureProvider: TLabel;
-    lblKey: TLabel;
-    edtKey: TEdit;
-    lblValue: TLabel;
-    edtValue: TEdit;
-    memSecure: TMemo;
-    btnSecStore: TButton;
-    btnSecRead: TButton;
-    btnSecDelete: TButton;
-    chkSecReveal: TCheckBox;
-    btnSecSeal: TButton;
-    btnSecVerify: TButton;
-    btnSecProbe: TButton;
+    tabSecure: TGLPage;
+    lblSecureProvider: TGLLabel;
+    lblKey: TGLLabel;
+    edtKey: TGLEdit;
+    lblValue: TGLLabel;
+    edtValue: TGLEdit;
+    memSecure: TLogSink;
+    btnSecStore: TGLButton;
+    btnSecRead: TGLButton;
+    btnSecDelete: TGLButton;
+    chkSecReveal: TGLCheck;
+    btnSecSeal: TGLButton;
+    btnSecVerify: TGLButton;
+    btnSecProbe: TGLButton;
     mnuSecure: TMenuItem;
     mnuSecretSet: TMenuItem;
     mnuSecretGet: TMenuItem;
@@ -851,51 +1099,97 @@ type
     pmSecretSet: TMenuItem;
     pmSecretGet: TMenuItem;
     pmSecretDelete: TMenuItem;
-    tabMixer: TTabSheet;
-    pnlMixTop: TPanel;
-    lblMixStrip: TLabel;
-    cboMixStrip: TComboBox;
-    lblMixTrackLink: TLabel;
-    cboMixTrackLink: TComboBox;
-    lblMixFader: TLabel;
-    edtMixFader: TEdit;
-    lblMixPan: TLabel;
-    edtMixPan: TEdit;
-    chkMixMute: TCheckBox;
-    chkMixSolo: TCheckBox;
-    lblMixRoute: TLabel;
-    cboMixRoute: TComboBox;
-    cboMixInsertKind: TComboBox;
-    btnMixAddVST: TButton;
+    tabMixer: TGLPage;
+    pnlMixTop: TGLPanel;
+    lblMixStrip: TGLLabel;
+    cboMixStrip: TGLCombo;
+    lblMixTrackLink: TGLLabel;
+    cboMixTrackLink: TGLCombo;
+    lblMixFader: TGLLabel;
+    edtMixFader: TGLEdit;
+    lblMixPan: TGLLabel;
+    edtMixPan: TGLEdit;
+    chkMixMute: TGLCheck;
+    chkMixSolo: TGLCheck;
+    lblMixRoute: TGLLabel;
+    cboMixRoute: TGLCombo;
+    cboMixInsertKind: TGLCombo;
+    btnMixAddVST: TGLButton;
     mnuMixModulation, mnuMixModLFO, mnuMixModRandom, mnuMixModSteps, mnuMixModFollower, mnuMixModMacro, mnuMixModRoute, mnuMixModList, mnuMixModClear: TMenuItem;
-    btnMixEditVST: TButton;
-    lblMixAutoParam: TLabel;
-    cboMixAutoParam: TComboBox;
-    cboMixAutoMode: TComboBox;
-    lblMixZoom: TLabel;
-    tbMixZoom: TTrackBar;
-    lblMixMasterLoudness: TLabel;
-    lblMixMeterHold: TLabel;
-    lblMixMeterDecay: TLabel;
-    edtMixMeterHold: TEdit;
-    edtMixMeterDecay: TEdit;
-    btnMixMeterApply: TButton;
+    btnMixEditVST: TGLButton;
+    lblMixAutoParam: TGLLabel;
+    cboMixAutoParam: TGLCombo;
+    cboMixAutoMode: TGLCombo;
+    lblMixZoom: TGLLabel;
+    tbMixZoom: TGLTrackBar;
+    pnlMixEq: TGLCollapsePanel;
+    sbMixEq01: TGLEqSlider;
+    lblMixEq01: TGLLabel;
+    sbMixEq02: TGLEqSlider;
+    lblMixEq02: TGLLabel;
+    sbMixEq03: TGLEqSlider;
+    lblMixEq03: TGLLabel;
+    sbMixEq04: TGLEqSlider;
+    lblMixEq04: TGLLabel;
+    sbMixEq05: TGLEqSlider;
+    lblMixEq05: TGLLabel;
+    sbMixEq06: TGLEqSlider;
+    lblMixEq06: TGLLabel;
+    sbMixEq07: TGLEqSlider;
+    lblMixEq07: TGLLabel;
+    sbMixEq08: TGLEqSlider;
+    lblMixEq08: TGLLabel;
+    sbMixEq09: TGLEqSlider;
+    lblMixEq09: TGLLabel;
+    sbMixEq10: TGLEqSlider;
+    lblMixEq10: TGLLabel;
+    sbMixEq11: TGLEqSlider;
+    lblMixEq11: TGLLabel;
+    sbMixEq12: TGLEqSlider;
+    lblMixEq12: TGLLabel;
+    sbMixEq13: TGLEqSlider;
+    lblMixEq13: TGLLabel;
+    sbMixEq14: TGLEqSlider;
+    lblMixEq14: TGLLabel;
+    sbMixEq15: TGLEqSlider;
+    lblMixEq15: TGLLabel;
+    sbMixEq16: TGLEqSlider;
+    lblMixEq16: TGLLabel;
+    chkMixEqOn: TGLCheck;
+    cboMixEqPreset: TGLCombo;
+    ibMixEqPreset: TGLIconBar;
+    btnMixEqFlat: TGLButton;
+    lblMixMasterLoudness: TGLLabel;
+    lblMixMeterHold: TGLLabel;
+    lblMixMeterDecay: TGLLabel;
+    edtMixMeterHold: TGLEdit;
+    edtMixMeterDecay: TGLEdit;
+    btnMixMeterApply: TGLButton;
     { on-panel Mixer workflow row: Add/Remove insert, Apply strip, Undo/Redo
       were previously reachable only through the Mixer main menu or the
       pbMixer right-click popup (mnuMix.../pmMix...) - no visible button on
       the strip-editor panel itself did the single most common action (apply
       the chosen insert kind). These reuse those same existing OnClick
       handlers; nothing new was added to the command/mixer layer. }
-    btnMixAddInsertRow: TButton;
-    btnMixDelInsertRow: TButton;
-    btnMixApplyRow: TButton;
-    btnMixUndoRow: TButton;
-    btnMixRedoRow: TButton;
-    pbMixAuto: TPaintBox;
-    dlgOpenVst: TOpenDialog;
-    pnlMixReadout: TPanel;
-    memMix: TMemo;
-    pbMixer: TPaintBox;
+    pnlMixBar: TGLPanel;
+    ibMixBar: TGLIconBar;
+    bvlMixSep: TGLBevel;
+    sbMixH: TGLScrollBar;
+    cboMixView: TGLCombo;
+    pmMixInsert: TPopupMenu;
+    pmMixInsertEdit: TMenuItem;
+    pmMixInsertRemove: TMenuItem;
+    pmMixInsertUp: TMenuItem;
+    pmMixInsertDown: TMenuItem;
+    btnMixAddInsertRow: TGLButton;
+    btnMixDelInsertRow: TGLButton;
+    btnMixApplyRow: TGLButton;
+    btnMixUndoRow: TGLButton;
+    btnMixRedoRow: TGLButton;
+    pbMixAuto: TGLView;
+    dlgOpenVst: TGLOpenDialog;
+    memMix: TLogSink;
+    pbMixer: TGLView;
     mnuMixer: TMenuItem;
     mnuMixStrip: TMenuItem;
     mnuMixAddTrack: TMenuItem;
@@ -906,6 +1200,7 @@ type
     mnuMixApply: TMenuItem;
     mnuMixInsert: TMenuItem;
     mnuMixAddInsert: TMenuItem;
+    mnuMixLoadPlugin: TMenuItem;
     mnuMixDelInsert: TMenuItem;
     mnuMixEdit: TMenuItem;
     mnuMixUndo: TMenuItem;
@@ -922,52 +1217,49 @@ type
     pmMixApply: TMenuItem;
     pmMixSep2: TMenuItem;
     pmMixAddInsert: TMenuItem;
+    pmMixLoadPlugin: TMenuItem;
+    pmMixRoleMenu, pmRoleDialogue, pmRoleVoiceOver, pmRoleMusic, pmRoleSfx, pmRoleAmbience, pmRoleMaster: TMenuItem;
     pmMixDelInsert: TMenuItem;
     pmMixSep3: TMenuItem;
     pmMixUndo: TMenuItem;
     pmMixRedo: TMenuItem;
     pmMixSep4: TMenuItem;
     pmMixPreview: TMenuItem;
-    tabTracker: TTabSheet;
-    pnlTrkTop: TPanel;
-    lblTrkPattern: TLabel;
-    cboTrkPattern: TComboBox;
-    lblTrkSpeed: TLabel;
-    edtTrkSpeed: TEdit;
-    lblTrkBPM: TLabel;
-    edtTrkBPM: TEdit;
-    lblTrkNote: TLabel;
-    edtTrkNote: TEdit;
-    lblTrkInstr: TLabel;
-    edtTrkInstr: TEdit;
-    lblTrkVol: TLabel;
-    edtTrkVol: TEdit;
-    lblTrkEff: TLabel;
-    edtTrkEff: TEdit;
-    lblTrkParam: TLabel;
-    edtTrkParam: TEdit;
-    pnlTrkReadout: TPanel;
-    memTrk: TMemo;
-    pnlTrkSequence: TPanel;
-    lblTrkSeq: TLabel;
-    pbTrkSequence: TPaintBox;
-    sbTrkSeq: TScrollBar;
-    pbTracker: TWheelPaintBox;
-    sbTrkChn: TScrollBar;
-    pnlTrkSupport: TPanel;
-    lblTrkSupport: TLabel;
-    btnTrkSupport: TButton;
-    pgcTrk: TPageControl;
-    tsTrkModule: TTabSheet;
-    tsTrkInstruments: TTabSheet;
-    pnlTrkInstrTop: TPanel;
-    lblTrkInstrSel: TLabel;
-    cboTrkInstrSel: TComboBox;
-    btnTrkInstrAddTimeline: TButton;
-    btnTrkInstrSaveWav: TButton;
-    pnlTrkInstrInfo: TPanel;
-    lblTrkInstrInfo: TLabel;
-    pbTrkInstrWave: TWheelPaintBox;
+    tabTracker: TGLPage;
+    pnlTrkTop: TGLPanel;
+    lblTrkPattern: TGLLabel;
+    cboTrkPattern: TGLCombo;
+    lblTrkSpeed: TGLLabel;
+    edtTrkSpeed: TGLEdit;
+    lblTrkBPM: TGLLabel;
+    edtTrkBPM: TGLEdit;
+    memTrk: TLogSink;
+    pnlTrkSequence: TGLPanel;
+    pbTrkSequence: TGLView;
+    sbTrkSeq: TGLScrollBar;
+    pbTracker: TGLView;
+    sbTrkChn: TGLScrollBar;
+    pnlTrkSupport: TGLPanel;
+    lblTrkSupport: TGLLabel;
+    btnTrkSupport: TGLButton;
+    pgcTrk: TGLPageControl;
+    tsTrkModule: TGLPage;
+    tsTrkInstruments: TGLPage;
+    pnlTrkInstrTop: TGLPanel;
+    lblTrkInstrSel: TGLLabel;
+    cboTrkInstrSel: TGLCombo;
+    ibTrkInstr: TGLIconBar;
+    lblTrkInstrPick: TGLLabel;
+    cboTrkInstr: TGLCombo;
+    pnlTrkTransport: TGLPanel;
+    ibTrkTransport: TGLIconBar;
+    btnTrkMidiRec: TGLButton;
+    pmTrkChanFx: TPopupMenu;
+    pmTrkChanFxEdit, pmTrkChanFxReplace, pmTrkChanFxRemove: TMenuItem;
+    tmrTrkAnim: TTimer;
+    pnlTrkInstrInfo: TGLPanel;
+    lblTrkInstrInfo: TGLLabel;
+    pbTrkInstrWave: TGLView;
     mnuTracker: TMenuItem;
     mnuTrkNew: TMenuItem;
     mnuTrkNewTracker: TMenuItem;
@@ -975,7 +1267,6 @@ type
     mnuTrkAddPattern: TMenuItem;
     mnuTrkDelPattern: TMenuItem;
     mnuTrkCell: TMenuItem;
-    mnuTrkSetCell: TMenuItem;
     mnuTrkClearCell: TMenuItem;
     mnuTrkFillDemo: TMenuItem;
     mnuTrkTransport: TMenuItem;
@@ -994,8 +1285,12 @@ type
     mnuTrkExportXm: TMenuItem;
     mnuTrkExportMptm: TMenuItem;
     pmTrkGrid: TPopupMenu;
-    pmTrkSetCell: TMenuItem;
     pmTrkClearCell: TMenuItem;
+    pmTrkCut, pmTrkCopy, pmTrkPaste, pmTrkDelete: TMenuItem;
+    pmTrkSelectAll, pmTrkSelectChannel: TMenuItem;
+    pmTrkTranspose: TMenuItem;
+    pmTrkTransUp, pmTrkTransDown, pmTrkOctUp, pmTrkOctDown: TMenuItem;
+    pmTrkEditSep: TMenuItem;
     pmTrkFillDemo: TMenuItem;
     pmTrkGridSep1: TMenuItem;
     pmTrkUndo: TMenuItem;
@@ -1004,144 +1299,149 @@ type
     pmTrkPlay: TMenuItem;
     pmTrkStop: TMenuItem;
     pmTrkSeq: TPopupMenu;
+    pmTrkGridExportRegion: TMenuItem;
+    mnuTrkExportRegion: TMenuItem;
+    pmTrkSeqExportRegion: TMenuItem;
     pmTrkAddPattern: TMenuItem;
     pmTrkDelPattern: TMenuItem;
-    dlgOpenMod: TOpenDialog;
-    dlgSaveMod: TSaveDialog;
-    dlgOpenXm: TOpenDialog;
-    dlgSaveXm: TSaveDialog;
-    dlgOpenMptm: TOpenDialog;
-    dlgSaveMptm: TSaveDialog;
-    stbMain: TStatusBar;
-    prgStatus: TProgressBar;
-    dlgOpenFlac: TOpenDialog;
-    dlgOpenAls: TOpenDialog;
-    dlgOpenFlp: TOpenDialog;
+    dlgOpenMod: TGLOpenDialog;
+    dlgSaveMod: TGLSaveDialog;
+    dlgOpenXm: TGLOpenDialog;
+    dlgSaveXm: TGLSaveDialog;
+    dlgOpenMptm: TGLOpenDialog;
+    dlgSaveMptm: TGLSaveDialog;
+    stbMain: TGLStatusBar;
+    prgStatus: TGLCapsuleProgress;
+    dlgOpenFlac: TGLOpenDialog;
+    dlgOpenAls: TGLOpenDialog;
+    dlgOpenFlp: TGLOpenDialog;
     tmrUI: TTimer;
-    tabBrowser: TTabSheet;
-    pnlBrowserTop: TPanel;
-    lblBrowserHint: TLabel;
-    btnBrowserAddFolder: TButton;
-    btnBrowserRefresh: TButton;
-    btnBrowserImport: TButton;
-    btnBrowserAddToSelected: TButton;
-    tvBrowser: TTreeView;
-    memBrowser: TMemo;
-    lblBrowserFloating: TLabel;
-    tabScope: TTabSheet;
-    pnlScopeTop: TPanel;
-    lblScopeSignal: TLabel;
-    lblScopeMode: TLabel;
-    cboScopeSignal: TComboBox;
-    cboScopeMode: TComboBox;
-    chkScopeLive: TCheckBox;
-    pnlScopeReadout: TPanel;
-    memScopeReadout: TMemo;
-    pbScope: TPaintBox;
-    tabAdvDsp: TTabSheet;
-    pnlAdvDspTop: TPanel;
-    lblAdvDspSignal: TLabel;
-    lblAdvDspProcess: TLabel;
-    lblAdvDspParam: TLabel;
-    cboAdvDspSignal: TComboBox;
-    cboAdvDspProcess: TComboBox;
-    edtAdvDspParam: TEdit;
-    memAdvDspReadout: TMemo;
-    tabAI: TTabSheet;
-    pcAiMain: TPageControl;
-    tsAiSelect: TTabSheet;
-    tsAiMcp: TTabSheet;
-    tsAiRecordings: TTabSheet;
-    tsAiLyrics: TTabSheet;
-    tsAiGeneration: TTabSheet;
-    lblAiProvider: TLabel;
-    lblAiKey: TLabel;
-    cboAiProvider: TComboBox;
-    edtAiApiKey: TEdit;
-    lblAiModel: TLabel;
-    cboAiModel: TComboBox;
-    lblAiMcpName: TLabel;
-    lblAiMcpCmd: TLabel;
-    edtAiMcpName: TEdit;
-    edtAiMcpCommand: TEdit;
-    lblAiMcpToken: TLabel;
-    edtAiMcpToken: TEdit;
-    btnAiMcpTest: TButton;
-    lblAiMcpHint: TLabel;
-    chkAiMcpExpose: TCheckBox;
-    lblAiMcpExposePort: TLabel;
-    edtAiMcpExposePort: TEdit;
-    chkAiMcpAllowDestructive: TCheckBox;
-    lblAiMcpBind: TLabel;
-    edtAiMcpBind: TEdit;
-    chkAiMcpTls: TCheckBox;
-    lblAiMcpTlsPort: TLabel;
-    edtAiMcpTlsPort: TEdit;
-    lblAiMcpCert: TLabel;
-    edtAiMcpCert: TEdit;
-    lblAiMcpKey: TLabel;
-    edtAiMcpKey: TEdit;
-    btnAiMcpTestLocal: TButton;
-    btnAiMcpTestTls: TButton;
-    edtAiMcpTestUrl: TEdit;
-    chkAiMcpSelfSigned: TCheckBox;
-    memAiMcpProviders: TMemo;
-    lstAiMcpServers: TListBox;
-    splAiLog: TSplitter;
-    memAiLog: TMemo;
-    btnAiSave: TButton;
-    btnAiTest: TButton;
-    btnAiDelete: TButton;
-    pnlAiChat: TPanel;
-    edtAiPrompt: TEdit;
-    btnAiSend: TButton;
-    btnAiClear: TButton;
-    btnAiGenerateTune: TButton;
-    pnlAiSuno: TPanel;
-    pnlAiLuma: TPanel;
+    tmrTlEffMenu: TTimer;
+    tabBrowser: TGLPage;
+    pnlBrowserTop: TGLPanel;
+    lblBrowserHint: TGLLabel;
+    btnBrowserAddFolder: TGLButton;
+    btnBrowserRefresh: TGLButton;
+    btnBrowserImport: TGLButton;
+    btnBrowserAddToSelected: TGLButton;
+    tvBrowser: TGLTree;
+    memBrowser: TLogSink;
+    lblBrowserFloating: TGLLabel;
+    tabScope: TGLPage;
+    pnlScopeTop: TGLPanel;
+    lblScopeSignal: TGLLabel;
+    lblScopeMode: TGLLabel;
+    cboScopeSignal: TGLCombo;
+    cboScopeMode: TGLCombo;
+    chkScopeLive: TGLCheck;
+    pnlScopeReadout: TGLPanel;
+    memScopeReadout: TLogSink;
+    pbScope: TGLView;
+    tabAdvDsp: TGLPage;
+    pnlAdvDspTop: TGLPanel;
+    lblAdvDspSignal: TGLLabel;
+    lblAdvDspProcess: TGLLabel;
+    lblAdvDspParam: TGLLabel;
+    cboAdvDspSignal: TGLCombo;
+    cboAdvDspProcess: TGLCombo;
+    edtAdvDspParam: TGLEdit;
+    memAdvDspReadout: TLogSink;
+    tabAI: TGLPage;
+    tabDockAi: TGLPage;
+    pcAiMain: TGLPageControl;
+    tsAiSelect: TGLPage;
+    tsAiMcp: TGLPage;
+    tsAiRecordings: TGLPage;
+    tsAiLyrics: TGLPage;
+    tsAiGeneration: TGLPage;
+    lblAiProvider: TGLLabel;
+    lblAiKey: TGLLabel;
+    cboAiProvider: TGLCombo;
+    edtAiApiKey: TGLEdit;
+    lblAiModel: TGLLabel;
+    cboAiModel: TGLCombo;
+    lblAiMcpName: TGLLabel;
+    lblAiMcpCmd: TGLLabel;
+    edtAiMcpName: TGLEdit;
+    edtAiMcpCommand: TGLEdit;
+    lblAiMcpToken: TGLLabel;
+    edtAiMcpToken: TGLEdit;
+    btnAiMcpTest: TGLButton;
+    lblAiMcpHint: TGLLabel;
+    chkAiMcpExpose: TGLCheck;
+    lblAiMcpExposePort: TGLLabel;
+    edtAiMcpExposePort: TGLEdit;
+    chkAiMcpAllowDestructive: TGLCheck;
+    lblAiMcpBind: TGLLabel;
+    edtAiMcpBind: TGLEdit;
+    chkAiMcpTls: TGLCheck;
+    lblAiMcpTlsPort: TGLLabel;
+    edtAiMcpTlsPort: TGLEdit;
+    lblAiMcpCert: TGLLabel;
+    edtAiMcpCert: TGLEdit;
+    lblAiMcpKey: TGLLabel;
+    edtAiMcpKey: TGLEdit;
+    btnAiMcpTestLocal: TGLButton;
+    btnAiMcpTestTls: TGLButton;
+    edtAiMcpTestUrl: TGLEdit;
+    chkAiMcpSelfSigned: TGLCheck;
+    memAiMcpProviders: TLogSink;
+    lstAiMcpServers: TGLList;
+    splAiLog: TGLSplitter;
+    memAiLog: TLogSink;
+    btnAiSave: TGLButton;
+    btnAiTest: TGLButton;
+    btnAiDelete: TGLButton;
+    pnlAiChat: TGLPanel;
+    edtAiPrompt: TGLEdit;
+    btnAiSend: TGLButton;
+    btnAiClear: TGLButton;
+    btnAiGenerateTune: TGLButton;
+    pnlAiSuno: TGLPanel;
+    pnlAiLuma: TGLPanel;
     lblLumaKind, lblLumaModel, lblLumaPrompt, lblLumaAspect, lblLumaResolution,
-      lblLumaDuration, lblLumaFormat, lblLumaStartFrame: TLabel;
+      lblLumaDuration, lblLumaFormat, lblLumaStartFrame: TGLLabel;
     cboLumaKind, cboLumaModel, cboLumaAspect, cboLumaResolution, cboLumaDuration,
-      cboLumaFormat: TComboBox;
+      cboLumaFormat: TGLCombo;
     lblLumaEndFrame, lblLumaImageRef, lblLumaImageRefWeight, lblLumaStyleRef,
-      lblLumaCharRef, lblLumaModifyRef: TLabel;
+      lblLumaCharRef, lblLumaModifyRef: TGLLabel;
     edtLumaPrompt, edtLumaStartFrame, edtLumaEndFrame, edtLumaImageRef,
       edtLumaImageRefWeight, edtLumaStyleRef, edtLumaStyleWeight, edtLumaCharRef,
-      edtLumaModifyRef, edtLumaModifyWeight: TEdit;
-    chkLumaLoop: TCheckBox;
-    chkLumaTabOnly: TCheckBox;
-    btnLumaTest, btnLumaGenerate, btnLumaCancel, btnLumaConcepts, btnLumaOpen: TButton;
-    lblLumaConcepts: TLabel;
-    lstLumaConcepts: TListBox;
-    lblSunoPrompt: TLabel;
-    edtSunoPrompt: TEdit;
-    memSunoLyrics: TRichEdit;
-    dlgSaveLyrics: TSaveDialog;
+      edtLumaModifyRef, edtLumaModifyWeight: TGLEdit;
+    chkLumaLoop: TGLCheck;
+    chkLumaTabOnly: TGLCheck;
+    btnLumaTest, btnLumaGenerate, btnLumaCancel, btnLumaConcepts, btnLumaOpen: TGLButton;
+    lblLumaConcepts: TGLLabel;
+    lstLumaConcepts: TGLList;
+    lblSunoPrompt: TGLLabel;
+    edtSunoPrompt: TGLEdit;
+    memSunoLyrics: TGLMemo;
+    dlgSaveLyrics: TGLSaveDialog;
     pmSunoLyrics: TPopupMenu;
     pmSunoLyricsClear: TMenuItem;
     pmSunoLyricsSep: TMenuItem;
     pmSunoLyricsSave: TMenuItem;
-    lblSunoLyricsCount: TLabel;
-    chkSunoInstrumental: TCheckBox;
-    lblSunoBaseUrl: TLabel;
-    edtSunoBaseUrl: TEdit;
-    btnSunoTest: TButton;
-    cboSunoApi, cboSunoModel: TComboBox;
-    edtSunoCallback, edtSunoTitle: TEdit;
-    edtSunoStyle: TRichEdit;
-    chkSunoCustom: TCheckBox;
-    btnSunoGenerate, btnSunoCancel: TButton;
-    lblSunoApi, lblSunoModel, lblSunoCallback, lblSunoStyle, lblSunoTitle: TLabel;
-    chkSunoAdvanced: TCheckBox;
-    lblSunoRefHint: TLabel;
-    lstSunoRefs: TListBox;
-    btnSunoRefAdd, btnSunoRefRemove, btnSunoRefRefresh, btnSunoRefRecord: TButton;
-    dlgSunoRefOpen: TOpenDialog;
-    lblSunoRefMode, lblSunoContinueAt: TLabel;
-    cboSunoRefMode: TComboBox;
-    edtSunoContinueAt: TEdit;
-    pnlAiVoice: TPanel;
-    lblVoiceHint: TLabel;
+    lblSunoLyricsCount: TGLLabel;
+    chkSunoInstrumental: TGLCheck;
+    lblSunoBaseUrl: TGLLabel;
+    edtSunoBaseUrl: TGLEdit;
+    btnSunoTest: TGLButton;
+    cboSunoApi, cboSunoModel: TGLCombo;
+    edtSunoCallback, edtSunoTitle: TGLEdit;
+    edtSunoStyle: TGLMemo;
+    chkSunoCustom: TGLCheck;
+    btnSunoGenerate, btnSunoCancel: TGLButton;
+    lblSunoApi, lblSunoModel, lblSunoCallback, lblSunoStyle, lblSunoTitle: TGLLabel;
+    chkSunoAdvanced: TGLCheck;
+    lblSunoRefHint: TGLLabel;
+    lstSunoRefs: TGLList;
+    btnSunoRefAdd, btnSunoRefRemove, btnSunoRefRefresh, btnSunoRefRecord: TGLButton;
+    dlgSunoRefOpen: TGLOpenDialog;
+    lblSunoRefMode, lblSunoContinueAt: TGLLabel;
+    cboSunoRefMode: TGLCombo;
+    edtSunoContinueAt: TGLEdit;
+    pnlAiVoice: TGLPanel;
+    lblVoiceHint: TGLLabel;
     mnuScope: TMenuItem;
     mnuScopeAnalyze: TMenuItem;
     pmScope: TPopupMenu;
@@ -1205,6 +1505,7 @@ type
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure FormResize(Sender: TObject);
+    function IsShortCut(var Message: TWMKey): Boolean; override;
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure DeleteActiveChannel;
     procedure btnRefreshSystemClick(Sender: TObject);
@@ -1214,7 +1515,6 @@ type
     procedure btnEmitInfoClick(Sender: TObject);
     procedure btnEmitWarnClick(Sender: TObject);
     procedure btnEmitErrorClick(Sender: TObject);
-    procedure btnClearLogViewClick(Sender: TObject);
     procedure btnRunSelfTestClick(Sender: TObject);
     procedure btnCancelJobsClick(Sender: TObject);
     procedure btnSecretSetClick(Sender: TObject);
@@ -1267,6 +1567,22 @@ type
     procedure btnMp4PlayClick(Sender: TObject);
     procedure btnMp4StopClick(Sender: TObject);
     procedure cboMidiClipChange(Sender: TObject);
+    procedure cboMidiTrackChange(Sender: TObject);
+    procedure pbPianoRollMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer;
+      MousePos: TPoint; var Handled: Boolean);
+    function PrZoom: Double;
+    function PrPxPerTick: Double;
+    function PrTickToX(ATick: Int64): Integer;
+    procedure PrClampView;
+    procedure sbMidiHChange(Sender: TObject);
+    procedure PrFitNoteRange;
+    function PrFullLo: Integer;
+    function PrFullHi: Integer;
+    function PrVisRows: Integer;
+    procedure PrClampV;
+    procedure sbMidiVChange(Sender: TObject);
+    function PrLoNote: Integer;
+    function PrHiNote: Integer;
     procedure btnMidiAddClipClick(Sender: TObject);
     procedure btnMidiAddTrackClick(Sender: TObject);
     procedure btnMidiAddNoteClick(Sender: TObject);
@@ -1291,6 +1607,9 @@ type
     {$IFNDEF FPC}
     procedure edtProjectNameExit(Sender: TObject);
     procedure edtProjectAuthorExit(Sender: TObject);
+    procedure cboExportChange(Sender: TObject);
+    procedure edExpAuthorExit(Sender: TObject);
+    procedure RefreshExportSettings;
     procedure btnKeyHookAssignClick(Sender: TObject);
     procedure btnKeyHookSaveClick(Sender: TObject);
     procedure btnKeyHookRestoreClick(Sender: TObject);
@@ -1301,16 +1620,19 @@ type
     procedure btnBrowserRefreshClick(Sender: TObject);
     procedure btnBrowserImportClick(Sender: TObject);
     procedure btnBrowserAddToSelectedClick(Sender: TObject);
-    procedure tvBrowserExpanding(Sender: TObject; Node: TTreeNode; var AllowExpansion: Boolean);
+    procedure tvBrowserExpanding(Sender: TObject; Node: TGLTreeNode; var AllowExpansion: Boolean);
     procedure tvBrowserMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure pbPianoRollPaint(Sender: TObject);
+    function PrPlayTick(out ATick: Int64): Boolean;
     procedure pbPianoRollMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure pbPianoRollMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure pbPianoRollMouseUp(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure chkMidiScaleHighlightClick(Sender: TObject);
+    procedure btnMidiDetectChordsClick(Sender: TObject);
+    procedure chkMidiChordsClick(Sender: TObject);
     procedure cboMidiScaleChange(Sender: TObject);
     procedure btnTlDemoClick(Sender: TObject);
     procedure btnTlAddTrackClick(Sender: TObject);
@@ -1329,17 +1651,224 @@ type
     procedure btnTlReverseRangeClick(Sender: TObject);
     procedure TlClipTempoClick(Sender: TObject);
     procedure TlFxMenuClick(Sender: TObject);
+    procedure TlFxPluginClick(Sender: TObject);
     procedure TlUndoEffectClick(Sender: TObject);
     procedure pmTlEffectPopup(Sender: TObject);
+    procedure cboTlStageQuantChange(Sender: TObject);
+    procedure ibTlStageClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ibTlTransportClick(Sender: TObject; AIndex: Integer; const AId: string);
+    function TlHeaderSub(ATrk: TTimelineTrack; out AColor: TColor): string;
+    function TlHeaderSignature: string;
+    procedure TlHeaderTick;
+    procedure TlHeaderSync;
+    procedure TlHeaderUpdate;
+    procedure WMTlSync(var Msg: TMessage); message WM_TLSYNC;
+    procedure TlHdrSelect(Sender: TGLTrackHeader);
+    procedure TlHdrFlag(Sender: TGLTrackHeader; AFlag: Integer; AValue: Boolean);
+    procedure TlHdrGain(Sender: TGLTrackHeader; AValue: Double);
+    procedure TlHdrPan(Sender: TGLTrackHeader; AValue: Double);
+    function TlLinkedStrip(ATrackId: Integer): TMixStrip;
+    procedure TlHdrRename(Sender: TGLTrackHeader);
+    procedure TlGotoEnd(AToEnd: Boolean);
+    procedure TlRenameTrack(ATrackId: Integer);
+    procedure TlHdrTempo(Sender: TGLTrackHeader);
+    procedure TlHdrPassMouse(Sender: TGLTrackHeader; ADown: Boolean; AButton: TMouseButton;
+      AShift: TShiftState; X, Y: Integer);
+    procedure pnlTimelineTopResize(Sender: TObject);
+    procedure tsTlModeChange(Sender: TObject);
+    procedure DrumLoadDialog(ANote: Integer);
+    function DrumPanelFor(ANote: Integer): TDrumInstrumentPanel;
+    function DrumPanelTitle(ANote: Integer): string;
+    procedure DrumPanelsSync;
+    procedure DrumPanelsLayout;
+    procedure DrumFitToPage;
+    procedure DrumPanelUpdate(APanel: TDrumInstrumentPanel);
+    procedure DrumPanelReveal(ANote: Integer);
+    procedure DrumPanelChanged(Sender: TObject);
+    procedure DrumPanelLoad(Sender: TObject);
+    procedure WMDrumRefresh(var Msg: TMessage); message WM_DRUM_REFRESH;
+    procedure DrumPanelPlay(Sender: TObject);
+    procedure DrumPanelStop(Sender: TObject);
+    procedure DrumPanelClear(Sender: TObject);
+    procedure DrumPanelSelect(Sender: TObject);
+    procedure DrumPanelToggle(Sender: TObject);
+    procedure DrumPanelEdit(Sender: TObject);
+    procedure DrumProjectSync(ANote: Integer; ARemove: Boolean = False);
+    procedure DrumProjectSyncAll;
+    procedure DrumApplyProject;
+    procedure pbDrumPadsDblClick(Sender: TObject);
+    procedure pbDrumPadsMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pbDrumPadsMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pbDrumPadsDropFiles(Sender: TObject; ADrop: HDROP; const APoint: TPoint);
+    procedure pbDrumPadsPaint(Sender: TObject);
+    function DrumKitFile: string;
+    function PluginCacheFile: string;
+    function PluginScanner: TPluginScanner;
+    procedure ScanPluginsNow;
+    procedure MixAddPluginFile(const AFileName: string);
+    procedure mnuScriptRunClick(Sender: TObject);
+    procedure mnuScriptFolderClick(Sender: TObject);
+    function ScriptsDir: string;
+    procedure DrumSaveKit;
+    function DrumPadAt(X, Y: Integer): Integer;
+    procedure DrumAudioAttach;
+    procedure DrumAudioDetach;
+    procedure DrumRefreshEditor;
+    procedure DrumLoadInto(APad: Integer; const APath: string);
+    procedure DrumSetBase(ABase: Integer);
+    procedure sbDrumRangeChange(Sender: TObject);
+    procedure pbDrumMapPaint(Sender: TObject);
+    procedure pbDrumMapMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pbDrumMapMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+    procedure pbDrumMapMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pbDrumPadsMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+    { the icon at a clip's left end, and the editor it opens }
+    function TlClipKind(AClip: TTimelineClip): TTlClipKind;
+    function TlClipIconRect(AClip: TTimelineClip; ATrackIndex: Integer): TRect;
+    function TlClipIconAt(AX, AY: Integer; out AClip: TTimelineClip): Boolean;
+    procedure TlDrawClipIcon(ACv: TGLCanvas; const ARect: TRect; AKind: TTlClipKind; AInk: TColor);
+    procedure TlOpenEditorPage(AMode: Integer);
+    procedure TlOpenClipEditor(AClip: TTimelineClip);
+    procedure TlEditClipAudio(AClip: TTimelineClip);
+    procedure TlEditLaneClick(Sender: TObject);
+    { Pattern mode: the step sequencer }
+    function PatCurrent: TPattern;
+    function PatPadName(ANote: Integer): string;
+    function PatPresetDir: string;
+    procedure PatSay(const AText: string);
+    procedure PatRefreshUI;
+    procedure PatAfterChange;
+    procedure PatPerform(const ADesc: string; const AEdit: TPatternEditProc);
+    procedure PatPublishSequence;
+    procedure PatEnsureInstruments(APattern: TPattern);
+    procedure PatSnapshotInstruments(APattern: TPattern);
+    procedure PatStartPlay;
+    procedure PatStopPlay;
+    function PatStepX(AStep: Integer): Integer;
+    function PatStepAt(AX: Integer): Integer;
+    function PatLaneAt(AY: Integer): Integer;
+    procedure PatEditCell(ALane, AStep, AValue: Integer);
+    procedure PatSavePreset(const AFileName: string);
+    procedure cboPatSelChange(Sender: TObject);
+    procedure btnPatNewClick(Sender: TObject);
+    procedure btnPatCloneClick(Sender: TObject);
+    procedure btnPatDeleteClick(Sender: TObject);
+    procedure btnPatSaveClick(Sender: TObject);
+    procedure btnPatSaveAsClick(Sender: TObject);
+    procedure btnPatLoadClick(Sender: TObject);
+    procedure btnPatPlayClick(Sender: TObject);
+    procedure btnPatPlaceClick(Sender: TObject);
+    procedure edtPatNameChange(Sender: TObject);
+    procedure PatLenStep(ADir: Integer);
+    procedure tsPatResChange(Sender: TObject);
+    procedure btnPatAddLaneClick(Sender: TObject);
+    procedure btnPatDelLaneClick(Sender: TObject);
+    procedure PatTool(ATool: Integer);
+    procedure ibPatFileClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ibPatPlayClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ibPatPlaceClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ibPatLenClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ibPatRowClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ibPatToolsClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure PatSyncPlayButton;
+    procedure sbPatChange(Sender: TObject);
+    procedure pbPatternPaint(Sender: TObject);
+    procedure pbPatternMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pbPatternMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+    procedure pbPatternMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pbPatternMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+    procedure tsTlRightChange(Sender: TObject);
+    procedure edtTlRightSearchChange(Sender: TObject);
+    procedure TlSetBrowser(AOn: Boolean);
+    procedure trTlRightDblClick(Sender: TObject);
+    procedure trTlRightExpanding(Sender: TObject; Node: TGLTreeNode; var AllowExpansion: Boolean);
+    procedure TlRightAddItem(AParent: TGLTreeNode; const AText: string; AKind, AIndex: Integer; const APath: string);
+    function TlSelectedTrackStrip: TMixStrip;
+    procedure TlRightFill;
+    procedure RefreshScoreParts;
+    procedure ScoreFollowPlayhead;
+    procedure ScoreOptionChange(Sender: TObject);
+    procedure btnScoreAllClick(Sender: TObject);
+    procedure btnScoreNoneClick(Sender: TObject);
+    procedure ibScoreClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ibScoreToolsClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure ScoreLoadTracker;
+    procedure ScoreDeleteSelected;
+    procedure RefreshScoreTrkList;
+    procedure ScoreTrkByChange(Sender: TObject);
+    procedure ScoreTrkListClick(Sender: TObject);
+    procedure btnScoreTrkAllClick(Sender: TObject);
+    procedure btnScoreTrkNoneClick(Sender: TObject);
+    procedure pbScoreMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pbScoreMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+    procedure pbScorePaint(Sender: TObject);
+    procedure ScoreGather(out notes: TArray<TScoreNote>; out chords: TArray<TScoreChord>; out shown: Integer);
+    procedure ScoreSavePdf;
+    procedure TlSetEditor(AOn: Boolean);
+    procedure splTlDockMoved(Sender: TObject);
+    procedure TlApplyDockHeight;
+    function TlTransportLit: Integer;
+    procedure ibTlToolsClick(Sender: TObject; AIndex: Integer; const AId: string);
+    function TlModeOfPage(ATab: TGLPage): Integer;
+    function TlPageOfMode(AMode: Integer): TGLPage;
+    procedure TlLayoutFull(AFull: Boolean);
+    procedure TlStackDock;
+    procedure RepaintThemedViews;
+    procedure TlRefreshDockPage(ATab: TGLPage);
+    procedure TlSetMode(AMode: Integer);
+    function TlChordH: Integer;
+    function TlChordAtSec(ASec: Double): TTimelineChord;
+    procedure TlChordsCommit(const AWhat, ANewSnapshot: string);
+    procedure TlChordAdd(ASec: Double);
+    procedure TlChordRename(AId: Integer);
+    procedure TlChordDelete(AId: Integer);
+    procedure TlChordDrag(AId, AMode: Integer; ASec: Double);
+    procedure pmMkRenameClick(Sender: TObject);
+    procedure pmMkDeleteClick(Sender: TObject);
+    procedure pmTlStagePopup(Sender: TObject);
+    function TlSegmentScene: TTimelineRegion;
+    procedure pmStgDeleteSegmentClick(Sender: TObject);
+    procedure pmStgCopySegmentClick(Sender: TObject);
+    procedure pmStgPasteSegmentClick(Sender: TObject);
+    procedure pmStgLoopingClick(Sender: TObject);
+    procedure pmStgContinuousClick(Sender: TObject);
+    procedure TlPasteRangeClipboardAt(AAnchorSec: Double);
+    procedure pmStgLaunchClick(Sender: TObject);
+    procedure pmStgAddClick(Sender: TObject);
+    procedure pmStgRenameClick(Sender: TObject);
+    procedure pmStgSetRangeClick(Sender: TObject);
+    procedure pmStgDeleteClick(Sender: TObject);
     procedure TlVideoFxMenuClick(Sender: TObject);
     procedure TlVideoFxRemoveClick(Sender: TObject);
     procedure pmTlEffEditClick(Sender: TObject);
+    procedure tmrTlEffMenuTimer(Sender: TObject);
     procedure TlFxFadeInClick(Sender: TObject);
     procedure TlFxFadeOutClick(Sender: TObject);
     procedure btnTlAddMarkerHereClick(Sender: TObject);
     procedure btnTlGoStartClick(Sender: TObject);
     procedure btnTlGoEndClick(Sender: TObject);
     procedure btnTlZoomFitClick(Sender: TObject);
+    function TlHotKey(var Key: Word; Shift: TShiftState): Boolean;
+    function TlLoopBarMouseDown(X, Y: Integer; Shift: TShiftState): Boolean;
+    procedure TlLoopBarMove(X: Integer);
+    procedure TlNudge(ADir: Integer; ACoarse: Boolean);
+    function TlLaneEditLocked: Boolean;
+    procedure TlGotoMarker(ADir: Integer);
+    procedure TlZoomToSelection;
+    procedure TlLaneEditMove(X: Integer);
+    procedure TlLaneEditEnd;
+    procedure TlTempoDragMove(X, Y: Integer; AFine: Boolean);
+    procedure TlPushTempoToPlayer;
+    function TlTempoPoints: TTempoPoints;
+    function TlTempoY(AYTop: Integer; ABpm: Double): Integer;
+    function TlTempoPointAt(X, Y: Integer): Integer;
+    procedure TlTempoAddPoint(ASeconds: Double);
+    procedure TlTempoDeletePoint(AIndex: Integer);
+    procedure TlTempoPrompt(AIndex: Integer);
+    procedure TlTempoSetPoint(AIndex: Integer; ABpm, ASeconds: Double; const ALabel: string);
+    procedure TlSignaturePrompt;
+    function TlTempoLaneAt(X, Y: Integer): Boolean;
+    procedure TlSetBpm(AValue: Double);
     procedure mnuTimelineClick(Sender: TObject);
     procedure btnTlZoomInClick(Sender: TObject);
     procedure btnTlZoomOutClick(Sender: TObject);
@@ -1370,6 +1899,14 @@ type
     procedure btnTlCutClick(Sender: TObject);
     procedure btnTlCopyClick(Sender: TObject);
     procedure btnTlPasteClick(Sender: TObject);
+    procedure btnTlLockClipClick(Sender: TObject);
+    procedure TlClampToClick(Sender: TObject);
+    procedure TlClampClips(const ids: TArray<Integer>; toLast: Boolean; out moved, skipped: Integer);
+    procedure TlDeleteCache;
+    procedure CacheClearProgress(ADone, ATotal: Integer);
+    procedure CacheClearReport(ADone, ATotal: Integer);
+    procedure CacheClearDone(Sender: TObject);
+    procedure pmMkLockClick(Sender: TObject);
     procedure pmTlCopySelectionClick(Sender: TObject);
     procedure pmTlPasteSelectionClick(Sender: TObject);
     procedure pmTlCutSelectionClick(Sender: TObject);
@@ -1377,6 +1914,22 @@ type
     procedure btnTlTrackDownClick(Sender: TObject);
     procedure pmTlMuteTrackClick(Sender: TObject);
     procedure pmTlRenameTrackClick(Sender: TObject);
+    procedure pmTlCreateScoreClick(Sender: TObject);
+    function TlScoreProgress(APercent: Integer): Boolean;
+    function TlJobCancelled: Boolean;
+    procedure JobPollEscape;
+    procedure JobPump;
+    procedure RenderJobsPollEscape;
+    function JobStatusText(const AText: string): string;
+    procedure JobRefreshStatus;
+    procedure JobAwait(const AWork: TProc; AAbandonOnEsc: Boolean = True);
+    procedure PyPoll;
+    procedure JobCancelNow;
+    procedure TlPruneSelection;
+    function JobRollback: Integer;
+    procedure JobNoteFile(const AFile: string);
+    procedure JobNoteClip(AClip: TTimelineClip);
+    procedure JobBegin;
     procedure pmTlNavNextClick(Sender: TObject);
     procedure pmTlNavPrevClick(Sender: TObject);
     procedure pmTlJumpElementStartClick(Sender: TObject);
@@ -1391,11 +1944,13 @@ type
     procedure mnuTlImportModClick(Sender: TObject);
     procedure mnuTlImportXmClick(Sender: TObject);
     procedure mnuTlImportMptmClick(Sender: TObject);
+    procedure mnuTlImportLegacyClick(Sender: TObject);
+    procedure btnTrkImportLegacyClick(Sender: TObject);
     procedure mnuTlImportAlsClick(Sender: TObject);
     procedure mnuTlImportFlpClick(Sender: TObject);
     procedure cboTlSnapChange(Sender: TObject);
     procedure edtTlTempoExit(Sender: TObject);
-    procedure chkTlMetronomeClick(Sender: TObject);
+    procedure TlSetMetronome(AOn: Boolean);
     procedure TlWarpMenuClick(Sender: TObject);
     procedure tbTlMasterVolChange(Sender: TObject);
     procedure sbTlHorzChange(Sender: TObject);
@@ -1406,8 +1961,14 @@ type
     procedure TlUpdateVideoHover(AX, AY: Integer);
     procedure pbTlMetersPaint(Sender: TObject);
     procedure pnlTlVideoResize(Sender: TObject);
+    procedure pnlTlVideoMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure TlVideoPopOut;
+    function TlVideoActive: Boolean;
+    procedure TlVideoWindowClosed(Sender: TObject);
+    procedure TlVideoWindowResized(Sender: TObject);
+    procedure TlOpenSpectrumWindow;
     procedure pbTlVideoFxPaint(Sender: TObject);
-    procedure DrawTimelineSpectrum(ACanvas: TCanvas; const ARect: TRect);
+    procedure DrawTimelineSpectrum(ACanvas: TGLCanvas; const ARect: TRect);
     procedure UpdateTimelineMeterChannel(var AMeter: Single; APeak: Single);
     procedure pbTimelineMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
@@ -1425,6 +1986,9 @@ type
       above BrowserIsAudioExt for why in-app TTreeView dragging didn't need
       this, but dropping straight from Explorer does. }
     procedure WMDropFiles(var Msg: TWMDropFiles); message WM_DROPFILES;
+    procedure CreateWnd; override;
+    procedure DoTimelineFileDrop(ADrop: HDROP; const ADropPt: TPoint);
+    procedure pbTimelineDropFiles(Sender: TObject; ADrop: HDROP; const APoint: TPoint);
     {$ENDIF}
     procedure cboRecPunchChange(Sender: TObject);
     procedure chkRecLoopClick(Sender: TObject);
@@ -1446,6 +2010,11 @@ type
       Shift: TShiftState; X, Y: Integer);
     function RecSelectedTakeIndex: Integer;
     procedure cboMixStripChange(Sender: TObject);
+    procedure cboMixViewChange(Sender: TObject);
+    procedure sbMixHChange(Sender: TObject);
+    procedure MixStripCollapse(Sender: TGLMixerStrip);
+    function MixCur: TMixerModel;
+    function MixPerform(ACmd: TDAWCommand): Boolean;
     procedure cboMixTrackLinkChange(Sender: TObject);
     procedure btnMixAddTrackClick(Sender: TObject);
     procedure btnMixAddBusClick(Sender: TObject);
@@ -1461,22 +2030,34 @@ type
     procedure btnMixUndoClick(Sender: TObject);
     procedure btnMixRedoClick(Sender: TObject);
     procedure pbMixerPaint(Sender: TObject);
-    procedure pbMixerMouseDown(Sender: TObject; Button: TMouseButton;
-      Shift: TShiftState; X, Y: Integer);
-    procedure pbMixerMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
-    procedure pbMixerMouseUp(Sender: TObject; Button: TMouseButton;
-      Shift: TShiftState; X, Y: Integer);
     procedure pbMixerDragOver(Sender, Source: TObject; X, Y: Integer;
       State: TDragState; var Accept: Boolean);
     procedure pbMixerDragDrop(Sender, Source: TObject; X, Y: Integer);
-    procedure pbMixerDblClick(Sender: TObject);
     procedure pmMixerPopup(Sender: TObject);
+    procedure pmMixRoleClick(Sender: TObject);
     procedure btnMixAddVSTClick(Sender: TObject);
     procedure MixModMenuClick(Sender: TObject);
     procedure btnMixEditVSTClick(Sender: TObject);
     procedure cboMixAutoParamChange(Sender: TObject);
     procedure cboMixAutoModeChange(Sender: TObject);
     procedure tbMixZoomChange(Sender: TObject);
+    procedure TlWheelScroll(AWheelDelta: Integer);
+    procedure pnlTlHeadersMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer;
+      MousePos: TPoint; var Handled: Boolean);
+    procedure MixEqSliderChange(Sender: TObject);
+    procedure MixEqOnChange(Sender: TObject);
+    procedure MixEqFlatClick(Sender: TObject);
+    procedure MixEqToggle(Sender: TObject);
+    procedure MixEqPresetClick(Sender: TObject; AIndex: Integer; const AId: string);
+    function MixEqPresetDir: string;
+    function MixEqPresetFile(out AFile: string): Boolean;
+    procedure MixEqRefreshPresets;
+    procedure MixEqSavePreset;
+    procedure MixEqLoadPreset;
+    procedure MixEqSync;
+    procedure MixEqApply(AStructural: Boolean);
+    function MixEqSlider(AIndex: Integer): TGLEqSlider;
+    function MixEqInsertIndex(AMaster: TMixStrip): Integer;
     procedure pbMixAutoPaint(Sender: TObject);
     procedure pbMixAutoMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
     procedure pbMixAutoMouseUp(Sender: TObject; Button: TMouseButton;
@@ -1485,14 +2066,44 @@ type
       Shift: TShiftState; X, Y: Integer);
     procedure btnMixMeterApplyClick(Sender: TObject);
     procedure RefreshMixAutomationParams(AStrip: TMixStrip);
-    procedure DrawMixStrip(ABuf: TCanvas; AX, AWidth, AHeight: Integer;
-      const AStrip: TMixStrip; ASelected: Boolean; out ARect: TRect);
+    function MixStripAccent(const AStrip: TMixStrip; AIndex: Integer): TColor;
+    function MixStripSignature: string;
+    procedure MixSyncStrips;
+    procedure MixUpdateStrips;
+    procedure MixTick;
+    procedure WMMixSync(var Msg: TMessage); message WM_MIXSYNC;
+    procedure WMMixPick(var Msg: TMessage); message WM_MIXPICK;
+    procedure MixSelectById(AId: Integer);
+    procedure MixShowPick(AKind: TMixPickKind; AStripId: Integer; const AScreenPt: TPoint);
+    procedure MixPickClick(Sender: TObject);
+    procedure MixEditInsert(AStripId, AIndex: Integer);
+    procedure MixStripSelect(Sender: TGLMixerStrip);
+    procedure MixStripFader(Sender: TGLMixerStrip; AValue: Double);
+    procedure MixStripPan(Sender: TGLMixerStrip; AValue: Double);
+    procedure MixStripFlag(Sender: TGLMixerStrip; AFlag: Integer; AValue: Boolean);
+    procedure MixStripInput(Sender: TGLMixerStrip; AId: Integer);
+    procedure MixStripOutput(Sender: TGLMixerStrip; AId: Integer);
+    procedure MixStripAddFx(Sender: TGLMixerStrip; const AScreenPt: TPoint);
+    procedure MixStripAddSend(Sender: TGLMixerStrip; const AScreenPt: TPoint);
+    procedure MixStripEditInsert(Sender: TGLMixerStrip; AIndex: Integer);
+    procedure MixStripSendClick(Sender: TGLMixerStrip; AIndex: Integer);
+    procedure MixStripClipReset(Sender: TGLMixerStrip);
+    procedure MixStripReorder(Sender: TGLMixerStrip; AOverId: Integer);
+    procedure MixStripDragOver(Sender, Source: TObject; X, Y: Integer;
+      State: TDragState; var Accept: Boolean);
+    procedure MixStripDragDrop(Sender, Source: TObject; X, Y: Integer);
+    procedure pbMixerMouseWheel(Sender: TObject; Shift: TShiftState;
+      WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+    procedure pmMixInsertEditClick(Sender: TObject);
+    procedure pmMixInsertRemoveClick(Sender: TObject);
+    procedure pmMixInsertUpClick(Sender: TObject);
+    procedure pmMixInsertDownClick(Sender: TObject);
+    procedure ibMixBarClick(Sender: TObject; AIndex: Integer; const AId: string);
     procedure cboTrkPatternChange(Sender: TObject);
     procedure mnuTrkNewTrackerClick(Sender: TObject);
     procedure btnTrkApplyXportClick(Sender: TObject);
     procedure btnTrkAddPatternClick(Sender: TObject);
     procedure btnTrkDelPatternClick(Sender: TObject);
-    procedure btnTrkSetCellClick(Sender: TObject);
     procedure btnTrkClearCellClick(Sender: TObject);
     procedure btnTrkFillDemoClick(Sender: TObject);
     procedure btnTrkPlayClick(Sender: TObject);
@@ -1506,6 +2117,35 @@ type
     procedure btnTrkImportMptmClick(Sender: TObject);
     procedure btnTrkExportMptmClick(Sender: TObject);
     procedure pbTrackerPaint(Sender: TObject);
+    procedure pbTrackerMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+    procedure pbTrackerMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure pmTrkGridPopup(Sender: TObject);
+    procedure pmTrkSeqPopup(Sender: TObject);
+    procedure mnuTrkExportClick(Sender: TObject);
+    procedure TrkExportToTimeline(AWholePattern: Boolean);
+    procedure TrkSeqToggleStep(AStep: Integer);
+    function TrkSeqIsSelected(AStep: Integer): Boolean;
+    procedure pmTrkExportRegionToTimelineClick(Sender: TObject);
+    procedure pmTrkExportPatternToTimelineClick(Sender: TObject);
+    procedure pmTrkCutClick(Sender: TObject);
+    procedure pmTrkCopyClick(Sender: TObject);
+    procedure pmTrkPasteClick(Sender: TObject);
+    procedure pmTrkDeleteClick(Sender: TObject);
+    procedure pmTrkSelectAllClick(Sender: TObject);
+    procedure pmTrkSelectChannelClick(Sender: TObject);
+    procedure pmTrkTransposeClick(Sender: TObject);
+    function TrkRegion(out R0, C0, R1, C1: Integer): Boolean;
+    procedure TrkRegionApply(const ALabel: string; ACopyFirst: Boolean);
+    procedure TrkRegionCopy;
+    procedure TrkRegionPaste;
+    procedure TrkRegionTranspose(ASemitones: Integer);
+    function TrkGridCellAt(X, Y: Integer; out ARow, ACol: Integer): Boolean;
+    procedure pbTrackerMouseLeave(Sender: TObject);
+    procedure tmrTrkAnimTimer(Sender: TObject);
+    procedure ibTrkTransportClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure pmTrkChanFxEditClick(Sender: TObject);
+    procedure pmTrkChanFxReplaceClick(Sender: TObject);
+    procedure pmTrkChanFxRemoveClick(Sender: TObject);
     procedure btnTrkSupportClick(Sender: TObject);
     procedure pbTrackerMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
@@ -1514,10 +2154,15 @@ type
     procedure sbTrkChnChange(Sender: TObject);
     procedure RefreshTrkInstrTab;
     procedure cboTrkInstrSelChange(Sender: TObject);
+    procedure cboTrkInstrPickChange(Sender: TObject);
     procedure btnTrkInstrAddTimelineClick(Sender: TObject);
+    procedure ibTrkInstrClick(Sender: TObject; AIndex: Integer; const AId: string);
     procedure btnTrkInstrSaveWavClick(Sender: TObject);
     procedure pbTrkInstrWavePaint(Sender: TObject);
+    procedure pbTrkInstrWaveDblClick(Sender: TObject);
+    procedure TrkInstrEditWav;
     procedure pbTrkSequencePaint(Sender: TObject);
+    procedure pbTrkSequenceDblClick(Sender: TObject);
     procedure pbTrkSequenceMouseDown(Sender: TObject; Button: TMouseButton;
       Shift: TShiftState; X, Y: Integer);
     procedure sbTrkSeqChange(Sender: TObject);
@@ -1534,6 +2179,13 @@ type
     procedure btnAiMcpRemoveClick(Sender: TObject);
     procedure btnAiMcpTestClick(Sender: TObject);
     procedure chkAiMcpExposeClick(Sender: TObject);
+    procedure edtSysFilterChange(Sender: TObject);
+    procedure btnSysRefreshClick(Sender: TObject);
+    procedure btnSysCopyClick(Sender: TObject);
+    procedure cboGlModeChange(Sender: TObject);
+    procedure cboGlMonitorChange(Sender: TObject);
+    procedure btnGlApplyClick(Sender: TObject);
+    procedure tmrGlFpsTimer(Sender: TObject);
     procedure btnAiMcpTestLocalClick(Sender: TObject);
     procedure btnAiMcpTestTlsClick(Sender: TObject);
     procedure btnAiSendClick(Sender: TObject);
@@ -1566,9 +2218,11 @@ type
     procedure FinishSunoJob;
     procedure RestoreStartupProject;
     procedure ShowLogClick(Sender: TObject);
+    procedure ShowMetersClick(Sender: TObject);
+    procedure ShowFoleyClick(Sender: TObject);
     procedure OpenBrowserWindowClick(Sender: TObject);
     procedure BrowserWindowFormClose(Sender: TObject; var Action: TCloseAction);
-    function ActiveWorkspacePage: TTabSheet;
+    function ActiveWorkspacePage: TGLPage;
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure RememberProject(const AFileName: string);
     procedure RefreshRecentProjects;
@@ -1585,6 +2239,12 @@ type
     procedure btnHelpAboutClick(Sender: TObject);
     procedure btnAboutClick(Sender: TObject);
     procedure pgcChange(Sender: TObject);
+    procedure pgcDockChange(Sender: TObject);
+    procedure DockShowClick(Sender: TObject);
+    function TabIs(ATab: TGLPage): Boolean;
+    function DockHasFocus: Boolean;
+    procedure ShowDockPage(ATab: TGLPage);
+    procedure HideDock;
     procedure btnAiAnalyzeMixClick(Sender: TObject);
     procedure btnAiMixPreviewClick(Sender: TObject);
     procedure btnAiMixCompareClick(Sender: TObject);
@@ -1611,8 +2271,6 @@ type
     procedure btnColorsSaveClick(Sender: TObject);
     procedure cboFadeDisplayChange(Sender: TObject);
     procedure btnColorsResetThemeClick(Sender: TObject);
-    procedure lvLogCustomDrawItem(Sender: TCustomListView; Item: TListItem;
-      State: TCustomDrawState; var DefaultDraw: Boolean);
   private
     procedure SendAiChatPrompt(const APrompt: string; ABatchConfirm: Boolean = False);
     procedure GenerateTimelineTuneFromAI;
@@ -1630,7 +2288,6 @@ type
     procedure EnsureMasterSession;
     procedure LogAiToolResult(const AText: string);
   private
-    FLogShown: Integer;
     FTrackedJobs: TList;
     FTonePlaying: Boolean;
     FDspDb: array of Double;          // one-sided spectrum, dBFS per bin
@@ -1646,7 +2303,20 @@ type
     FRecovery: TProjectRecoveryManager;
     FRecoverySessionActive: Boolean;
     FWindowStateReady: Boolean;
-    FLogViewer: TfrmLogViewer;
+    FMeters: TfrmMeters;
+    FFoley: TfrmFoley;
+    FDisplay: TDisplayController;       // the window's screen mode (windowed / borderless / exclusive full screen)
+    FMonitors: TArray<TMonitorEntry>;
+    FDisplayModes: TArray<TDisplayMode>;
+    FGlFps, FGlDraws: Double;           // render rate of the busiest GL surface / of all of them, last sample
+    FGlSurfaceCount: Integer;
+    FCacheThread: TThread;              // Delete Cache is running (nil when idle)
+    FCacheCancel: Boolean;              // Esc: the Delete Cache thread stops after the file it is on
+    FCacheDeleted, FCacheFailed: Integer;
+    FCacheFreed: Int64;
+    FCacheStopped: Boolean;
+    FFoleyBusy: Boolean;                // a Foley pad sound is being placed (see FoleyInsertAtPlayhead)
+    FFoleyTrackId: Integer;            // the lane Foley keys fill when no audio lane is selected
     FBrowserWindow: TfrmBrowserWindow;
     FOpenVST2Editors: TList<TfrmVST2Editor>;   // non-owning: each frees itself via caFree
     FSunoJob: TSunoGenerationJob;
@@ -1680,6 +2350,66 @@ type
     FTlScrollGuard: Boolean;
     FTlVolGuard: Boolean;
     FTlPlayer: TTimelinePlayer;
+    FLanesVisible: Boolean;               // Markers / Tempo / Signature lane stack under the ruler (ibTlTransport 'lanes')
+    FChordsVisible: Boolean;              // the optional Chords lane in that stack (ibTlTransport 'chords')
+    FTlMode: Integer;                     // ARRANGE / PIANO / SCORE / MIX / TRACKER / REC / AI (tsTlMode)
+    FTlModeSync: Boolean;
+    FRightItems: TArray<TRightItem>;
+    FPyBridge: TPythonBridge;
+    FPluginScan: TPluginScanner;   // created on first use, cached in Config\plugins.cache
+    FRightFilled: Boolean;
+    FDrum: TDrumMachine;                  // the kit (kept alive by FDrumIntf)
+    FDrumIntf: IAudioSource;
+    FDrumPanels: TList<TDrumInstrumentPanel>;   // one panel per instrument (a pad with a sound), by note
+    FDrumPad: Integer;                    // selected pad
+    FDrumHeld: Integer;                   // pad held by the mouse (gate mode)
+    FDrumAudioOn: Boolean;
+    FDrumBase: Integer;                   // lowest MIDI note of the 4x4 view
+    FDrumScrollBusy: Boolean;
+    FDrumMapDrag: Boolean;
+    FPatId: Integer;                      // the pattern being edited
+    FPatSel: Integer;                     // selected instrument lane, -1 none
+    FPatBusy: Boolean;
+    FPatPlaying: Boolean;
+    FPatDragging: Boolean;
+    FPatPaintVal: Integer;                // velocity a drag writes (0 erases)
+    FPatLastCell: TPoint;                 // (step, lane) the drag last wrote
+    FPatBefore: string;                   // the library before a drag
+    FPatAddNotes: TArray<Integer>;        // the notes behind cboPatAdd's rows
+    FPatSig: string;
+    FScoreLay: TScoreLayout;
+    FScoreZoom: Double;
+    FScoreTracks: TArray<Integer>;
+    FScoreSig: string;
+    FScoreTrkChanOn: TArray<Boolean>;    // tracker part: channels shown (0-based)
+    FScoreTrkInstrOn: TArray<Boolean>;   // tracker part: instruments shown (1-based, [0] unused)
+    FScoreTrkSig: string;
+    FTrkMidiNoteChn: TArray<Integer>;   // MIDI note -> tracker channel it was written to (-1 = none)
+    FTrkMidiLastMs: Cardinal;           // when the last recorded note arrived (chords share a row)
+    FTrkMidiLastRow: Integer;
+    FScoreTrkCache: TArray<TTrkScoreNote>;
+    FScoreTrkCacheKey: string;
+    FScoreBusy: Boolean;
+    FTlTool: Integer;                     // arrangement tool: 0 select, 1 range, 2 split, 3 erase (ibTlTools)
+    FLaneDragging: Boolean;               // dragging out a new region in the Markers lane
+    FLaneDragStartSec, FLaneDragCurSec: Double;
+    FLaneCtxKind: Integer;                // popup target: 0 none, 1 marker, 2 region
+    FLaneCtxId: Integer;
+    FStageVisible: Boolean;               // Clip Stage column shown (ibTlTransport 'stage')
+    FStageQuantIdx: Integer;              // launch quantize: 0 none, 1 beat, 2 bar, 3 two bars, 4 four bars
+    FStageScroll: Integer;                // first visible scene (wheel over the stage)
+    FStageActiveScene: Integer;           // region id of the last launched scene, -1 none
+    FStageCtxSceneId: Integer;            // scene the stage popup menu was opened on, -1 none
+    FStageLaunches: TArray<TStageLaunch>;
+    FBrowserOff: Boolean;               // the browser panel is hidden (ibTlTransport 'browser'); shown by default
+    FMetronomeOn: Boolean;              // the click is on (ibTlTransport 'metronome')
+    FTlDockHeight: Integer;             // the editor dock's height under the lanes: what the splitter was last set to
+    FEditorOn: Boolean;                 // the editor dock under the Timeline is shown (ibTlTransport 'editor')
+    FVideoPanelOff: Boolean;            // the user hid the video panel (ibTlTransport 'video'); saved with the project
+    FSpectrumWindow: TfrmSpectrum;       // the large spectrum window (double-click the Timeline's spectrum)
+    FVideoWindow: TfrmVideoPlayer;      // the pop-out video window (double-click the video pane)
+    FVideoClickTick: UInt64;            // when the video pane was last pressed, to spot a double-click
+    FVideoClickPos: TPoint;
     FTlVideo: TTimelineVideoPlayer;     // shows the video channels in pnlTlVideo, following the playhead
     FTlThumbnailer: TVideoThumbnailer;  // decodes the hover-preview frames off the UI thread
     FTlFxThumbA, FTlFxThumbB: TVideoThumbnailer;  // frames for the video-effect preview (outgoing / incoming side)
@@ -1693,13 +2423,21 @@ type
     FWarpMarkers: TWarpMarkers;
     FTlMixerProc: TMixerProcessor;   // owned; feeds any track a Mixer strip's InputSourceId names
     FTlPlaying: Boolean;
-    FTlRefreshHz: Integer;       // Timeline redraws/second while playing (Settings; 5..40, default 20)
+    FSyncingExport: Boolean;     // RefreshExportSettings is filling the Export controls
+    FTlRefreshHz: Integer;      // Timeline redraws/second while playing (Settings; 5..60, default 20)
     { True for the duration of a synchronous ShowStatusProgress/
       HideStatusProgress-bracketed operation - tells RefreshJobs (tmrUITimer,
       500ms) not to stomp stbMain/prgStatus with the background-jobs summary
       while a foreground operation owns them. }
     FSyncProgressActive: Boolean;
     FTlCtxTrackId: Integer;
+    FTlJobCancelled: Boolean;          // Escape pressed during a status-bar job (JobPollEscape)
+    FJobUndoMark: Integer;             // FCmds.UndoCount when the job began: Esc undoes back to it
+    FJobFiles: TArray<string>;         // rendered / cached files this job wrote: deleted if it is cancelled
+    FJobUndo: TArray<TProc>;           // direct (non-command) edits this job made, and how to put them back
+    FJobTick: UInt64;                 // GetTickCount64 when the job began (elapsed time in the status bar)
+    FJobBaseText: string;              // what the job last said it is doing, without the elapsed/Esc suffix
+    FJobLastSec: Integer;              // elapsed second last shown, so the status bar only repaints on change
     FTlSelectedTrackId: Integer;  // persistent destination selected in the Timeline
     FTlExtraTrackIds: TArray<Integer>;  // additional tracks selected via Ctrl/Shift-click (highlight only)
     FTlVScrollY: Integer;         // px, vertical scroll of the channel list; the ruler
@@ -1710,6 +2448,8 @@ type
     { an effect name in a channel's title band was pressed - pbTimelineMouseUp
       shows pmTlEffect (Edit / Undo) for that region instead of pmTimeline }
     FTlEffCtxActive: Boolean;
+    FTlDblPress: Boolean;           { the press now being handled is the second of a double-click }
+    FTlEffMenuPt: TPoint;           { where the effect menu will open once the double-click time has passed }
     FTlEffCtx: TClipEffectRegion;
     { left press in the lanes: where it started, and whether the mouse has
       since moved past TL_DRAG_THRESHOLD - a clip move/trim/fade only starts
@@ -1717,14 +2457,12 @@ type
     FTlPressX, FTlPressY: Integer;
     FTlPressMoved: Boolean;
     FTlPressClipId: Integer;
-    FTlBuffer: TBitmap;
     { Out L/R level graphs on the Timeline toolbar (pbTlMeters) - smoothed
       0..1 peak with VU-style decay, read from App.Audio.OutputPeak while
       FTlPlaying; StartTimelinePlayback/StopTimelinePlayback reset both to 0
       so the graphs only move during playback and go idle when it stops. }
     FTlMeterL: Single;
     FTlMeterR: Single;
-    FTlMeterBuffer: TBitmap;
     { Single master-output spectrum drawn in the Timeline's top-left corner
       (over the track-header column, so it resizes with HeaderWidth). Fed from
       the engine's post-mixer output tap, i.e. exactly what the mixer sends out. }
@@ -1745,6 +2483,22 @@ type
     FTlMultiDragStartTrackIdx: TArray<Integer>;  // ...and each clip's track INDEX at drag-start
     FTlDragStartTrackIdx: Integer;       // track index under the cursor when the drag began (-1 if none)
     FTlRubberSelecting: Boolean;
+    FTlLoopDrag: Integer;               // loop bar drag: 0 none, 1 new, 2 move, 3 left edge, 4 right edge
+    FTlLoopAnchorSec: Double;
+    FTlLoopGrabSec: Double;
+    FTlLoopMoved: Boolean;
+    FTlSnapGuideOn: Boolean;            // a snap guide line is shown while dragging / trimming
+    FTlSnapGuideSec: Double;
+    FLaneEdit: Integer;                 // marker / region / chord edit: 0 none, 1 marker move, 2 region move, 3 region start, 4 region end, 5 chord move, 7 chord end
+    FLaneEditId: Integer;
+    FLaneEditGrabSec: Double;
+    FLaneEditMoved: Boolean;
+    FLaneEditStartX: Integer;
+    FTempoDrag: Boolean;
+    FTempoPt: Integer;                  // tempo point being dragged (0 = the base tempo)
+    FTlPushedTempoSig: Double;          // tempo-map signature last handed to the running player
+    FTempoDragStartY: Integer;
+    FTempoDragStartBpm: Double;
     FTlRubberStartX, FTlRubberStartY: Integer;
     FTlRubberX, FTlRubberY: Integer;
     FTlClipboard: TClipState;
@@ -1797,6 +2551,7 @@ type
     FColorPreviewColor: TColor;   { swatch colour for pbColorPreview - a plain TColor field, not the
       paintbox's own property, so pbColorPreviewPaint has something to read on every repaint (paint
       via Canvas, not a themed control's .Color, so it renders correctly under an active VCL style) }
+    FColorExtraKeys: TArray<string>;          { index-parallel to FColorSwatchList: '' for a fixed swatch, else the ExtraFx key }
     FColorSwatchList: TArray<TColorSwatch>;   { lbColorSwatches.Items, index-parallel - not every
       TColorSwatch is listed (Log: Trace/Debug/Info are left out, see lvLogCustomDrawItem: only
       Warn/Error/Critical actually change anything, so showing the other three would just be a
@@ -1809,23 +2564,22 @@ type
       via raw Windows menu-loop messages, which only the VCL/Delphi build
       receives through this "message" binding - under FPC/LCL the flag
       simply stays False (its pre-existing, unguarded behaviour). }
-    FMixBuffer: TBitmap;
-    FMixAutoBuffer: TBitmap;   // offscreen buffer for pbMixAutoPaint, mirrors FMixBuffer
     FFxName: string;
     FFxItem, FFxItems, FFxPer, FFxDone, FFxTotal: Integer;
-    FFxLog: TMemo;
-    FDspBuffer: TBitmap;       // offscreen buffer for pbSpectrumPaint, mirrors FMixBuffer
+    FFxLog: TLogSink;
     FMixStripRects: array of TRect;    // last-painted strip hit-boxes, index-parallel to strip order
     FMixStripIds: array of Integer;
-    FMixClipRects: array of TRect;     // combined L/R clip-LED hit-box, index-parallel to FMixClipIds
-    FMixClipIds: array of Integer;
-    FMixInsertDotRects: array of TRect;  // one per painted insert dot, this-tick only
-    FMixInsertDotStripId: array of Integer;
-    FMixInsertDotIndex: array of Integer;
+    FTlHdrSig: string;                 // what TlHeaderSync last built the header widgets for
+    FTlHdrSyncPosted: Boolean;
+    FMixPickMenu: TPopupMenu;          // transient + FX / + Send chooser (MixShowPick)
+    FMixPickStrip: Integer;
+    FMixPickKind: TMixPickKind;
+    FMixSig: string;                   // what MixSyncStrips last laid out (see MixStripSignature)
+    FMixSyncPosted: Boolean;
+    FMixFirst: Integer;                // horizontal scroll of the strips, in pixels (wheel / arrows / scroll bar)
+    FMixScrollSync: Boolean;           // MixSyncStrips is writing the scroll bar
+    FMixViewApplying: Boolean;         // the stored fold state is being applied to the EQ panel
     FMixZoomFactor: Double;            // tbMixZoom-driven strip-width scale, persisted (CFG_UI_MIXER_STRIP_WIDTH)
-    FMixDragMode: TMixDragMode;
-    FMixDragStripId: Integer;
-    FMixDragInsertIndex: Integer;
     FMixAutoParam: TAutomationParam;
     FMixAutoTarget: Integer;
     FMixAutoSub: Integer;
@@ -1843,7 +2597,6 @@ type
     FRecCommitted: Boolean;
     FRecStarted: UInt64;
     FRecovery2: TRecordingRecovery;
-    FRecBuffer: TBitmap;              // offscreen buffer for pbRecTakesPaint, mirrors FTlBuffer/FMixBuffer
     FRecTakeRects: TArray<TRect>;     // hit-test rects, index-parallel with FRecTakeIds
     FRecTakeIds: TArray<string>;      // TRecordedTake.Id (a session-folder string, not an integer)
     FRecSelectedTakeId: string;       // '' = no take selected
@@ -1854,21 +2607,45 @@ type
     FCompSwipeOn: Boolean;
     FCompSwipeTake, FCompSwipeX0, FCompSwipeX1: Integer;
     FMixPreview: string;
+    FMixPickTag: Integer;              // effect picked from the + FX menu, waiting for its editor
+    FMixPickPending, FMixPickBusy: Boolean;
+    FMixViewTracker: Boolean;          // the Mixer tab shows the Tracker mixer, not the Timeline's
     FMixRefreshing: Boolean;
+    FMixEqSyncing: Boolean;            // MixEqSync is writing the sliders - ignore their OnChange
     FTrkSelRow: Integer;
     FTrkSelChn: Integer;
+    { right-drag highlighted area of the pattern grid (rows / channels, either corner first) }
+    FTrkRgnOn: Boolean;
+    FTrkRgnR1, FTrkRgnC1, FTrkRgnR2, FTrkRgnC2: Integer;
+    FTrkRgnDrag, FTrkRgnMoved, FTrkNoPopup: Boolean;
+    FTrkClip: TTrackerCellArray;       // copied cells, row-major
+    FTrkClipRows, FTrkClipChn: Integer;
     FTrkPreview: string;
     FTrkRefreshing: Boolean;
-    FTrkPatternBuffer, FTrkSequenceBuffer: TBitmap;
     FTrkLastPattern, FTrkLastRow, FTrkLastOrder, FTrkLastScroll: Integer;
     FTrkSeqScroll: Integer;    // first visible order step in the sequence strip
+    FTrkSeqSel: TArray<Integer>;   // Ctrl+click multi-selection of order steps (ascending); exported together
     FTrkGridRowScroll: Integer;       // manual pattern-grid row scroll (mouse wheel); -1 = auto-follow selection/playback
     FTrkGridChnScroll: Integer;       // first visible channel column in the pattern grid (sbTrkChn)
     FTrkGridLastFirstRow: Integer;    // firstRow actually painted last (pbTrackerPaint), for click hit-testing
     FTrkInstrIndex: Integer;          // 1-based selected instrument on the Instruments sub-tab; 0 = none
-    FTrkInstrWaveBuffer: TBitmap;
     FTrkPlayer: TTrackerPlayer;
+    FTrkMeter: array of Double;        // per-channel meter fraction 0..1 (instant rise, steady fall)
+    FTrkAudPlayer: TTrackerPlayer;     // one-note audition of the cell just typed (see TrkAuditionNote)
+    FTrkAudModule: TTrackerModule;     // scratch module the audition player reads; owned
     FTrkPlaying: Boolean;
+    FTrkInstrSync: Boolean;           // guards the two instrument combos against changing each other
+    FTrkPaused: Boolean;              // playing but held (Pause): the player keeps its position
+    FTrkField: Integer;               // 0 note, 1 instrument, 2 volume, 3 effect letter, 4 effect parameter
+    FTrkOctave: Integer;              // octave the piano keys enter notes in
+    FTrkFxChn: Integer;               // channel the Effect popup acts on
+    FTrkCharW: Integer;               // width of one grid character, measured by the painter
+    FTrkGridScroll, FTrkGoalFirstRow, FTrkGridLastScroll: Double;   // animated row scroll
+    FTrkAnimRow, FTrkAnimCol, FTrkAnimFx, FTrkAnimFw: Double;       // gliding cursor
+    FTrkHovRow, FTrkHovCol, FTrkHovAlpha: Double;                   // gliding hover highlight
+    FTrkHovGoalRow, FTrkHovGoalCol: Integer;
+    FTrkPlayGlide, FTrkPhase: Double;
+    FTrkAnimInit: Boolean;
     FMidiClipIndex: Integer;
     FMidiTrackIndex: Integer;
     FMidiEngine: IAudioSource;         // TMidiPlaybackEngine held as an interface
@@ -1883,6 +2660,13 @@ type
     FMidiScaleHighlight: Boolean;
     FMidiRangeDragging: Boolean;          { Ctrl+left-drag highlights a tick range }
     FMidiRangeActive: Boolean;
+    FTrkNotation: TDictionary<Integer, TTrackerNotation>;   // module notes per Timeline source id
+    FMidiZoomX: Double;          // piano roll horizontal zoom (1 = whole clip fits)
+    FMidiViewStart: Int64;       // first visible tick
+    FMidiVHi: Integer;           // top of the visible note window (exclusive); 0 = centre on middle C
+    FMidiVBusy: Boolean;         // sbMidiV is being updated from the view, not by the user
+    FMidiHBusy: Boolean;         // sbMidiH is being updated from the view, not by the user
+    FMidiLo, FMidiHi: Integer;   // visible note range, fitted to the clip's notes
     FMidiRangeAnchor, FMidiRangeStart, FMidiRangeEnd: Int64;
     FMidiScaleRoot: Integer;    // 0=C .. 11=B
     FMidiScaleType: Integer;    // index into MIDI_SCALES (see NoteInScale)
@@ -1933,16 +2717,40 @@ type
     function McpServerGetDoc: TProjectDocument;
     function McpServerGetCommands: TCommandManager;
     function McpServerTransport(const AAction: string; AFromBeginning: Boolean): string;
+    function McpUICommand(const ACall: TAIToolCall): string;
+    function UICommandNow(const ACall: TAIToolCall): string;
     procedure RefreshMp4Tab;
     procedure RefreshMidiTab;
     function CurrentMidiSeq: TMidiSequence;
     procedure StopLiveRecording;
+    procedure StopEverythingForClose;
     function RecordingPosition: Double;
     function RecordingRootPath: string;
     procedure RefreshRecordingTab;
     procedure EnsureMixerStripsForTimelineTracks;
     procedure RefreshMixerTab;
     procedure RefreshTrackerTab(AFull: Boolean = True);
+    function TrkFieldAt(AOffsetX: Integer): Integer;
+    function TrkEditAllowed: Boolean;
+    procedure TrkRevealChannel;
+    function TrkGridKey(var Key: Word; Shift: TShiftState): Boolean;
+    procedure TrkAuditionNote(const ACell: TTrackerCell);
+    procedure TrkMidiRecord(const AMsg: TMidiMessage; ATimestampMs: Cardinal);
+    procedure TrkFreeAudition;
+    procedure TrkPlayOrResume;
+    procedure TrkPlayPattern;
+    procedure TrkStartPlay(ALoopPattern: Integer);
+    procedure TrkPause;
+    procedure TrkGoStart;
+    procedure TrkGoLastPattern;
+    procedure TrkSendToTimeline;
+    procedure TrkProjectChanged;
+    procedure TrkApplyChannelFx(AChannel: Integer; const AKind, AParams, AName: string);
+    procedure TrkChannelFxClick(AChannel, AX, AY: Integer);
+    procedure TrkOpenMixerForChannel(AChannel: Integer);
+    procedure MixScrollStripIntoView(AId: Integer);
+    function TrkChannelFxOf(AChannel: Integer): TTrackerChannelFx;
+    function TrkChannelStrip(AChannel: Integer): TMixStrip;
     function SelectedTrackerPattern: Integer;
     function SelectedMixStripId: Integer;
     function ExtractSidechainParam(var AParams: string): Integer;
@@ -1954,15 +2762,60 @@ type
     procedure TlHistoryItemClick(Sender: TObject);
     function TimelineGrid: TGridContext;
     function TlLaneWidth: Integer;
+    { ---- Clip Stage (clip launcher): scenes are Timeline regions, one slot per
+      track holding that track's own content of the region ---- }
+    function TlLaneStackH: Integer;
+    procedure TlApplyViewMetrics;
+    procedure TlPaintLaneStack(cv: TGLCanvas; AWidth: Integer);
+    function TlLaneMouseDown(X, Y: Integer; Shift: TShiftState; Button: TMouseButton): Boolean;
+    procedure TlLaneMouseUp;
+    function TlStageCols: Integer;
+    function TlStageSceneColor(AIndex: Integer): TColor;
+    procedure TlStageUpdateHint(X, Y: Integer);
+    procedure TlStageStopScene(ARegion: TTimelineRegion);
+    procedure TlStageDeleteScene(ASceneId: Integer);
+    function TlStageWidth: Integer;
+    function TlHdrW: Integer;
+    function TlStageSceneRect(ACol: Integer): TRect;
+    function TlStageCellRect(ACol, ATop, ALaneH: Integer): TRect;
+    function TlStageBackRect(ATop, ALaneH: Integer): TRect;
+    function TlArmedAudioTrackId: Integer;
+    function TlStageQuantSeconds: Double;
+    function TlStageActivateTime: Double;
+    function TlStageLaunchIndex(ATrackId: Integer): Integer;
+    function TlRegionById(AId: Integer): TTimelineRegion;
+    function TlStageSlotHasClips(ATrk: TTimelineTrack; ARegion: TTimelineRegion): Boolean;
+    procedure TlStageSetLaunch(ATrk: TTimelineTrack; ARegion: TTimelineRegion;
+      ASilent: Boolean; AActivateAt: Double);
+    procedure TlStageLaunchCell(ATrk: TTimelineTrack; ARegion: TTimelineRegion);
+    procedure TlStageLaunchScene(ARegion: TTimelineRegion);
+    procedure TlStageBack;
+    procedure TlStagePushToPlayer;
+    procedure TlStageCheckFinished;
+    procedure TlStageSceneChanged(ASceneId: Integer);
+    function TlSceneEdgeGrab(X: Integer): Boolean;
+    function TlPickedScene: TTimelineRegion;
+    procedure TlStageAddScene;
+    function TlStageMouseDown(X, Y: Integer; Button: TMouseButton): Boolean;
+    procedure TlStagePaintSceneHeader(cv: TGLCanvas);
+    procedure TlStagePaintCells(cv: TGLCanvas; ATrk: TTimelineTrack; ATop, ALaneH: Integer;
+      AColor: TColor);
+    procedure TlStagePaintBanner(cv: TGLCanvas; ATrk: TTimelineTrack; ALaunch: Integer;
+      ATop, ALaneH, AWidth: Integer; AColor: TColor);
+    function TlDrawTrackerNotation(cv: TGLCanvas; AClip: TTimelineClip; ASrc: TMediaSource;
+      const ARect: TRect; AColor: TColor; AThick: Integer): Boolean;
+    procedure TlDrawMidiDashes(cv: TGLCanvas; AClip: TTimelineClip; const ARect: TRect;
+      AT0, AT1: Double; AColor: TColor; AThick: Integer);
+    procedure TlStageMiniWave(cv: TGLCanvas; AClip: TTimelineClip; ARegion: TTimelineRegion;
+      const ARect: TRect; AColor: TColor);
     function TlTrackTop(AIndex: Integer): Integer;
     function TlTracksContentHeight: Integer;
+    function TlAddChannelRect: TRect;
     function TlMaxVScroll: Integer;
     function TlExtraTrackIndex(AId: Integer): Integer;
     function TlRangeTrackIds: TArray<Integer>;
     procedure TlExtraTrackRemove(AId: Integer);
     function TlTrackAtY(AY: Integer; out ATrackIndex: Integer): Boolean;
-    function TlMuteButtonRect(ATop: Integer): TRect;
-    function TlTempoUnknownRect(ATop, ALaneH: Integer): TRect;
     function TlPrimaryTempoUnknown(ATrack: TTimelineTrack): Boolean;
     procedure ApplyBaselineTempoOnImport(AClipId: Integer);
     procedure TlTempoUnknownClick;
@@ -1972,11 +2825,14 @@ type
     function TlClipRegionAtSec(AClip: TTimelineClip; ASec: Double;
       out AStartSec, AEndSec: Double; out ARegion: TClipEffectRegion): Boolean;
     procedure TlShowEffectMenu(AX, AY: Integer);
+    procedure TlEffectMenuOrEdit(AButton: TMouseButton; AX, AY: Integer);
+    function TlRegionAudioBefore(out APlanar: TAudioPlanar; out ARate: Integer): Boolean;
     function TlFxPreset(ATag: Integer; out AKind, AParams, AName: string): Boolean;
     function TlFxPresetByName(const AName: string; out AKind, AParams: string): Boolean;
     function TlMasterTrack: TTimelineTrack;
     procedure TlNoteEffectAdded(AStripId: Integer; const AEffectName: string);
     function TlEffectColor(const AEffectName: string): TColor;
+    function TlExtraAudioFxNames: TArray<string>;
     function TlClipRegions(AClip: TTimelineClip): TArray<TClipEffectRegion>;
     function TlClipAtPoint(AX, AY: Integer): TTimelineClip;
     function TlHitTestClipEdge(AClip: TTimelineClip; AX: Integer; out AEdge: TClipEdge): Boolean;
@@ -1991,7 +2847,7 @@ type
     procedure TlSplitAtRangeEdges;
     procedure TlSplitTracksAtRangeEdges(const ATrackIds: TArray<Integer>);
     function TlRangeScopeTrackIds: TArray<Integer>;
-    function TlCopyRangeToClipboard: Boolean;
+    function TlCopyRangeToClipboard(const AScope: TArray<Integer> = nil): Boolean;
     procedure TlClearRangeOnTracks(const ATrackIds: TArray<Integer>; ARemoveMarkersRegions: Boolean);
     procedure TlNoteClipboardSource(var ASources: TArray<TTlClipboardSource>; ASourceId: Integer);
     function TlResolveClipboardSource(const ASources: TArray<TTlClipboardSource>; ASourceId: Integer): Integer;
@@ -1999,11 +2855,18 @@ type
     procedure TlMergeTrackTitle(ATrackId: Integer; const ATitle: string);
     procedure TlApplyEffectToRange(const AKind, AParams, AEffectName: string);
     procedure TlSplitStemsSelected;
+    procedure TlSplitSpeechMusicSelected;
+    procedure TlMeasureRangeReport;
     procedure TlAudioToMidiSelected;
     procedure TlApplySilenceToRange;
     function TlUndoEffectInRange: Boolean;
     function TlHealMissingEffectSources: Boolean;
     function MidiRowHeight: Integer;
+    function PrGridTop: Integer;
+    function PrGridBottom: Integer;
+    function PrSpanTicks: Int64;
+    function PrChordOffsetSec: Double;
+    function PrChordAtX(AX: Integer): TTimelineChord;
     function MidiNoteAtY(AY: Integer): Integer;
     function MidiTickAtX(AX: Integer): Int64;
     function MidiFindNoteAt(AX, AY: Integer; out ATrk: TMidiTrackSeq; out ANote: TMidiNote): Boolean;
@@ -2011,8 +2874,8 @@ type
     function MidiNoteInScale(ANote: Integer): Boolean;
     procedure PopulateBrowserRoots;
     procedure BrowserAddRoot(const APath: string);
-    function BrowserNodePath(ANode: TTreeNode): string;
-    procedure BrowserExpandNode(ANode: TTreeNode);
+    function BrowserNodePath(ANode: TGLTreeNode): string;
+    procedure BrowserExpandNode(ANode: TGLTreeNode);
     function BrowserIsAudioExt(const AExt: string): Boolean;
     function ImportBrowserFileToTimeline(const APath: string; ATrackId: Integer;
       AStartSeconds: Double): Boolean;
@@ -2031,7 +2894,7 @@ type
     procedure SyncEffectMenus;
     function TlSplitTrackAt(ATrk: TTimelineTrack; ASeconds: Double): Double;
     procedure TlApplyVideoEffect(const AInfo: TVideoFxInfo);
-    procedure TlPaintVideoFx(ACv: TCanvas; ATrk: TTimelineTrack; ATop, ALaneH, AW: Integer);
+    procedure TlPaintVideoFx(ACv: TGLCanvas; ATrk: TTimelineTrack; ATop, ALaneH, AW: Integer);
     procedure TlUpdateVideoFxPreview;
     procedure TlFxThumbReady;
     function TlFxClipFrame(AClip: TTimelineClip; AT: Double; AThumb: TVideoThumbnailer;
@@ -2050,7 +2913,7 @@ type
       FxItem(no) / FxStage / FxStageDone, finally FxEnd. Status bar shows
       "effect - item i/n - stage k/m: what (pct)  [overall d/t stages]" and each
       completed stage is logged to the given memo. }
-    procedure FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TMemo);
+    procedure FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TLogSink);
     procedure FxItem(ANo: Integer);
     procedure FxStage(AStageNo: Integer; const AWhat: string; APct: Integer);
     procedure FxStageDone(AStageNo: Integer; const AWhat: string);
@@ -2059,6 +2922,8 @@ type
     procedure ShowStatusBusy(const AText: string);
     procedure UpdateStatusProgress(AValue: Integer; const AText: string = '');
     procedure HideStatusProgress;
+    procedure AddLiveTrackerClip(const AFileName, AKindLabel: string);
+    function ImportTrackerFileToTimeline(const APath: string; AShowTracker: Boolean = True): Boolean;
     procedure ImportTrackerModuleToTimeline(AModule: TTrackerModule;
       const ASourceFileName, AKindLabel: string);
     procedure TrkImportRenderProgress(Sender: TObject; AFraction: Double);
@@ -2066,6 +2931,14 @@ type
     procedure WarmClipWaveform(ASourceId: Integer; AProgressBase: Integer = 0;
       AProgressSpan: Integer = 100; AShowProgress: Boolean = True);
     procedure RefreshSystemTab;
+    procedure SysInfoAddApplication(AInfo: TSysInfo);
+    procedure FillDisplayPage;
+    procedure FillDisplayModes(const AWant: TDisplayMode);
+    procedure UpdateDisplayControls;
+    procedure RefreshGlInfoLabels;
+    procedure SaveDisplaySettings(AMode: TScreenMode; const ADevice: string; const AWant: TDisplayMode);
+    procedure ApplyDisplayFromConfig;
+    procedure UpdateFpsOverlay;
     procedure LoadSettingsTab;
     procedure InstallControlHints;
     function ProjectFingerprint: string;
@@ -2078,7 +2951,6 @@ type
     procedure LoadKeyHooksTab;
     procedure SaveSettingsTab;
     procedure ApplyDirDialogs;
-    procedure PumpLog;
     procedure RefreshJobs;
     procedure RefreshAudio;
     procedure RunDspAnalysis;
@@ -2089,12 +2961,20 @@ type
     procedure RunGraphAnalysis;
     procedure OpenInShell(const APath: string);
     procedure RefreshProjectTab;
+    procedure RefreshProjectMenus;
+    procedure ShowProjectStartScreen;
     procedure ProjectTick;
     function SelectedWavFormat: TWavSampleFormat;
     function Mp3TabTone(AFreqL, AFreqR: Double; AFrames: Integer): TAudioPlanar;
     procedure OpenProjectFile(const AFileName: string; AAsRecovery: Boolean);
     procedure ReportProjectError(const AWhat: string; E: Exception);
-    procedure LogViewerFormClose(Sender: TObject; var Action: TCloseAction);
+    function FoleyPlayheadSeconds: Double;
+    function FoleyTimelinePlaying: Boolean;
+    procedure FoleyCommitHits(const AHits: TArray<TFoleyHit>);
+    procedure FoleyPlaceClip(const AFile: string; ASeconds: Double);
+    procedure FoleyInsertAtPlayhead(const AFile: string; ASeconds: Double);
+    procedure FoleyInsertAtPlayheadNow(const AFile: string; ASeconds: Double);
+    function MasterStripForMeters: TMixStrip;
     procedure VST2EditorClosing(Sender: TObject);
     function OpenVST2EditorForInsert(AStripId, AIndex: Integer): Boolean;
     procedure CaptureOpenWindowLayout;
@@ -2112,7 +2992,7 @@ implementation
 {$R *.dfm}
 {$ENDIF}
 
-uses
+uses UDAW.DSP.MathTables,
   UDAW.Platform;
 
 { Themed one-field prompt with the edit box BELOW the (wrapped) prompt text,
@@ -2120,7 +3000,7 @@ uses
 function PromptValueBelow(const ACaption, APrompt: string; var AValue: string): Boolean;
 var
   f: TForm;
-  lbl: TLabel;
+  lbl: TGLLabel;
   ed: TEdit;
   ok, cancel: TButton;
 begin
@@ -2130,7 +3010,7 @@ begin
     f.BorderStyle := bsDialog;
     f.Position := poOwnerFormCenter;
     f.ClientWidth := 520;
-    lbl := TLabel.Create(f);
+    lbl := TGLLabel.Create(f);
     lbl.Parent := f;
     lbl.WordWrap := True;
     lbl.AutoSize := False;
@@ -2211,7 +3091,32 @@ procedure TfrmMain.FormCreate(Sender: TObject);
 var
   i: Integer;
 begin
+  mnuProject.MenuIndex := 0;   // the Project menu is always the first menu
+  TimelinePumpHook := JobPump;
+  { every file dialog opens where it was last used in this project, and the project saves that }
+  GLDialogRecall := function(const AKey: string): string
+    begin
+      if FProject <> nil then Result := FProject.DialogPaths.Get(AKey) else Result := '';
+    end;
+  GLDialogRemember := procedure(const AKey, APath: string)
+    begin
+      if FProject <> nil then FProject.DialogPaths.Put(AKey, APath);
+    end;
+  { the video pane is never taller than 290 px (the widget set does not stream Constraints,
+    so it is set here rather than in the form file) }
+  pnlTlVideo.Constraints.MaxHeight := 290;
   FTlVideo := TTimelineVideoPlayer.Create(pnlTlVideo);
+  { the picture follows the Timeline tempo (live rate and tempo-map changes) like the sound }
+  FTlVideo.WarpFunc :=
+    function(AFrom, ATo: Double): Double
+    begin
+      if FTlPlayer <> nil then Result := FTlPlayer.WarpedElapsed(AFrom, ATo) else Result := ATo - AFrom;
+    end;
+  FTlVideo.RateFunc :=
+    function(ATime: Double): Double
+    begin
+      if FTlPlayer <> nil then Result := FTlPlayer.VideoRate(ATime) else Result := 1.0;
+    end;
   FTlThumbBmp := TBitmap.Create;
   FTlThumbnailer := TVideoThumbnailer.Create(TlThumbReady);
   FTlFxThumbA := TVideoThumbnailer.Create(TlFxThumbReady);
@@ -2221,8 +3126,10 @@ begin
   FTlFxBmp := TBitmap.Create;
   FTlRubberBandMods := [ssShift];
   Caption := Format('UDAW - by Ultimanium Designs (C) 2026 - %s', [UDAWDisplayVersionString]);
-  lblHeader.Caption := 'Ultimanium Audio Studio  -  system diagnostics (platform, audio engine, graph, project, PCM/WAV, timeline, recording)';
+  lblHeader.Caption := Format('%s  -  version %s  -  system diagnostics (platform, audio engine, graph, project, PCM/WAV, timeline, recording)',
+    [UDAW_PRODUCT_NAME, UDAWDisplayVersionString]);
   {$IFNDEF FPC}
+  { Registration disabled - UDAW is the full version and the Registration page is hidden.
   edtRegUsername.Text := TUDAWLicense.CachedUsername;
   edtRegSerial.Text := TUDAWLicense.CachedSerial;
   lblRegVersion.Caption := 'Installed version: ' + UDAWNumericVersion;
@@ -2232,11 +3139,10 @@ begin
       UpdateRegistrationUI;
     end;
   UpdateRegistrationUI;
+  }
+  tabRegistration.TabVisible := False;
   {$ENDIF}
   FTrackedJobs := TList.Create;
-  FTrkPatternBuffer := TBitmap.Create;
-  FTrkSequenceBuffer := TBitmap.Create;
-  FTrkInstrWaveBuffer := TBitmap.Create;
   pbTracker.ControlStyle := pbTracker.ControlStyle + [csOpaque];
   pbTrkSequence.ControlStyle := pbTrkSequence.ControlStyle + [csOpaque];
   pbTrkInstrWave.ControlStyle := pbTrkInstrWave.ControlStyle + [csOpaque];
@@ -2260,17 +3166,6 @@ begin
     if App.Config.GetBool(CFG_SEC_UI, CFG_UI_MAXIMIZED, False) then WindowState := wsMaximized;
   end;
   FWindowStateReady := True;
-
-  cboLevel.Items.Clear;
-  cboLevel.Items.Add('trace');
-  cboLevel.Items.Add('debug');
-  cboLevel.Items.Add('info');
-  cboLevel.Items.Add('warn');
-  cboLevel.Items.Add('error');
-  cboLevel.Items.Add('critical');
-  cboLevel.ItemIndex := cboLevel.Items.IndexOf(LowerCase(LevelName(Logger.MinLevel)));
-  if cboLevel.ItemIndex < 0 then
-    cboLevel.ItemIndex := 2;
 
   cboDspSignal.Items.Clear;
   cboDspSignal.Items.Add('Sine 440 Hz');
@@ -2381,6 +3276,10 @@ begin
 
   FTlView := TTimelineView.Create;
   FTlView.SetHeaderWidth(150);
+  FStageQuantIdx := 2;
+  FLanesVisible := True;
+  FStageActiveScene := -1;
+  FStageCtxSceneId := -1;
   FTlView.SetRulerHeight(26);
   FTlView.SetTrackTitleHeight(14);
   FTlView.SnapMode := smSample;
@@ -2389,23 +3288,13 @@ begin
   FTlSelectedTrackId := -1;
   FTlHaveSelectionClipboard := False;
   FRecInsertSeconds := 0;
-  FTlBuffer := TBitmap.Create;
-  FTlMeterBuffer := TBitmap.Create;
   FTlSpectrum := TSpectrumAnalyzer.Create;
   SetLength(FTlSpecTap, 2048);
-  FMixBuffer := TBitmap.Create;
-  FMixAutoBuffer := TBitmap.Create;
-  FRecBuffer := TBitmap.Create;
   FRecSelectedTakeId := '';
-  FDspBuffer := TBitmap.Create;
   FTlTrimClipId := -1;
   FTlFadeClipId := -1;
-  { pbTimeline is already fully double-buffered (paint goes into FTlBuffer,
-    one Draw blits it) - csOpaque tells the VCL/LCL paint machinery this
-    control always fills its own client area, so it skips erasing the
-    background (WM_ERASEBKGND) before OnPaint fires. Without it, a resize
-    still shows a brief flash of the parent panel's colour under the new
-    area before the buffered paint catches up. }
+  { pbTimeline (TGLView) is an OpenGL back-buffered surface that always fills
+    its own client area; csOpaque (set by TGLView) skips the background erase. }
   pbTimeline.ControlStyle := pbTimeline.ControlStyle + [csOpaque];
   { pbTlMeters (Timeline Out L/R graphs) is buffered the same way - see
     FTlMeterL/FTlMeterR's declaration comment. }
@@ -2431,11 +3320,6 @@ begin
   FRecovery.Interval := ai5Min;
   FOpenVST2Editors := TList<TfrmVST2Editor>.Create;
 
-  cboRecChannels.Items.Clear;
-  cboRecChannels.Items.Add('Mono');
-  cboRecChannels.Items.Add('Stereo');
-  cboRecChannels.Items.Add('4-channel');
-  cboRecChannels.ItemIndex := 1;
   cboRecFormat.Items.Clear;
   cboRecFormat.Items.Add('IEEE float 32-bit');
   cboRecFormat.Items.Add('PCM 24-bit');
@@ -2503,6 +3387,7 @@ begin
   cboMixInsertKind.Items.Add('Mastering Chain');
   cboMixInsertKind.Items.Add('Tube Saturation');
   cboMixInsertKind.Items.Add('Soft Clip');
+  cboMixInsertKind.Items.Add('Ducker (sidechain)');
   cboMixInsertKind.ItemIndex := 3;
 
   cboMixAutoParam.Items.Add('Fader');
@@ -2531,6 +3416,10 @@ begin
   FTrkGridChnScroll := 0;
   FTrkGridLastFirstRow := 0;
   FTrkInstrIndex := 1;
+  FTrkOctave := 4;
+  FTrkCharW := 7;
+  FTrkHovGoalRow := -1;
+  FTrkHovGoalCol := -1;
   FTrkPreview := '(press Play pattern)';
 
   cboScopeSignal.Items.Clear;
@@ -2577,8 +3466,6 @@ begin
   FSunoRefs := TStringList.Create;
   FMcpBridge := TMCPToolBridge.Create;
 
-  RefreshSystemTab;
-  PumpLog;
   RefreshAudio;
   RefreshProjectTab;
   RefreshMixerTab;
@@ -2586,6 +3473,16 @@ begin
   RefreshMp4Tab;
   RefreshMidiTab;
   FMidiMonitorSynth := TMidiSynth.Create;
+  FDrum := TDrumMachine.Create;
+  FDrumIntf := FDrum;
+  FDrumPanels := TList<TDrumInstrumentPanel>.Create;
+  FDrumHeld := -1;
+  FDrumPad := DRUM_BASE_NOTE;
+  FDrumBase := DRUM_BASE_NOTE;
+  FPatSel := -1;
+  if DrumKitFile <> '' then FDrum.LoadKit(DrumKitFile);
+  DrumApplyProject;   // the blank project adopts the player's kit; a project that is opened brings its own
+  TMidiSynth.SharedDrum := FDrum;
   FMidiCapture := TMidiCaptureEngine.Create;
   FMidiCapture.Monitor := FMidiMonitorSynth;
   FMidiInDevice := TMidiInputDevice.Create;
@@ -2596,15 +3493,20 @@ begin
   RefreshAiTab;
   PopulateBrowserRoots;
   RestoreStartupProject;
-  pgc.ActivePage := tabProject;
+  pgc.ActivePage := tabTimeline;   // Timeline is the default workspace
   pgcChange(pgc);
+  { the Project Startup screen opens once the main window is up }
+  FDisplay := TDisplayController.Create(Self);
+  FillDisplayPage;
+  TThread.ForceQueue(nil, ApplyDisplayFromConfig, 150);
+  TThread.ForceQueue(nil, ShowProjectStartScreen, 600);   // after the Timeline has been shown and drawn
 end;
 
 { Only one tab's menu is ever visible on mnuMain at a time - each tab's action
   buttons live in its own top-level menu (Tracker, Mixer, ...); this shows
   whichever one matches the active page and hides the rest, so the menu bar
   never grows past one contextual menu regardless of how many tabs exist. }
-function TfrmMain.ActiveWorkspacePage: TTabSheet;
+function TfrmMain.ActiveWorkspacePage: TGLPage;
 begin
   Result := pgc.ActivePage;
   if Result = tabSettings then
@@ -2616,11 +3518,11 @@ end;
 
 procedure TfrmMain.pgcChange(Sender: TObject);
 begin
-  mnuTracker.Visible := pgc.ActivePage = tabTracker;
-  mnuMixer.Visible := pgc.ActivePage = tabMixer;
-  mnuMidi.Visible := pgc.ActivePage = tabMIDI;
+  mnuTracker.Visible := TabIs(tabTracker);
+  mnuMixer.Visible := TabIs(tabMixer);
+  mnuMidi.Visible := TabIs(tabMIDI);
   mnuTimeline.Visible := pgc.ActivePage = tabTimeline;
-  mnuProject.Visible := pgc.ActivePage = tabProject;
+  mnuProject.Visible := True;   // the Project menu (new / open / save ...) is always on the bar
   mnuMp3.Visible := ActiveWorkspacePage = tabMP3;
   mnuSystem.Visible := ActiveWorkspacePage = tabSystem;
   mnuLog.Visible := True;
@@ -2629,16 +3531,22 @@ begin
   mnuDsp.Visible := ActiveWorkspacePage = tabDSP;
   mnuGraph.Visible := ActiveWorkspacePage = tabGraph;
   mnuWav.Visible := ActiveWorkspacePage = tabWav;
-  mnuRecording.Visible := pgc.ActivePage = tabRecording;
+  mnuRecording.Visible := TabIs(tabRecording);
   mnuSecure.Visible := ActiveWorkspacePage = tabSecure;
   mnuMp4.Visible := ActiveWorkspacePage = tabMP4;
   mnuSettings.Visible := pgc.ActivePage = tabSettings;
   mnuScope.Visible := ActiveWorkspacePage = tabScope;
   mnuAdvDsp.Visible := ActiveWorkspacePage = tabAdvDsp;
-  mnuAi.Visible := pgc.ActivePage = tabAI;
+  mnuAi.Visible := TabIs(tabDockAi);
+
+  { the Timeline tab now has its real size: put the editor dock at the splitter position that
+    was saved with the project (it could not be measured while the tab was hidden) }
+  if (pgc.ActivePage = tabTimeline) and (FTlMode = 0) then TlApplyDockHeight;   // 0 = the arrangement mode
 
   if pgc.ActivePage = tabSettings then
     sbSettings.VertScrollBar.Position := 0;
+  if ActiveWorkspacePage = tabSystem then RefreshSystemTab
+  else if ActiveWorkspacePage = tabGlDisplay then RefreshGlInfoLabels;
 end;
 
 const
@@ -2648,6 +3556,58 @@ const
   { Not a window: Left = pixels-per-second * 1000, Top = scroll seconds * 1000
     (reuses the layout section so no project format change is needed). }
   WINKEY_TIMELINEVIEW = 'TimelineView';
+  { Not a window either: Left = height of the editor dock under the Timeline lanes (the
+    splitter above it). The track-header column width is saved by the Timeline itself. }
+  WINKEY_TIMELINESPLIT = 'TimelineSplitters';
+  { Not a window either: Left = which Timeline switches are on (TL_TOG_* bits below) - the transport
+    bar's video / editor / clip stage / browser / metronome buttons and the Lanes / Chords
+    checkboxes - so every one of them comes back as it was when the project loads. }
+  WINKEY_TIMELINETOGGLES = 'TimelineToggles';
+  { Not a window either: Left = 1 when the Mixer tab shows the Tracker mixer (0 = the Timeline's), so
+    the Tracker master EQ and strips are what comes up when the project is opened. }
+  WINKEY_MIXERVIEW = 'MixerView';
+  TL_TOG_VIDEO_OFF = 1;
+  TL_TOG_EDITOR_ON = 2;
+  TL_TOG_STAGE_ON = 4;
+  TL_TOG_BROWSER_OFF = 8;
+  TL_TOG_METRONOME_ON = 16;
+  TL_TOG_LANES_OFF = 32;
+  TL_TOG_CHORDS_ON = 64;
+
+{ File and folder names in the order a person looks for them: alphabetical, ignoring case, with
+  numbers compared as numbers (Kick 2 before Kick 10) - the same order Explorer uses }
+{$IFNDEF FPC}
+function StrCmpLogicalW(psz1, psz2: PWideChar): Integer; stdcall; external 'shlwapi.dll';
+{$ENDIF}
+
+function BrowserNameCompare(const A, B: string): Integer;
+begin
+  {$IFNDEF FPC}
+  Result := StrCmpLogicalW(PWideChar(A), PWideChar(B));
+  {$ELSE}
+  Result := CompareText(A, B);
+  {$ENDIF}
+end;
+
+function BrowserListCompare(List: TStringList; Index1, Index2: Integer): Integer;
+begin
+  Result := BrowserNameCompare(ExtractFileName(List[Index1]), ExtractFileName(List[Index2]));
+end;
+
+{ the same names (or paths), alphabetically by file name }
+function BrowserSortedNames(const AItems: TArray<string>): TArray<string>;
+var
+  l: TStringList;
+begin
+  l := TStringList.Create;
+  try
+    l.AddStrings(AItems);
+    l.CustomSort(BrowserListCompare);
+    Result := l.ToStringArray;
+  finally
+    l.Free;
+  end;
+end;
 
 function SavedWindowStateOf(AForm: TForm): TSavedWindowState;
 begin
@@ -2682,32 +3642,188 @@ begin
   end;
 end;
 
+{ There is no log window: messages go to the log file. This opens the newest
+  log file in the system's default text viewer (or the log folder if none). }
 procedure TfrmMain.ShowLogClick(Sender: TObject);
+var
+  dir, best: string;
+  sr: TSearchRec;
+  bestTime: TDateTime;
 begin
-  if FLogViewer = nil then
-  begin
-    FLogViewer := TfrmLogViewer.Create(Self);
-    FLogViewer.OnClose := LogViewerFormClose;
-    pnlLogView.Parent := FLogViewer;
-    pnlLogView.Align := alClient;
-    pnlLogView.Visible := True;
-    ApplySavedGeometry(FLogViewer, FProject.Windows.Find(WINKEY_LOGVIEWER));
+  dir := LogFile('');
+  best := '';
+  bestTime := 0;
+  if FindFirst(dir + '*.log', faAnyFile, sr) = 0 then
+  try
+    repeat
+      if (sr.Attr and faDirectory = 0) and (sr.TimeStamp > bestTime) then
+      begin
+        bestTime := sr.TimeStamp;
+        best := dir + sr.Name;
+      end;
+    until FindNext(sr) <> 0;
+  finally
+    FindClose(sr);
   end;
-  FLogViewer.Show;
-  FLogViewer.BringToFront;
+  if best <> '' then ShellExecute(0, 'open', PChar(best), nil, nil, SW_SHOWNORMAL)
+  else ShellExecute(0, 'open', PChar(dir), nil, nil, SW_SHOWNORMAL);
 end;
 
-procedure TfrmMain.LogViewerFormClose(Sender: TObject; var Action: TCloseAction);
+function TfrmMain.FoleyPlayheadSeconds: Double;
 begin
-  { The user closing this window is an explicit "don't reopen it next time" -
-    forget it rather than Put its geometry, or it would come back on every
-    future project load even after being deliberately closed before exit.
-    A window that is still open when the project is saved/closed is
-    remembered separately, by CaptureOpenWindowLayout. }
-  if FProject <> nil then
-    FProject.Windows.Remove(WINKEY_LOGVIEWER);
-  Action := caHide;   // the Log Viewer is a lazy singleton, kept alive for the session
+  if FProject = nil then Result := 0 else Result := FProject.Timeline.PlayheadSeconds;
 end;
+
+function TfrmMain.FoleyTimelinePlaying: Boolean;
+begin
+  Result := FTlPlaying;
+end;
+
+{ Foley hits become clips: one new track per pad that was used, each hit a clip
+  at the playhead time it was struck, all through the undoable import path. }
+procedure TfrmMain.FoleyCommitHits(const AHits: TArray<TFoleyHit>);
+var
+  pads: array[0..15] of Integer;
+  i, placed: Integer;
+begin
+  if FProject = nil then Exit;
+  for i := 0 to 15 do pads[i] := 0;
+  placed := 0;
+  for i := 0 to High(AHits) do
+  begin
+    if (AHits[i].PadIndex < 0) or (AHits[i].PadIndex > 15) then Continue;
+    if pads[AHits[i].PadIndex] = 0 then pads[AHits[i].PadIndex] := TlNewAudioTrackId;
+    if ImportBrowserFileToTimeline(AHits[i].SampleFile, pads[AHits[i].PadIndex], AHits[i].Seconds) then
+      Inc(placed);
+  end;
+  memTimeline.Lines.Insert(0, Format('Foley Sampler: %d of %d hit(s) added to the Timeline.', [placed, Length(AHits)]));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.FoleyPlaceClip(const AFile: string; ASeconds: Double);
+begin
+  if FProject = nil then Exit;
+  if ImportBrowserFileToTimeline(AFile, TlNewAudioTrackId, ASeconds) then
+    memTimeline.Lines.Insert(0, 'Foley Sampler: ' + ExtractFileName(AFile) + ' placed at the playhead.');
+  RefreshTimelineTab;
+end;
+
+{ A Foley pad key was pressed: the pad's sound goes on the selected audio lane (else a Foley
+  lane) at the playhead. When the playhead is inside a clip of that lane the clip is split
+  there and everything after the split moves right by the sound's length, so the sound sits
+  in between the two halves instead of on top of the clip. Each step is an undoable command.
+  With the transport stopped the playhead moves to the end of the sound, so the next key
+  follows on from it. }
+procedure TfrmMain.FoleyInsertAtPlayhead(const AFile: string; ASeconds: Double);
+begin
+  if (FProject = nil) or (AFile = '') then Exit;
+  { the import below pumps the message queue, so a second pad key can arrive while this one is
+    still being placed; it is ignored rather than started on top of the first }
+  if FFoleyBusy then Exit;
+  FFoleyBusy := True;
+  try
+    FoleyInsertAtPlayheadNow(AFile, ASeconds);
+  finally
+    FFoleyBusy := False;
+  end;
+end;
+
+procedure TfrmMain.FoleyInsertAtPlayheadNow(const AFile: string; ASeconds: Double);
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  c, newC, hit: TTimelineClip;
+  trackId, id, i: Integer;
+  before, after: TArray<Integer>;
+  t, len: Double;
+begin
+  tl := FProject.Timeline;
+  t := Max(0.0, ASeconds);
+  trackId := TlSelectedAudioTrackId;
+  if trackId < 0 then
+  begin
+    if (FFoleyTrackId <= 0) or (tl.TrackById(FFoleyTrackId) = nil) then FFoleyTrackId := TlNewAudioTrackId;
+    trackId := FFoleyTrackId;
+  end;
+  trk := tl.TrackById(trackId);
+  if trk = nil then Exit;
+  before := nil;
+  for i := 0 to trk.ClipCount - 1 do before := before + [trk.GetClip(i).Id];
+  if not ImportBrowserFileToTimeline(AFile, trackId, t) then Exit;
+  newC := tl.ClipById(FTlSelClipId);
+  if (newC = nil) or (newC.LengthSeconds <= 0) then Exit;
+  len := newC.LengthSeconds;
+  { an existing clip the playhead is strictly inside? }
+  hit := nil;
+  for id in before do
+  begin
+    c := tl.ClipById(id);
+    if (c <> nil) and (not c.Locked) and (c.StartSeconds < t - 0.001) and (c.EndSeconds > t + 0.001) then
+    begin
+      hit := c;
+      Break;
+    end;
+  end;
+  if hit <> nil then
+  begin
+    FCmds.Perform(TSplitTimelineClipCommand.Create(FProject, hit.Id, t));
+    after := nil;
+    for i := 0 to trk.ClipCount - 1 do
+    begin
+      c := trk.GetClip(i);
+      if (c.Id <> newC.Id) and (c.StartSeconds >= t - 0.001) then after := after + [c.Id];
+    end;
+    for id in after do
+    begin
+      c := tl.ClipById(id);
+      if c <> nil then FCmds.Perform(TMoveTimelineClipCommand.Create(FProject, id, c.StartSeconds + len));
+    end;
+    memTimeline.Lines.Insert(0, Format('Foley: %s inserted at %.3fs - the clip was split and the rest moved %.3fs later.',
+      [ExtractFileName(AFile), t, len]));
+  end
+  else
+    memTimeline.Lines.Insert(0, Format('Foley: %s added at %.3fs.', [ExtractFileName(AFile), t]));
+  FTlSelClipId := newC.Id;
+  if not FTlPlaying then
+  begin
+    tl.PlayheadSeconds := t + len;
+    FRecInsertSeconds := tl.PlayheadSeconds;
+  end;
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.ShowFoleyClick(Sender: TObject);
+begin
+  if FFoley = nil then
+  begin
+    FFoley := TfrmFoley.Create(Self);
+    FFoley.OnPlayhead := FoleyPlayheadSeconds;
+    FFoley.OnIsPlaying := FoleyTimelinePlaying;
+    FFoley.OnCommit := FoleyCommitHits;
+    FFoley.OnPlace := FoleyPlaceClip;
+    FFoley.OnInsert := FoleyInsertAtPlayhead;
+  end;
+  FFoley.Show;
+  FFoley.BringToFront;
+end;
+
+function TfrmMain.MasterStripForMeters: TMixStrip;
+begin
+  if FProject = nil then Result := nil else Result := FProject.Mixer.MasterStrip;
+end;
+
+{ Loudness and Phase Meters window: live master-output meters, see UDAW.UI.MeterForm. }
+procedure TfrmMain.ShowMetersClick(Sender: TObject);
+begin
+  if FMeters = nil then
+  begin
+    FMeters := TfrmMeters.Create(Self);
+    FMeters.StripProvider := MasterStripForMeters;
+  end;
+  FMeters.Show;
+  FMeters.BringToFront;
+end;
+
 
 procedure TfrmMain.OpenBrowserWindowClick(Sender: TObject);
 begin
@@ -2717,8 +3833,6 @@ begin
     FBrowserWindow.OnClose := BrowserWindowFormClose;
     pnlBrowserTop.Parent := FBrowserWindow;
     pnlBrowserTop.Align := alTop;
-    memBrowser.Parent := FBrowserWindow;
-    memBrowser.Align := alBottom;
     tvBrowser.Parent := FBrowserWindow;
     tvBrowser.Align := alClient;
     lblBrowserFloating.Visible := True;
@@ -2738,8 +3852,6 @@ begin
     FProject.Windows.Remove(WINKEY_BROWSER);
   pnlBrowserTop.Parent := tabBrowser;
   pnlBrowserTop.Align := alTop;
-  memBrowser.Parent := tabBrowser;
-  memBrowser.Align := alBottom;
   tvBrowser.Parent := tabBrowser;
   tvBrowser.Align := alClient;
   lblBrowserFloating.Visible := False;
@@ -2749,16 +3861,33 @@ end;
 
 procedure TfrmMain.CaptureOpenWindowLayout;
 var
-  i: Integer;
+  i, dockH, togMask: Integer;
+  e: TWindowLayoutEntry;
   frm: TfrmVST2Editor;
 begin
   if FProject = nil then Exit;
   if FTlView <> nil then
     FProject.Windows.Put(WINKEY_TIMELINEVIEW, Round(FTlView.PixelsPerSecond * 1000),
       Round(FTlView.ScrollSeconds * 1000), 0, 0);
-  if (FLogViewer <> nil) and FLogViewer.Visible then
-    FProject.Windows.Put(WINKEY_LOGVIEWER, FLogViewer.Left, FLogViewer.Top,
-      FLogViewer.Width, FLogViewer.Height, SavedWindowStateOf(FLogViewer));
+  { the splitter between the lanes and the editor dock: only meaningful while the dock sits
+    under the lanes (not when a full-page editor mode owns the whole tab) }
+  { Left = dock height (kept from the last time it was measurable) }
+  { FTlDockHeight is what the user set with the splitter (see splTlDockMoved). The panel's own height is not read here: right after a load, or while the tab is hidden, it can be a clamped stand-in, and saving that would overwrite the real position. }
+  if (FTlDockHeight <= 0) and (pnlTlDock.Align = alBottom) and pnlTlDock.Visible then FTlDockHeight := pnlTlDock.Height;
+  dockH := FTlDockHeight;
+  e := FProject.Windows.Find(WINKEY_TIMELINESPLIT);
+  if (dockH <= 0) and (e <> nil) then dockH := e.Left;
+  FProject.Windows.Put(WINKEY_TIMELINESPLIT, dockH, 0, 0, 0);
+  togMask := 0;
+  if FVideoPanelOff then togMask := togMask or TL_TOG_VIDEO_OFF;
+  if FEditorOn then togMask := togMask or TL_TOG_EDITOR_ON;
+  if FStageVisible then togMask := togMask or TL_TOG_STAGE_ON;
+  if FBrowserOff then togMask := togMask or TL_TOG_BROWSER_OFF;
+  if FMetronomeOn then togMask := togMask or TL_TOG_METRONOME_ON;
+  if not FLanesVisible then togMask := togMask or TL_TOG_LANES_OFF;
+  if FChordsVisible then togMask := togMask or TL_TOG_CHORDS_ON;
+  FProject.Windows.Put(WINKEY_TIMELINETOGGLES, togMask, 0, 0, 0);
+  FProject.Windows.Put(WINKEY_MIXERVIEW, Ord(FMixViewTracker), 0, 0, 0);
   if (FBrowserWindow <> nil) and FBrowserWindow.Visible then
     FProject.Windows.Put(WINKEY_BROWSER, FBrowserWindow.Left, FBrowserWindow.Top,
       FBrowserWindow.Width, FBrowserWindow.Height, SavedWindowStateOf(FBrowserWindow));
@@ -2774,7 +3903,7 @@ end;
 
 procedure TfrmMain.RestoreWindowLayout;
 var
-  i, stripId, idx, sep: Integer;
+  i, stripId, idx, sep, togMask: Integer;
   e: TWindowLayoutEntry;
   keyTail: string;
 begin
@@ -2789,8 +3918,36 @@ begin
     pbTimeline.Invalidate;
   end;
 
-  if FProject.Windows.Find(WINKEY_LOGVIEWER) <> nil then
-    ShowLogClick(nil);
+  { the Timeline's switches: a project without the entry gets the defaults (video, browser and
+    lanes shown; editor, clip stage, chords and metronome off) }
+  e := FProject.Windows.Find(WINKEY_TIMELINETOGGLES);
+  if e <> nil then togMask := e.Left else togMask := 0;
+  FVideoPanelOff := togMask and TL_TOG_VIDEO_OFF <> 0;
+  FStageVisible := togMask and TL_TOG_STAGE_ON <> 0;
+  TlSetBrowser(togMask and TL_TOG_BROWSER_OFF = 0);
+  TlSetMetronome(togMask and TL_TOG_METRONOME_ON <> 0);
+  FLanesVisible := togMask and TL_TOG_LANES_OFF = 0;
+  FChordsVisible := togMask and TL_TOG_CHORDS_ON <> 0;
+  TlSetEditor(togMask and TL_TOG_EDITOR_ON <> 0);
+  RefreshTimelineTab;
+
+  { the Mixer tab's Timeline / Tracker view; the Mixer tab itself refreshes right after this load }
+  e := FProject.Windows.Find(WINKEY_MIXERVIEW);
+  FMixViewTracker := (e <> nil) and (e.Left = 1);
+  FMixRefreshing := True;   // setting the box must not run its change handler mid-load
+  try
+    cboMixView.ItemIndex := Ord(FMixViewTracker);
+  finally
+    FMixRefreshing := False;
+  end;
+  pnlMixEq.Title := IfThen(FMixViewTracker, 'Tracker Master Graphic 16-Band EQ', 'Master Graphic 16-Band EQ');
+
+  e := FProject.Windows.Find(WINKEY_TIMELINESPLIT);
+  if (e <> nil) and (e.Left > 0) then
+  begin
+    FTlDockHeight := e.Left;
+    TlApplyDockHeight;
+  end;
 
   if FProject.Windows.Find(WINKEY_BROWSER) <> nil then
     OpenBrowserWindowClick(nil);
@@ -2817,9 +3974,25 @@ begin
   end;
 end;
 
+{ Quiets the whole application before it starts shutting down: the recording is finished and saved,
+  every transport (Timeline, tracker, graph, previews, the one-note audition) is stopped, the audio
+  output is detached, and running background work (decoding, effect renders, exports) is cancelled,
+  so nothing is still producing audio or touching the project while it is torn down. }
+procedure TfrmMain.StopEverythingForClose;
+begin
+  tmrUI.Enabled := False;
+  StopLiveRecording;
+  StopAllPlayback;
+  TrkFreeAudition;
+  if (App <> nil) and (App.Audio <> nil) then App.Audio.ClearSource;
+  if FTimelineExportJob <> nil then FTimelineExportJob.Cancel;
+  if FTlFxJob <> nil then FTlFxJob.Cancel;
+  if App <> nil then App.Jobs.CancelAll;
+end;
+
 procedure TfrmMain.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
-  StopLiveRecording;
+  StopEverythingForClose;
   CaptureOpenWindowLayout;
   FormResize(nil);
   if (App <> nil) and (App.Config <> nil) then
@@ -2830,22 +4003,26 @@ procedure TfrmMain.FormDestroy(Sender: TObject);
 var
   i: Integer;
 begin
+  FreeAndNil(FDisplay);   // the monitor goes back to the mode it had
+  TimelinePumpHook := nil;
+  GLDialogRecall := nil;
+  GLDialogRemember := nil;
   FormResize(nil);
   if (App <> nil) and (App.Config <> nil) then
     if not App.Config.Save then Logger.Warn('ui', 'Could not save window state');
   FWindowStateReady := False;
   {$IFNDEF FPC}
-  TUDAWLicense.OnStateChanged := nil;   // the callback captures this form
+  // TUDAWLicense.OnStateChanged := nil;   // registration disabled
   {$ENDIF}
   tmrUI.Enabled := False;
   StopLiveRecording;
   FreeAndNil(FOpenVST2Editors);   // does not own the forms - they free via caFree or MainForm's own ownership
+  FreeAndNil(FPluginScan);
+  FreeAndNil(FTrkNotation);
+  FreeAndNil(FPyBridge);
   {$IFNDEF FPC}
   FreeAndNil(FKeyHooks);   // unregisters every hotkey with the OS
   {$ENDIF}
-  FreeAndNil(FTrkPatternBuffer);
-  FreeAndNil(FTrkSequenceBuffer);
-  FreeAndNil(FTrkInstrWaveBuffer);
   {$IFNDEF FPC}
   DragAcceptFiles(Handle, False);
   {$ENDIF}
@@ -2859,9 +4036,15 @@ begin
   FreeAndNil(FMidiInDevice);    // closes the device (Destroy calls Close)
   FreeAndNil(FMidiOutDevice);
   FreeAndNil(FMidiCapture);
+  TMidiSynth.SharedDrum := nil;
+  DrumAudioDetach;
+  FDrumIntf := nil;
+  FDrum := nil;
+  FreeAndNil(FDrumPanels);
   FreeAndNil(FMidiMonitorSynth);
   FTrkPlaying := False;
   FreeAndNil(FTrkPlayer);
+  TrkFreeAudition;
   FTlPlaying := False;
   FreeAndNil(FTlVideo);
   FreeAndNil(FTlThumbnailer);
@@ -2872,6 +4055,12 @@ begin
   FreeAndNil(FTlPlayer);
   FreeAndNil(FTlCacheHolder);
   FTlWaveformWarned.Free;
+  if FCacheThread <> nil then
+  begin
+    FCacheCancel := True;
+    while FCacheThread <> nil do CheckSynchronize(20);   // lets its OnTerminate run
+    CheckSynchronize(0);                                 // and any progress still queued
+  end;
   if App <> nil then
   begin
     App.Jobs.CancelAll;
@@ -2890,13 +4079,7 @@ begin
   FProject.Free;
   FGraph.Free;
   FTlView.Free;
-  FTlBuffer.Free;
-  FTlMeterBuffer.Free;
   FTlSpectrum.Free;
-  FMixBuffer.Free;
-  FMixAutoBuffer.Free;
-  FRecBuffer.Free;
-  FDspBuffer.Free;
   for i := 0 to FTrackedJobs.Count - 1 do
     TJob(FTrackedJobs[i]).Free;
   FTrackedJobs.Free;
@@ -2913,6 +4096,9 @@ end;
 
 procedure TfrmMain.FormResize(Sender: TObject);
 begin
+  DrumFitToPage;
+  if (lblGlFps <> nil) and (lblGlFps.Visible) then lblGlFps.Left := ClientWidth - lblGlFps.Width - 8;
+  if (FDisplay <> nil) and FDisplay.IsFullScreen then Exit;   // a full screen window is not the size to remember
   if not FWindowStateReady or (App = nil) or (App.Config = nil) then Exit;
   { minimized geometry is meaningless to persist - leave the last known good
     normal/maximized state alone until the window is normal or maximized again }
@@ -2965,7 +4151,7 @@ const
 procedure TfrmMain.LoadKeyHooksTab;
 var
   i: Integer;
-  it: TListItem;
+  it: TGLListItem;
   {$IFNDEF FPC}
   h: TKeyHookDef;
   status: string;
@@ -3163,6 +4349,14 @@ end;
   Ctrl+Y here is just another caller of the same thing.
   Every branch below corresponds to one row of KeyHookTable above - keep both
   in sync when adding, removing or rebinding a shortcut. }
+{ the main menu is drawn by mbMain (the form's own Menu is unassigned), so its
+  shortcut keys are offered to the TMainMenu here }
+function TfrmMain.IsShortCut(var Message: TWMKey): Boolean;
+begin
+  Result := inherited IsShortCut(Message);
+  if not Result and (mnuMain <> nil) then Result := mnuMain.IsShortCut(Message);
+end;
+
 procedure TfrmMain.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 var
   inTextEditor: Boolean;
@@ -3199,8 +4393,12 @@ begin
     Exit;
   end;
   {$ENDIF}
-  inTextEditor := (ActiveControl is TCustomEdit) or (ActiveControl is TCustomMemo);
+  inTextEditor := (ActiveControl is TCustomEdit) or (ActiveControl is TCustomMemo) or (ActiveControl is TGLEdit);
   if inTextEditor then Exit;   // leave native single-field undo/typing alone
+
+  { the Tracker's pattern grid takes its own editing keys while it has the focus }
+  if TabIs(tabTracker) and (pgcTrk.ActivePage = tsTrkModule) and pbTracker.Focused then
+    if TrkGridKey(Key, Shift) then Exit;
 
   if (Key = Ord('Z')) and (Shift = [ssCtrl]) then
   begin
@@ -3218,7 +4416,13 @@ begin
     Exit;
   end;
 
-  if (Shift = []) and (pgc.ActivePage = tabTimeline) then
+  if (pgc.ActivePage = tabTimeline) and not DockHasFocus and TlHotKey(Key, Shift) then
+  begin
+    Key := 0;
+    Exit;
+  end;
+
+  if (Shift = []) and (pgc.ActivePage = tabTimeline) and not DockHasFocus then
     case Key of
       VK_DELETE:
         begin
@@ -3280,51 +4484,362 @@ begin
   RefreshMixerTab;
 end;
 
-procedure TfrmMain.RefreshSystemTab;
+{ ---- Diagnostics > System: the full system report ---- }
+
+{ what only the application knows, added to the machine report: its own start-up summary, the
+  project, the OpenGL driver (with every extension), the screen mode settings and the render rate }
+procedure TfrmMain.SysInfoAddApplication(AInfo: TSysInfo);
+var
+  ln, key, val: string;
+  p: Integer;
+  rep, ext: TArray<string>;
+  e: string;
+  cur: TDisplayMode;
 begin
   if App <> nil then
-    memSystem.Lines.Text := App.DescribeStartup
+    for ln in App.DescribeStartup.Split([sLineBreak]) do
+    begin
+      if Trim(ln) = '' then Continue;
+      if ln[1] <> ' ' then
+      begin
+        AInfo.Section('UDAW - ' + Trim(ln));
+        Continue;
+      end;
+      p := Pos(' : ', ln);
+      if p = 0 then p := Pos(' = ', ln);
+      if p > 0 then AInfo.Row(Trim(Copy(ln, 1, p - 1)), Trim(Copy(ln, p + 3, MaxInt)))
+      else AInfo.Row(Trim(ln), '');
+    end;
+
+  AInfo.Section('UDAW - project');
+  if FProject = nil then
+    AInfo.Row('Project', '(none open)')
   else
-    memSystem.Lines.Text := '(application core not initialised)';
+  begin
+    AInfo.Row('Name', FProject.Name);
+    AInfo.Row('File', IfThen(FProject.FileName = '', '(not saved yet)', FProject.FileName));
+    AInfo.Row('Unsaved changes', IfThen(FProject.Dirty, 'yes', 'no'));
+    AInfo.Row('Tempo / time signature', '%s BPM, %d/%d', [FloatToStr(FProject.TempoBPM), FProject.TimeSigNum, FProject.TimeSigDen]);
+    AInfo.Row('Sample rate / channels', '%d Hz / %d', [FProject.SampleRate, FProject.Channels]);
+    AInfo.Row('Timeline tracks / clips / sources', '%d / %d / %d', [FProject.Timeline.TrackCount,
+      FProject.Timeline.ClipCountTotal, FProject.Timeline.SourceCount]);
+    AInfo.Row('Mixer strips', IntToStr(FProject.Mixer.StripCount));
+    AInfo.Row('Undo steps available', IntToStr(FCmds.UndoCount));
+    AInfo.Row('Score line spacing', '%d %%', [Round(FProject.ScoreSpread * 100)]);
+  end;
+
+  AInfo.Section('OpenGL (graphics driver)');
+  ext := nil;
+  rep := GLDriverReport;
+  for ln in rep do
+  begin
+    p := Pos('|', ln);
+    if p = 0 then Continue;
+    key := Copy(ln, 1, p - 1);
+    val := Copy(ln, p + 1, MaxInt);
+    if key = 'extension' then ext := ext + [val] else AInfo.Row(key, val);
+  end;
+  AInfo.Row('GL surfaces in this window', IntToStr(FGlSurfaceCount));
+  AInfo.Row('Render rate - busiest surface', '%.1f frames per second', [FGlFps]);
+  AInfo.Row('Render rate - all surfaces together', '%.1f draws per second', [FGlDraws]);
+
+  AInfo.Section('UDAW - screen mode');
+  if FDisplay <> nil then
+  begin
+    AInfo.Row('Screen mode', ScreenModeName(FDisplay.Mode));
+    AInfo.Row('Monitor in use', IfThen(FDisplay.Device = '', '(window on its own monitor)', FDisplay.Device));
+    if (FDisplay.Device <> '') and CurrentDisplayMode(FDisplay.Device, cur) then
+      AInfo.Row('Monitor mode now', DisplayModeText(cur));
+  end;
+  AInfo.Row('Window', '%d x %d at %d,%d', [Width, Height, Left, Top]);
+  AInfo.Row('Client area', '%d x %d', [ClientWidth, ClientHeight]);
+  AInfo.Row('Frame rate display', IfThen(lblGlFps.Visible, 'shown', 'hidden'));
+
+  AInfo.Section(Format('OpenGL extensions (%d)', [Length(ext)]));
+  for e in ext do AInfo.Row(e, 'supported');
 end;
 
-procedure TfrmMain.PumpLog;
+procedure TfrmMain.RefreshSystemTab;
 var
-  snap: TArray<TLogEntry>;
-  i: Integer;
-  it: TListItem;
+  info: TSysInfo;
+  rows, i: Integer;
 begin
-  if (App = nil) or (App.MemoryLog = nil) then
-    Exit;
-  snap := App.MemoryLog.Snapshot;
-  if Length(snap) < FLogShown then
-    FLogShown := 0;   { sink was cleared }
-  lvLog.Items.BeginUpdate;
+  info := TSysInfo.Create;
   try
-    for i := FLogShown to High(snap) do
-    begin
-      it := lvLog.Items.Add;
-      it.Caption := FormatDateTime('hh:nn:ss.zzz', snap[i].Time);
-      it.SubItems.Add(LevelName(snap[i].Level));
-      it.SubItems.Add(snap[i].Subsystem);
-      it.SubItems.Add(snap[i].Text);
-      it.Data := Pointer(NativeInt(Ord(snap[i].Level)));
-    end;
-    FLogShown := Length(snap);
-    while lvLog.Items.Count > 5000 do
-      lvLog.Items.Delete(0);
+    CollectSystemInfo(info,
+      procedure(AInfo: TSysInfo)
+      begin
+        SysInfoAddApplication(AInfo);
+      end);
+    ivSystem.SetReport(info);
+    rows := 0;
+    for i := 0 to info.Count - 1 do
+      if info[i].Kind = sikRow then Inc(rows);
+    lblSysCount.Caption := Format('%d rows, collected %s', [rows, FormatDateTime('hh:nn:ss', Now)]);
   finally
-    lvLog.Items.EndUpdate;
+    info.Free;
   end;
-  if lvLog.Items.Count > 0 then
-    lvLog.Items[lvLog.Items.Count - 1].MakeVisible(False);
 end;
+
+procedure TfrmMain.edtSysFilterChange(Sender: TObject);
+begin
+  ivSystem.Filter := edtSysFilter.Text;
+  if Trim(edtSysFilter.Text) <> '' then
+    lblSysCount.Caption := Format('%d rows match "%s"', [ivSystem.MatchCount, Trim(edtSysFilter.Text)]);
+end;
+
+procedure TfrmMain.btnSysRefreshClick(Sender: TObject);
+begin
+  RefreshSystemTab;
+  ivSystem.Filter := edtSysFilter.Text;
+end;
+
+procedure TfrmMain.btnSysCopyClick(Sender: TObject);
+begin
+  ivSystem.CopyAll;
+  lblSysCount.Caption := 'the whole report is on the clipboard';
+end;
+
+{ ---- Settings > OpenGL: screen mode, monitor, resolution and the frame-rate display ---- }
+
+const
+  FPS_ALWAYS = 0;
+  FPS_FULLSCREEN = 1;
+  FPS_WINDOWED = 2;
+
+{ fills the monitor and resolution lists with what this computer offers, choosing the saved values }
+procedure TfrmMain.FillDisplayPage;
+var
+  cfg: TConfig;
+  i, pick: Integer;
+  dev: string;
+  want, cur: TDisplayMode;
+begin
+  cfg := App.Config;
+  cboGlMode.Items.Clear;
+  cboGlMode.Items.Add(ScreenModeName(smWindowed));
+  cboGlMode.Items.Add(ScreenModeName(smBorderless));
+  cboGlMode.Items.Add(ScreenModeName(smExclusive));
+  cboGlMode.ItemIndex := EnsureRange(cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_MODE, 0), 0, 2);
+  cboGlFpsWhen.Items.Clear;
+  cboGlFpsWhen.Items.Add('Always');
+  cboGlFpsWhen.Items.Add('Only in full screen');
+  cboGlFpsWhen.Items.Add('Only in a window');
+  cboGlFpsWhen.ItemIndex := EnsureRange(cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_FPS_WHEN, FPS_ALWAYS), 0, 2);
+  chkGlFps.Checked := cfg.GetBool(CFG_SEC_DISPLAY, CFG_DSP_SHOW_FPS, False);
+
+  FMonitors := ListMonitors;
+  cboGlMonitor.Items.Clear;
+  for i := 0 to High(FMonitors) do cboGlMonitor.Items.Add(FMonitors[i].Caption);
+  dev := cfg.GetString(CFG_SEC_DISPLAY, CFG_DSP_MONITOR, '');
+  pick := 0;
+  for i := 0 to High(FMonitors) do
+    if SameText(FMonitors[i].Device, dev) then pick := i;
+  cboGlMonitor.ItemIndex := pick;
+
+  want.Width := cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_WIDTH, 0);
+  want.Height := cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_HEIGHT, 0);
+  want.Frequency := cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_HZ, 0);
+  FillDisplayModes(want);
+  if (pick <= High(FMonitors)) and CurrentDisplayMode(FMonitors[pick].Device, cur) and (want.Width = 0) then
+    for i := 0 to High(FDisplayModes) do
+      if SameDisplayMode(FDisplayModes[i], cur) then cboGlRes.ItemIndex := i;
+  UpdateDisplayControls;
+end;
+
+procedure TfrmMain.FillDisplayModes(const AWant: TDisplayMode);
+var
+  i, pick: Integer;
+begin
+  cboGlRes.Items.Clear;
+  FDisplayModes := nil;
+  if (cboGlMonitor.ItemIndex < 0) or (cboGlMonitor.ItemIndex > High(FMonitors)) then Exit;
+  FDisplayModes := ListDisplayModes(FMonitors[cboGlMonitor.ItemIndex].Device);
+  pick := 0;
+  for i := 0 to High(FDisplayModes) do
+  begin
+    cboGlRes.Items.Add(DisplayModeText(FDisplayModes[i]));
+    if SameDisplayMode(FDisplayModes[i], AWant) then pick := i;
+  end;
+  if cboGlRes.Items.Count > 0 then cboGlRes.ItemIndex := pick;
+end;
+
+procedure TfrmMain.UpdateDisplayControls;
+begin
+  cboGlMonitor.Enabled := cboGlMode.ItemIndex > 0;
+  cboGlRes.Enabled := cboGlMode.ItemIndex = 2;
+  lblGlMonitor.Enabled := cboGlMonitor.Enabled;
+  lblGlRes.Enabled := cboGlRes.Enabled;
+  cboGlFpsWhen.Enabled := chkGlFps.Checked;
+  lblGlFpsWhen.Enabled := chkGlFps.Checked;
+end;
+
+procedure TfrmMain.cboGlModeChange(Sender: TObject);
+begin
+  UpdateDisplayControls;
+end;
+
+procedure TfrmMain.cboGlMonitorChange(Sender: TObject);
+var
+  none: TDisplayMode;
+begin
+  FillChar(none, SizeOf(none), 0);
+  FillDisplayModes(none);
+end;
+
+{ what the OpenGL page says about this computer's graphics driver }
+procedure TfrmMain.RefreshGlInfoLabels;
+var
+  ln, key, val: string;
+  p: Integer;
+  vendor, renderer, ver, glsl, mem: string;
+begin
+  for ln in GLDriverReport do
+  begin
+    p := Pos('|', ln);
+    if p = 0 then Continue;
+    key := Copy(ln, 1, p - 1);
+    val := Copy(ln, p + 1, MaxInt);
+    if key = 'vendor' then vendor := val
+    else if key = 'renderer' then renderer := val
+    else if key = 'version' then ver := val
+    else if key = 'shading language' then glsl := val
+    else if key = 'status' then renderer := val
+    else if (Pos('GPU', key) = 1) and ((Pos('total', key) > 0) or (Pos('dedicated', key) > 0)) and (mem = '') then mem := key + ': ' + val;
+  end;
+  lblGlRenderer.Caption := Format('Graphics: %s  (%s)', [renderer, vendor]);
+  lblGlVersion.Caption := Format('OpenGL %s   |   shading language %s', [ver, glsl]);
+  if mem = '' then mem := 'Video memory: see Settings > Diagnostics > System (the adapter list reports it for every GPU)';
+  lblGlMemory.Caption := mem;
+end;
+
+procedure TfrmMain.SaveDisplaySettings(AMode: TScreenMode; const ADevice: string; const AWant: TDisplayMode);
+var
+  cfg: TConfig;
+begin
+  cfg := App.Config;
+  cfg.SetInt(CFG_SEC_DISPLAY, CFG_DSP_MODE, Ord(AMode));
+  cfg.SetString(CFG_SEC_DISPLAY, CFG_DSP_MONITOR, ADevice);
+  cfg.SetInt(CFG_SEC_DISPLAY, CFG_DSP_WIDTH, AWant.Width);
+  cfg.SetInt(CFG_SEC_DISPLAY, CFG_DSP_HEIGHT, AWant.Height);
+  cfg.SetInt(CFG_SEC_DISPLAY, CFG_DSP_HZ, AWant.Frequency);
+  cfg.SetBool(CFG_SEC_DISPLAY, CFG_DSP_SHOW_FPS, chkGlFps.Checked);
+  cfg.SetInt(CFG_SEC_DISPLAY, CFG_DSP_FPS_WHEN, Max(0, cboGlFpsWhen.ItemIndex));
+  if not cfg.Save then Logger.Warn('ui', 'Could not persist the display settings');
+end;
+
+procedure TfrmMain.btnGlApplyClick(Sender: TObject);
+var
+  mode: TScreenMode;
+  dev, err: string;
+  want: TDisplayMode;
+  ok: Boolean;
+begin
+  if (App = nil) or (FDisplay = nil) then Exit;
+  mode := TScreenMode(EnsureRange(cboGlMode.ItemIndex, 0, 2));
+  dev := '';
+  if (cboGlMonitor.ItemIndex >= 0) and (cboGlMonitor.ItemIndex <= High(FMonitors)) then
+    dev := FMonitors[cboGlMonitor.ItemIndex].Device;
+  FillChar(want, SizeOf(want), 0);
+  if (cboGlRes.ItemIndex >= 0) and (cboGlRes.ItemIndex <= High(FDisplayModes)) then
+    want := FDisplayModes[cboGlRes.ItemIndex];
+  if (mode <> smWindowed) and (dev = '') then
+  begin
+    lblGlStatus.Caption := 'No monitor was found to put the full screen window on.';
+    Exit;
+  end;
+  if (mode = smExclusive) and (want.Width = 0) then
+  begin
+    lblGlStatus.Caption := 'Choose a resolution and refresh rate for exclusive full screen.';
+    Exit;
+  end;
+  ok := FDisplay.Apply(mode, dev, want, err);
+  SaveDisplaySettings(mode, dev, want);
+  if ok then
+    lblGlStatus.Caption := ScreenModeName(FDisplay.Mode) +
+      IfThen(FDisplay.Mode = smExclusive, ' - ' + DisplayModeText(want), '') + ' applied and saved.'
+  else
+    lblGlStatus.Caption := 'Exclusive full screen failed: ' + err + '. The window is borderless full screen instead.';
+  UpdateFpsOverlay;
+  if FDisplay.IsFullScreen then
+    memTimeline.Lines.Insert(0, 'Screen mode: ' + ScreenModeName(FDisplay.Mode) + ' on ' + dev);
+end;
+
+{ at start-up: puts the window in the screen mode that was saved }
+procedure TfrmMain.ApplyDisplayFromConfig;
+var
+  cfg: TConfig;
+  mode: TScreenMode;
+  dev, err: string;
+  want: TDisplayMode;
+  mons: TArray<TMonitorEntry>;
+  i: Integer;
+begin
+  if (App = nil) or (FDisplay = nil) then Exit;
+  cfg := App.Config;
+  mode := TScreenMode(EnsureRange(cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_MODE, 0), 0, 2));
+  if mode <> smWindowed then
+  begin
+    mons := ListMonitors;
+    dev := '';
+    if Length(mons) > 0 then dev := mons[0].Device;
+    for i := 0 to High(mons) do
+      if SameText(mons[i].Device, cfg.GetString(CFG_SEC_DISPLAY, CFG_DSP_MONITOR, '')) then dev := mons[i].Device;
+    want.Width := cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_WIDTH, 0);
+    want.Height := cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_HEIGHT, 0);
+    want.Frequency := cfg.GetInt(CFG_SEC_DISPLAY, CFG_DSP_HZ, 0);
+    want.Bits := 32;
+    if (mode = smExclusive) and (want.Width = 0) then mode := smBorderless;
+    if dev <> '' then
+      if not FDisplay.Apply(mode, dev, want, err) then
+        Logger.Warn('ui', 'Exclusive full screen at start-up failed: ' + err);
+  end;
+  UpdateFpsOverlay;
+end;
+
+{ the frame rate in the top right corner: shown when switched on and the screen mode matches }
+procedure TfrmMain.UpdateFpsOverlay;
+var
+  want, full: Boolean;
+begin
+  if (App = nil) or (FDisplay = nil) then Exit;
+  want := App.Config.GetBool(CFG_SEC_DISPLAY, CFG_DSP_SHOW_FPS, False);
+  full := FDisplay.IsFullScreen;
+  case App.Config.GetInt(CFG_SEC_DISPLAY, CFG_DSP_FPS_WHEN, FPS_ALWAYS) of
+    FPS_FULLSCREEN: want := want and full;
+    FPS_WINDOWED: want := want and not full;
+  end;
+  lblGlFps.Visible := want;
+  tmrGlFps.Enabled := want;
+  if want then
+  begin
+    lblGlFps.Left := ClientWidth - lblGlFps.Width - 8;
+    lblGlFps.BringToFront;
+  end;
+end;
+
+procedure TfrmMain.tmrGlFpsTimer(Sender: TObject);
+begin
+  GLSampleFrames(FGlFps, FGlDraws, FGlSurfaceCount);
+  if lblGlFps.Visible then
+    lblGlFps.Caption := Format('%.0f FPS  (%.0f draws/s)  %s', [FGlFps, FGlDraws,
+      IfThen(FDisplay.IsFullScreen, 'full screen', 'window')]);
+end;
+
+{ the drag-in registration belongs to the window handle: a screen mode change re-creates the
+  handle, so it is registered again every time one is made }
+procedure TfrmMain.CreateWnd;
+begin
+  inherited CreateWnd;
+  if not (csDesigning in ComponentState) then DragAcceptFiles(Handle, True);
+end;
+
 
 procedure TfrmMain.RefreshJobs;
 var
   i: Integer;
   job, runningJob: TJob;
-  it: TListItem;
+  it: TGLListItem;
 begin
   lvJobs.Items.BeginUpdate;
   try
@@ -3361,9 +4876,9 @@ begin
       prgStatus.Min := 0;
       prgStatus.Max := 100;
       prgStatus.Position := Round(runningJob.Progress * 100);
+      prgStatus.Text := '';   // the bar shows the percentage; the status line names the action
       prgStatus.Visible := True;
-      stbMain.SimpleText := Format('%s: %.0f%%  %s',
-        [runningJob.Title, runningJob.Progress * 100, runningJob.Note]);
+      stbMain.SimpleText := Trim(runningJob.Title + IfThen(runningJob.Note <> '', ': ' + runningJob.Note, ''));
     end
     else
     begin
@@ -3378,10 +4893,11 @@ end;
 
 procedure TfrmMain.tmrUITimer(Sender: TObject);
 begin
+  if FSyncProgressActive then JobRefreshStatus;   // elapsed time keeps moving for background jobs too
+  RenderJobsPollEscape;
+  if FTlPlaying then ScoreFollowPlayhead;
   {$IFNDEF FPC}
-  { licence server unreachable: keep the Registration page's countdown live,
-    and shut down once it hits zero so the next start re-verifies online. The
-    project is autosaved first so nothing is lost. }
+  { Registration disabled - no licence offline countdown / forced shutdown.
   if TUDAWLicense.OfflineSecondsRemaining >= 0 then
   begin
     UpdateRegistrationUI;
@@ -3397,6 +4913,7 @@ begin
       Exit;
     end;
   end;
+  }
   {$ENDIF}
   if (FMidiInDevice <> nil) and FMidiInDevice.IsOpen then
     FMidiInDevice.Poll(HandleLiveMidiInput, Self);
@@ -3414,7 +4931,6 @@ begin
   FinishTimelineExport;
   FinishTimelinePrepare;
   DrainSunoRefRecording;
-  PumpLog;
   RefreshJobs;
   RefreshAudio;
   if chkDspLive.Checked and (ActiveWorkspacePage = tabDSP) then
@@ -3424,13 +4940,19 @@ begin
   if chkScopeLive.Checked and (ActiveWorkspacePage = tabScope) then
     RunScopeAnalysis;
   ProjectTick;
+  TlStageCheckFinished;
   { guarded the same way as Timeline/Mixer/Tracker below: WM_TIMER keeps
     reaching tmrUITimer during pmProject's modal popup loop, and repainting
     the tab underneath it every tick is what left the popup blank/flickering
     until a mouse move forced Windows to redraw it - see FMenuLoopActive's
     declaration comment. }
-  if (pgc.ActivePage = tabProject) and (not FMenuLoopActive) then
-    RefreshProjectTab;
+  if not FMenuLoopActive then
+  begin
+    if ActiveWorkspacePage = tabSettingsProject then
+      RefreshProjectTab
+    else
+      RefreshProjectMenus;   // Undo / Redo / Recover captions stay current on every tab
+  end;
   if (pgc.ActivePage = tabTimeline) and (not FMenuLoopActive) then
     { Skip the tick entirely - not just the menu Enabled/Caption/Checked sync -
       while the Timeline menu bar item or pmTimeline is actually on screen.
@@ -3443,7 +4965,8 @@ begin
       move over its items forced Windows to redraw them. }
     begin
       RefreshTimelineTab(not FTlPlaying);
-      if FTlPlaying and (App <> nil) and (App.Audio <> nil) then
+      { the Tracker's playback feeds the meters and the spectrum too }
+      if (FTlPlaying or (FTrkPlaying and not FTrkPaused)) and (App <> nil) and (App.Audio <> nil) then
       begin
         UpdateTimelineMeterChannel(FTlMeterL, App.Audio.OutputPeak(0));
         if App.Audio.OutputChannels > 1 then
@@ -3463,25 +4986,41 @@ begin
           FTlSpectrum.PushBlock(@FTlSpecTap[0], Length(FTlSpecTap));
           FTlSpectrum.GetSpectrumDb(FTlSpecDb);
           FTlSpecActive := True;
+          if (FSpectrumWindow <> nil) and FSpectrumWindow.Visible then
+            FSpectrumWindow.Feed(FTlSpecDb, FTlSpecRate, True);
         end;
       end
       else
+      begin
         FTlSpecActive := False;
+        if (FSpectrumWindow <> nil) and FSpectrumWindow.Visible then
+          FSpectrumWindow.Feed(FTlSpecDb, FTlSpecRate, False);
+      end;
     end;
-  if pgc.ActivePage = tabRecording then
+  { the piano roll's play position moves with the music }
+  if TabIs(tabMIDI) and (not FMenuLoopActive) and (((FMidiEngineRef <> nil) and FMidiEngineRef.Playing) or FTlPlaying) then
+    pbPianoRoll.Invalidate;
+  if TabIs(tabRecording) then
     RefreshRecordingTab;
-  if (pgc.ActivePage = tabMixer) and (not FMenuLoopActive) then
+  if TabIs(tabMixer) and (not FMenuLoopActive) then
     { Cheap repaint only (live meters/hold-caps/clip-LEDs/automation playhead) -
       never the full RefreshMixerTab (which rebuilds combos and would also
       mutate pmMixer's items) from a per-tick path; see pmMixerPopup's header
       comment for exactly the flicker/stale-menu bug that guards against. }
     begin
-      pbMixer.Invalidate;
+      MixTick;   { moves the strip widgets' faders / meters; re-lays them out if the model changed }
       pbMixAuto.Invalidate;
     end;
+  if TabIs(tabScore) and FTlPlaying then pbScore.Invalidate;
+  if TabIs(tabInst) then
+  begin
+    DrumFitToPage;   { converges the panel box onto the page whatever order the page was sized in }
+    pbDrumPads.Invalidate;   { the pads flash while they sound }
+  end;
+  if FPatPlaying and TabIs(tabPattern) then pbPattern.Invalidate;   { the playing step moves }
   if FTlPlaying then
     AdvanceTimelinePlayback;
-  if FTrkPlaying and (pgc.ActivePage = tabTracker) and not FMenuLoopActive then
+  if FTrkPlaying and TabIs(tabTracker) and not FMenuLoopActive then
     RefreshTrackerTab(False);
 end;
 
@@ -3741,17 +5280,19 @@ end;
 
 procedure TfrmMain.pbScopePaint(Sender: TObject);
 var
-  c: TCanvas;
+  c: TGLCanvas;
   w, h, i, n, x, y, row, bin, rows, bins: Integer;
   topDb, botDb, hz, fmin, fmax, v: Double;
   px, py: Single;
   shade: Byte;
   db: array of Double;
+  specBmp: TBitmap;
+  specLine: PCardinal;
 
   function XForHz(AHz: Double): Integer;
   begin
     if AHz < fmin then AHz := fmin;
-    Result := Round((Ln(AHz) - Ln(fmin)) / (Ln(fmax) - Ln(fmin)) * (w - 1));
+    Result := Round((FastLn(AHz) - FastLn(fmin)) / (FastLn(fmax) - FastLn(fmin)) * (w - 1));
   end;
 
   function YForDb(ADb: Double): Integer;
@@ -3762,7 +5303,7 @@ var
   end;
 
 begin
-  c := pbScope.Canvas;
+  c := pbScope.GL;
   w := pbScope.Width;
   h := pbScope.Height;
   c.Brush.Color := CurrentTheme.Background;
@@ -3793,21 +5334,32 @@ begin
       if (rows > 0) and (bins > 0) and (w > 0) and (h > 0) then
       begin
         SetLength(db, bins);
-        for y := 0 to h - 1 do
-        begin
-          row := (y * rows) div h;
-          if row > rows - 1 then row := rows - 1;
-          FScopeSpectrogram.GetRow(row, db);
-          for x := 0 to w - 1 do
+        specBmp := TBitmap.Create;
+        try
+          specBmp.PixelFormat := pf32bit;
+          specBmp.SetSize(w, h);
+          for y := 0 to h - 1 do
           begin
-            bin := (x * bins) div w;
-            if bin > bins - 1 then bin := bins - 1;
-            v := (db[bin] + 114) / 120;   // ~[-114..6] dB -> 0..1
-            if v < 0 then v := 0;
-            if v > 1 then v := 1;
-            shade := Round(v * 255);
-            c.Pixels[x, h - 1 - y] := TColor(shade or (shade shl 8) or (Min(255, shade + 40) shl 16));
+            row := (y * rows) div h;
+            if row > rows - 1 then row := rows - 1;
+            FScopeSpectrogram.GetRow(row, db);
+            specLine := PCardinal(specBmp.ScanLine[h - 1 - y]);
+            for x := 0 to w - 1 do
+            begin
+              bin := (x * bins) div w;
+              if bin > bins - 1 then bin := bins - 1;
+              v := (db[bin] + 114) / 120;   // ~[-114..6] dB -> 0..1
+              if v < 0 then v := 0;
+              if v > 1 then v := 1;
+              shade := Round(v * 255);
+              { 32-bit DIB pixel is $00RRGGBB: the old TColor ($00BBGGRR) swapped }
+              specLine^ := Cardinal(shade) shl 16 or Cardinal(shade) shl 8 or Cardinal(Min(255, shade + 40));
+              Inc(specLine);
+            end;
           end;
+          c.Draw(0, 0, specBmp);
+        finally
+          specBmp.Free;
         end;
       end;
     end;
@@ -3823,7 +5375,7 @@ begin
         x := Round(w / 2 + px * (w / 2 - 2));
         y := Round(h / 2 - py * (h / 2 - 2));
         if (x >= 0) and (x < w) and (y >= 0) and (y < h) then
-          c.Pixels[x, y] := CurrentTheme.Waveform;
+          c.SetPixel(x, y, CurrentTheme.Waveform);
       end;
     end;
     3:
@@ -4163,9 +5715,14 @@ begin
   provider := CreateAIProvider(APid, AKey);
   if provider = nil then Exit;
   try
-    models := provider.ListModels;
+    JobAwait(
+      procedure
+      begin
+        models := provider.ListModels;
+      end);
   except
-    models := nil;
+    on EAbort do raise;   // Esc: unwind the whole job
+    on Exception do models := nil;
   end;
   if Length(models) = 0 then Exit;
 
@@ -4263,9 +5820,14 @@ begin
   client := TLumaClient.Create(edtAiApiKey.Text);
   try
     try
-      cents := client.GetCreditsCents;
+      JobAwait(
+        procedure
+        begin
+          cents := client.GetCreditsCents;
+        end, False);
       memAiLog.Lines.Add(Format('Luma: key OK, credit balance $%.2f.', [cents / 100]));
     except
+      on EAbort do memAiLog.Lines.Add('Luma: connection test cancelled with Esc.');
       on E: Exception do
         memAiLog.Lines.Add('Luma: ' + AISecureLog.Redact(E.Message));
     end;
@@ -4335,13 +5897,18 @@ begin
   ShowStatusBusy(Format('Writing music tab with %s...', [AIProviderDisplayName(pid)]));
   try
     try
-      resp := provider.SendMessage(req, nil);
+      JobAwait(
+        procedure
+        begin
+          resp := provider.SendMessage(req, nil);
+        end);
       UpdateStatusProgress(0, 'Rendering PDF...');
       path := MusicTabToPdf(RecordingRootPath, prompt, resp.Content);
       FLumaLastResult := path;
       btnLumaOpen.Enabled := True;
       memAiLog.Lines.Add(Format('Music tab: written by %s, saved %s', [AIProviderDisplayName(pid), path]));
     except
+      on EAbort do memAiLog.Lines.Add('Music tab: cancelled with Esc.');
       on E: Exception do
         memAiLog.Lines.Add('Music tab FAILED: ' + AISecureLog.Redact(E.Message));
     end;
@@ -4432,7 +5999,11 @@ begin
   client := TLumaClient.Create(edtAiApiKey.Text);
   try
     try
-      keys := client.GetConcepts;
+      JobAwait(
+        procedure
+        begin
+          keys := client.GetConcepts;
+        end, False);
       lstLumaConcepts.Items.BeginUpdate;
       try
         lstLumaConcepts.Items.Clear;
@@ -4442,6 +6013,7 @@ begin
       end;
       memAiLog.Lines.Add(Format('Luma: %d camera concept(s) loaded.', [Length(keys)]));
     except
+      on EAbort do memAiLog.Lines.Add('Luma: loading camera concepts cancelled with Esc.');
       on E: Exception do memAiLog.Lines.Add('Luma: ' + AISecureLog.Redact(E.Message));
     end;
   finally
@@ -4535,7 +6107,11 @@ begin
   ShowStatusBusy(Format('Testing %s connection...', [AIProviderDisplayName(pid)]));
   try
     try
-      resp := provider.SendMessage(req, nil);
+      JobAwait(
+        procedure
+        begin
+          resp := provider.SendMessage(req, nil);
+        end);
       memAiLog.Lines.Add(Format('%s: connection OK - reply: %s', [AIProviderDisplayName(pid), resp.Content]));
 
       { On a successful Test, (re)fetch the provider's model list so the user
@@ -4547,6 +6123,7 @@ begin
       else
         memAiLog.Lines.Add(Format('%s: could not fetch model list (keeping current selection).', [AIProviderDisplayName(pid)]));
     except
+      on EAbort do memAiLog.Lines.Add(Format('%s: test cancelled with Esc.', [AIProviderDisplayName(pid)]));
       on E: Exception do
         memAiLog.Lines.Add(Format('%s: test FAILED - %s', [AIProviderDisplayName(pid), E.Message]));
     end;
@@ -4719,6 +6296,406 @@ begin
   if act = 'play' then Result := 'timeline playback started' else Result := 'timeline playback stopped';
 end;
 
+{ ---- application commands for AI agents: ListCommands / RunCommand / SelectClips / SelectTrack /
+       SetPlayhead / SetRange / ClampClips. A command is exactly what a click would run: every
+       menu item of the main menu and the popup menus, every button, every icon-bar icon. The same
+       command reachable from several places is listed once. ---- }
+
+type
+  TUICmdKind = (uckMenu, uckButton, uckIcon);
+
+  TUICmd = record
+    Path: string;
+    Kind: TUICmdKind;
+    Item: TMenuItem;
+    Ctl: TControl;
+    Bar: TGLIconBar;
+    Index: Integer;
+    IconId: string;
+    Enabled, Checked, Dialog, Blocked: Boolean;
+  end;
+
+  TUICtlCrack = class(TControl);
+
+function UIQ(const S: string): string;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 1 to Length(S) do
+    case S[i] of
+      '"': Result := Result + '\"';
+      '\': Result := Result + '\\';
+      #10: Result := Result + '\n';
+      #13: Result := Result + '\r';
+      #9:  Result := Result + '\t';
+    else
+      if S[i] < ' ' then Result := Result + ' ' else Result := Result + S[i];
+    end;
+  Result := '"' + Result + '"';
+end;
+
+function UIErr(const AMessage: string): string;
+begin
+  Result := '{"error":' + UIQ(AMessage) + '}';
+end;
+
+function UIClean(const S: string): string;
+begin
+  Result := StringReplace(S, '&&', #1, [rfReplaceAll]);
+  Result := StringReplace(Result, '&', '', [rfReplaceAll]);
+  Result := Trim(StringReplace(Result, #1, '&', [rfReplaceAll]));
+end;
+
+{ nothing that exposes secrets, changes the licence or closes the program is ever runnable by an agent }
+function UIBlocked(const APath: string): Boolean;
+const
+  WORDS: array[0..9] of string = ('secure storage', 'secret', 'unregister', 'credential', 'api key',
+    'licen', 'registration', '> exit', 'quit', 'close project');
+var
+  w: string;
+  lp: string;
+begin
+  lp := LowerCase(APath);
+  for w in WORDS do
+    if Pos(w, lp) > 0 then Exit(True);
+  Result := False;
+end;
+
+function UIKey(const AHandler: TNotifyEvent; ATag: Integer): string;
+begin
+  Result := Format('%p|%p|%d', [TMethod(AHandler).Code, TMethod(AHandler).Data, ATag]);
+end;
+
+procedure UIAdd(var AList: TArray<TUICmd>; const ACmd: TUICmd);
+begin
+  SetLength(AList, Length(AList) + 1);
+  AList[High(AList)] := ACmd;
+end;
+
+function UIEndsWithDots(const ACaption: string): Boolean;
+begin
+  Result := (Length(ACaption) >= 3) and (Copy(ACaption, Length(ACaption) - 2, 3) = '...');
+end;
+
+procedure UIWalkMenu(AItem: TMenuItem; const APrefix: string; var AList: TArray<TUICmd>;
+  ASeen: TStringList);
+var
+  i: Integer;
+  it: TMenuItem;
+  cap, p, key: string;
+  cmd: TUICmd;
+begin
+  for i := 0 to AItem.Count - 1 do
+  begin
+    it := AItem.Items[i];
+    cap := UIClean(it.Caption);
+    if (cap = '') or (cap = '-') then Continue;
+    if APrefix = '' then p := cap else p := APrefix + ' > ' + cap;
+    if it.Count > 0 then
+      UIWalkMenu(it, p, AList, ASeen)
+    else if Assigned(it.OnClick) then
+    begin
+      key := UIKey(it.OnClick, it.Tag);
+      if ASeen.IndexOf(key) >= 0 then Continue;
+      ASeen.Add(key);
+      FillChar(cmd, SizeOf(cmd), 0);
+      cmd.Path := p;
+      cmd.Kind := uckMenu;
+      cmd.Item := it;
+      cmd.Enabled := it.Enabled;
+      cmd.Checked := it.Checked;
+      cmd.Dialog := UIEndsWithDots(cap);
+      cmd.Blocked := UIBlocked(p);
+      UIAdd(AList, cmd);
+    end;
+  end;
+end;
+
+function UICollectCommands(AForm: TfrmMain): TArray<TUICmd>;
+var
+  seen: TStringList;
+  i, k: Integer;
+  c: TComponent;
+  cmd: TUICmd;
+  cap, hint, key, title: string;
+  ids, hints: TArray<string>;
+begin
+  Result := nil;
+  seen := TStringList.Create;
+  try
+    if AForm.mnuMain <> nil then UIWalkMenu(AForm.mnuMain.Items, '', Result, seen);
+    for i := 0 to AForm.ComponentCount - 1 do
+    begin
+      c := AForm.Components[i];
+      if c is TPopupMenu then
+        UIWalkMenu(TPopupMenu(c).Items, 'Popup ' + c.Name, Result, seen);
+    end;
+    for i := 0 to AForm.ComponentCount - 1 do
+    begin
+      c := AForm.Components[i];
+      if c is TGLButton then
+      begin
+        if not Assigned(TUICtlCrack(c).OnClick) then Continue;
+        key := UIKey(TUICtlCrack(c).OnClick, TControl(c).Tag);
+        if seen.IndexOf(key) >= 0 then Continue;
+        seen.Add(key);
+        cap := UIClean(TGLWidget(c).Caption);
+        title := cap;
+        if title = '' then title := Trim(Copy(TControl(c).Hint, 1, 60));
+        if title = '' then title := c.Name;
+        FillChar(cmd, SizeOf(cmd), 0);
+        cmd.Path := 'Button > ' + title + ' [' + c.Name + ']';
+        cmd.Kind := uckButton;
+        cmd.Ctl := TControl(c);
+        cmd.Enabled := TControl(c).Enabled;
+        cmd.Dialog := UIEndsWithDots(cap);
+        cmd.Blocked := UIBlocked(cmd.Path);
+        UIAdd(Result, cmd);
+      end
+      else if c is TGLIconBar then
+      begin
+        if not Assigned(TGLIconBar(c).OnButtonClick) then Continue;
+        ids := TGLIconBar(c).Buttons.Split([';']);
+        hints := TGLIconBar(c).Hints.Split([';']);
+        for k := 0 to High(ids) do
+        begin
+          if Trim(ids[k]) = '' then Continue;
+          hint := '';
+          if k <= High(hints) then hint := hints[k];
+          if Pos(':', hint) > 0 then hint := Copy(hint, 1, Pos(':', hint) - 1);
+          hint := Trim(hint);
+          if Length(hint) > 60 then hint := Copy(hint, 1, 60);
+          if hint = '' then hint := ids[k];
+          FillChar(cmd, SizeOf(cmd), 0);
+          cmd.Path := 'Icon bar > ' + c.Name + ' > ' + hint + ' [' + ids[k] + ']';
+          cmd.Kind := uckIcon;
+          cmd.Bar := TGLIconBar(c);
+          cmd.Index := k;
+          cmd.IconId := ids[k];
+          cmd.Enabled := TControl(c).Enabled;
+          cmd.Blocked := UIBlocked(cmd.Path);
+          UIAdd(Result, cmd);
+        end;
+      end;
+    end;
+  finally
+    seen.Free;
+  end;
+end;
+
+function UIMatches(const APath, ACriteria: string): Boolean;
+var
+  w: string;
+  lp: string;
+begin
+  if Trim(ACriteria) = '' then Exit(True);
+  lp := LowerCase(APath);
+  for w in LowerCase(ACriteria).Split([' ', ',', ';'], TStringSplitOptions.ExcludeEmpty) do
+    if Pos(w, lp) > 0 then Exit(True);
+  Result := False;
+end;
+
+function UICommandJson(const ACmds: TArray<TUICmd>; const ACriteria: string): string;
+var
+  sb: TStringBuilder;
+  i, n: Integer;
+begin
+  sb := TStringBuilder.Create;
+  try
+    n := 0;
+    sb.Append('"commands":[');
+    for i := 0 to High(ACmds) do
+    begin
+      if not UIMatches(ACmds[i].Path, ACriteria) then Continue;
+      if n > 0 then sb.Append(',');
+      Inc(n);
+      sb.Append('{"path":').Append(UIQ(ACmds[i].Path))
+        .Append(',"enabled":').Append(IfThen(ACmds[i].Enabled, 'true', 'false'))
+        .Append(',"checked":').Append(IfThen(ACmds[i].Checked, 'true', 'false'))
+        .Append(',"dialog":').Append(IfThen(ACmds[i].Dialog, 'true', 'false'))
+        .Append(',"runnable":').Append(IfThen(ACmds[i].Enabled and not ACmds[i].Dialog and not ACmds[i].Blocked, 'true', 'false'))
+        .Append('}');
+    end;
+    sb.Append(']');
+    Result := '{"count":' + IntToStr(n) + ',' + sb.ToString + '}';
+  finally
+    sb.Free;
+  end;
+end;
+
+{ the one command a path names: the whole path, else the only command whose path ends with it }
+function UIFind(const ACmds: TArray<TUICmd>; const APath: string; out AIndex: Integer;
+  out AError: string): Boolean;
+var
+  i, hits: Integer;
+  want, tail, lp, cands: string;
+begin
+  Result := False;
+  AIndex := -1;
+  AError := '';
+  want := LowerCase(Trim(StringReplace(APath, '&', '', [rfReplaceAll])));
+  for i := 0 to High(ACmds) do
+    if LowerCase(ACmds[i].Path) = want then
+    begin
+      AIndex := i;
+      Exit(True);
+    end;
+  hits := 0;
+  cands := '';
+  tail := ' > ' + want;
+  for i := 0 to High(ACmds) do
+  begin
+    lp := LowerCase(ACmds[i].Path);
+    if (Length(lp) >= Length(tail)) and (Copy(lp, Length(lp) - Length(tail) + 1, Length(tail)) = tail) then
+    begin
+      Inc(hits);
+      AIndex := i;
+      if hits <= 6 then cands := cands + IfThen(cands = '', '', '; ') + ACmds[i].Path;
+    end;
+  end;
+  if hits = 1 then Exit(True);
+  AIndex := -1;
+  if hits = 0 then AError := 'no command matches "' + APath + '" - use ListCommands for the exact paths'
+  else AError := Format('"%s" matches %d commands, give more of the path: %s', [APath, hits, cands]);
+end;
+
+function TfrmMain.UICommandNow(const ACall: TAIToolCall): string;
+var
+  cmds: TArray<TUICmd>;
+  idx, i, moved, skipped: Integer;
+  err, s: string;
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  okIds, missing: TArray<Integer>;
+begin
+  Result := '';
+  if FProject = nil then Exit(UIErr('no project is open'));
+  tl := FProject.Timeline;
+  try
+    case ACall.Kind of
+      atkListCommands:
+        begin
+          try SyncTimelineMenuState; except end;   // menus are enabled / disabled when they open
+          Result := UICommandJson(UICollectCommands(Self), IfThen(ACall.HasCriteria, ACall.Criteria, ''));
+        end;
+
+      atkRunCommand:
+        begin
+          try SyncTimelineMenuState; except end;
+          cmds := UICollectCommands(Self);
+          if not UIFind(cmds, ACall.CommandPath, idx, err) then Exit(UIErr(err));
+          if cmds[idx].Blocked then
+            Exit(UIErr('"' + cmds[idx].Path + '" is not available to agents (it touches secrets, the licence or closes the program)'));
+          if cmds[idx].Dialog then
+            Exit(UIErr('"' + cmds[idx].Path + '" opens a dialog that needs a person; set things up with the other tools instead'));
+          if not cmds[idx].Enabled then
+            Exit(UIErr('"' + cmds[idx].Path + '" is disabled right now - it needs a selection or a different state first'));
+          case cmds[idx].Kind of
+            uckMenu: cmds[idx].Item.Click;
+            uckButton: TUICtlCrack(cmds[idx].Ctl).Click;
+            uckIcon: cmds[idx].Bar.OnButtonClick(cmds[idx].Bar, cmds[idx].Index, cmds[idx].IconId);
+          end;
+          RefreshTimelineTab;
+          Result := '{"ok":true,"ran":' + UIQ(cmds[idx].Path) + '}';
+        end;
+
+      atkSelectClips:
+        begin
+          SetLength(okIds, 0);
+          SetLength(missing, 0);
+          for i := 0 to High(ACall.ClipIds) do
+            if tl.ClipById(ACall.ClipIds[i]) <> nil then okIds := okIds + [ACall.ClipIds[i]]
+            else missing := missing + [ACall.ClipIds[i]];
+          if Length(okIds) = 0 then Exit(UIErr('none of those clips exist'));
+          TlSetSingleSelection(okIds[0]);
+          for i := 1 to High(okIds) do
+            FTlSelClipIds := FTlSelClipIds + [okIds[i]];
+          trk := nil;
+          tl.ClipById(okIds[0], trk);
+          if trk <> nil then FTlSelectedTrackId := trk.Id;
+          RefreshTimelineTab;
+          s := '';
+          for i := 0 to High(missing) do s := s + IfThen(s = '', '', ',') + IntToStr(missing[i]);
+          Result := Format('{"ok":true,"selected":%d,"missing":[%s]}', [Length(okIds), s]);
+        end;
+
+      atkSelectTrack:
+        begin
+          trk := nil;
+          for i := 0 to tl.TrackCount - 1 do
+            if SameText(tl.GetTrack(i).Name, Trim(ACall.TrackName)) then trk := tl.GetTrack(i);
+          if trk = nil then
+            for i := 0 to tl.TrackCount - 1 do
+              if ContainsText(tl.GetTrack(i).Name, Trim(ACall.TrackName)) then
+              begin
+                trk := tl.GetTrack(i);
+                Break;
+              end;
+          if trk = nil then Exit(UIErr('no track matches "' + ACall.TrackName + '"'));
+          FTlExtraTrackIds := nil;
+          FTlSelectedTrackId := trk.Id;
+          RefreshTimelineTab;
+          Result := '{"ok":true,"track":' + UIQ(trk.Name) + '}';
+        end;
+
+      atkSetPlayhead:
+        begin
+          tl.PlayheadSeconds := ACall.PositionSec;
+          FRecInsertSeconds := ACall.PositionSec;
+          FTlView.EnsureVisible(ACall.PositionSec);
+          RefreshTimelineTab;
+          Result := Format('{"ok":true,"position_sec":%s}', [FloatToStr(ACall.PositionSec, TFormatSettings.Invariant)]);
+        end;
+
+      atkSetRange:
+        begin
+          if ACall.HasEnabled and not ACall.Enabled then
+          begin
+            FTlRangeActive := False;
+            Result := '{"ok":true,"range":null}';
+          end
+          else
+          begin
+            FTlRangeActive := True;
+            FTlRangeStartSec := ACall.StartSec;
+            FTlRangeEndSec := ACall.EndSec;
+            Result := Format('{"ok":true,"start_sec":%s,"end_sec":%s}',
+              [FloatToStr(ACall.StartSec, TFormatSettings.Invariant), FloatToStr(ACall.EndSec, TFormatSettings.Invariant)]);
+          end;
+          RefreshTimelineTab;
+        end;
+
+      atkClampClips:
+        begin
+          TlClampClips(ACall.ClipIds, SameText(ACall.Mode, 'last'), moved, skipped);
+          Result := Format('{"ok":true,"moved":%d,"skipped":%d}', [moved, skipped]);
+        end;
+    else
+      Result := UIErr('not an application command');
+    end;
+  except
+    on E: Exception do Result := UIErr(E.ClassName + ': ' + E.Message);
+  end;
+end;
+
+{ MCP worker threads and the chat both call this; the window belongs to the main thread }
+function TfrmMain.McpUICommand(const ACall: TAIToolCall): string;
+var
+  res: string;
+  call: TAIToolCall;
+begin
+  if TThread.CurrentThread.ThreadID = MainThreadID then Exit(UICommandNow(ACall));
+  call := ACall;
+  res := '';
+  TThread.Synchronize(nil,
+    procedure
+    begin
+      res := UICommandNow(call);
+    end);
+  Result := res;
+end;
+
 procedure TfrmMain.chkAiMcpExposeClick(Sender: TObject);
 begin
   if chkAiMcpExpose.Checked and not RequireRegistration('The MCP server (AI tool access)') then
@@ -4737,6 +6714,7 @@ begin
     FMcpServer.OnGetCommands := McpServerGetCommands;
     FMcpServer.OnGetBrowserRoots := GetAiBrowserRoots;
     FMcpServer.OnTransport := McpServerTransport;
+    FMcpServer.OnUICommand := McpUICommand;
     FMcpServer.AuthToken := EnsureMCPServerToken;   // clients must send 'Authorization: Bearer <token>'
     { Remote (outside-LAN) access: an https listener alongside the local one. }
     if chkAiMcpTls.Checked then
@@ -4781,6 +6759,7 @@ var
   r: TMCPDiagResult;
   tok: string;
   ln: string;
+  selfSigned: Boolean;
 begin
   if not RequireRegistration('Testing the MCP connection') then Exit;
   tok := '';
@@ -4790,7 +6769,20 @@ begin
   ShowStatusProgress('Testing MCP connection...', 0);
   Screen.Cursor := crHourGlass;
   try
-    r := MCPTestEndpoint(AUrl, tok, chkAiMcpSelfSigned.Checked, 10000);
+    selfSigned := chkAiMcpSelfSigned.Checked;
+    try
+      JobAwait(
+        procedure
+        begin
+          r := MCPTestEndpoint(AUrl, tok, selfSigned, 10000);
+        end);
+    except
+      on EAbort do
+      begin
+        memAiLog.Lines.Add('MCP connectivity test cancelled with Esc.');
+        Exit;
+      end;
+    end;
   finally
     Screen.Cursor := crDefault;
     HideStatusProgress;
@@ -4851,7 +6843,7 @@ var
   dispatcher: TAIToolDispatcher;
   calls: TArray<TAIToolCall>;
   mcpCalls: TArray<TMCPToolCallRequest>;
-  i, destructiveCount, round: Integer;
+  i, destructiveCount, round, chatMark: Integer;
   errMsg, resultText, mcpFragment, confirmList, roundResultsLog: string;
   batchAllowed, truncated, hadMutatingCall, keepGoing, sawTrackOrSampleTool, placedSampleEver, execOk: Boolean;
 begin
@@ -4921,6 +6913,7 @@ begin
     req.MaxTokens := 1024;
   req.Stream := False;
 
+  if FCmds <> nil then chatMark := FCmds.UndoCount else chatMark := 0;
   Screen.Cursor := crHourGlass;
   try
     try
@@ -4934,7 +6927,11 @@ begin
         req.Messages := FAiHistory;
         ShowStatusBusy(Format('Waiting for %s (round %d/%d)...', [AIProviderDisplayName(pid), round, MAX_AI_ROUNDS]));
 
-        resp := provider.SendMessage(req, nil);
+        JobAwait(
+          procedure
+          begin
+            resp := provider.SendMessage(req, nil);
+          end);
         memAiLog.Lines.Add(AIProviderDisplayName(pid) + ': ' + resp.Content);
         msg.Role := arAssistant;
         msg.Content := resp.Content;
@@ -4992,10 +6989,10 @@ begin
               dispatcher := TAIToolDispatcher.Create(FProject, FCmds);
               try
                 dispatcher.OnGetBrowserRoots := GetAiBrowserRoots;
+                dispatcher.OnUICommand := McpUICommand;
                 for i := 0 to High(calls) do
                 begin
-                  UpdateStatusProgress(i + 1, Format('Applying %s (%d/%d)...',
-                    [AIToolKindId(calls[i].Kind), i + 1, Length(calls)]));
+                  UpdateStatusProgress(i + 1, Format('Applying %s...', [AIToolKindId(calls[i].Kind)]));
                   if not IsReadOnlyTool(calls[i].Kind) then
                     hadMutatingCall := True;
                   if calls[i].Kind in [atkAddTrack, atkFindSample, atkAddSampleToTimeline] then
@@ -5113,6 +7110,14 @@ begin
         end;
       end;
     except
+      on EAbort do
+      begin
+        { Esc: JobCancelNow undid this round; undo the earlier rounds of this prompt too }
+        while (FCmds <> nil) and (FCmds.UndoCount > chatMark) and FCmds.CanUndo do FCmds.Undo;
+        RefreshTimelineTab;
+        stbMain.SimpleText := 'AI request CANCELLED (Esc) - all changes it made were discarded.';
+        memAiLog.Lines.Add('--- cancelled with Esc: every change this request made was undone ---');
+      end;
       on E: Exception do
         memAiLog.Lines.Add('ERROR: ' + E.Message);
     end;
@@ -6050,14 +8055,14 @@ end;
 
 procedure TfrmMain.pbSpectrumPaint(Sender: TObject);
 var
-  c: TCanvas;
+  c: TGLCanvas;
   w, h, i, n, x, y, k: Integer;
   topDb, botDb, hz, fmin, fmax: Double;
 
   function XForHz(AHz: Double): Integer;
   begin
     if AHz < fmin then AHz := fmin;
-    Result := Round((Ln(AHz) - Ln(fmin)) / (Ln(fmax) - Ln(fmin)) * (w - 1));
+    Result := Round((FastLn(AHz) - FastLn(fmin)) / (FastLn(fmax) - FastLn(fmin)) * (w - 1));
   end;
 
   function YForDb(ADb: Double): Integer;
@@ -6075,8 +8080,7 @@ begin
     invalidated at near-frame rate while "Live" is checked (RunDspAnalysis
     via tmrUITimer), and drawing the grid/curve straight to the on-screen DC
     flickered badly; mirrors pbMixerPaint/FMixBuffer. }
-  FDspBuffer.SetSize(w, h);
-  c := FDspBuffer.Canvas;
+  c := pbSpectrum.GL;
   c.Brush.Color := CurrentTheme.Background;
   c.FillRect(Rect(0, 0, w, h));
 
@@ -6111,7 +8115,6 @@ begin
   begin
     c.Font.Color := CurrentTheme.MeterClip;
     c.TextOut(8, 8, 'no spectrum yet - press Analyze');
-    pbSpectrum.Canvas.Draw(0, 0, FDspBuffer);
     Exit;
   end;
 
@@ -6123,7 +8126,6 @@ begin
     y := YForDb(FDspDb[i]);
     if i = 1 then c.MoveTo(x, y) else c.LineTo(x, y);
   end;
-  pbSpectrum.Canvas.Draw(0, 0, FDspBuffer);
 end;
 
 { ---- Audio graph demo (Phase 4): build a real node graph, compile it, and
@@ -6352,7 +8354,7 @@ end;
 
 procedure TfrmMain.pbGraphPaint(Sender: TObject);
 var
-  c: TCanvas;
+  c: TGLCanvas;
   w, h, n, cols, i, j, col, row, bx, by, bw, bh, gapx, gapy: Integer;
   kindId, nm: string;
   srcs: TArray<Integer>;
@@ -6366,7 +8368,7 @@ var
   end;
 
 begin
-  c := pbGraph.Canvas;
+  c := pbGraph.GL;
   w := pbGraph.Width;
   h := pbGraph.Height;
   c.Brush.Color := clWhite;
@@ -6466,7 +8468,26 @@ begin
   if not edtProjectChannels.Focused then
     edtProjectChannels.Text := IntToStr(FProject.Channels);
   cboProjectSampleRate.ItemIndex := cboProjectSampleRate.Items.IndexOf(IntToStr(FProject.SampleRate));
+  RefreshExportSettings;
+  RefreshProjectMenus;
 
+  sb := TStringBuilder.Create;
+  try
+    sb.AppendLine(FProject.Describe);
+    sb.AppendLine;
+    sb.AppendLine(Format('undo stack: %d   redo stack: %d', [FCmds.UndoCount, FCmds.RedoCount]));
+    sb.AppendLine(Format('autosave: %s   backups on disk: %s',
+      [AutosaveIntervalName(FRecovery.Interval),
+       IfThen(FProject.FileName <> '', IntToStr(FRecovery.AutosaveCount(FProject.FileName)), '0')]));
+    memProject.Lines.Text := sb.ToString;
+  finally
+    sb.Free;
+  end;
+end;
+
+procedure TfrmMain.RefreshProjectMenus;
+begin
+  if (FProject = nil) or (FCmds = nil) or (FRecovery = nil) then Exit;
   mnuProjectUndo.Enabled := FCmds.CanUndo;
   pmProjectUndo.Enabled := FCmds.CanUndo;
   if FCmds.CanUndo then
@@ -6495,19 +8516,6 @@ begin
   mnuProjectRecover.Enabled := (FProject.FileName <> '') and
     FRecovery.HasUncleanShutdown(FProject.FileName);
   pmProjectRecover.Enabled := mnuProjectRecover.Enabled;
-
-  sb := TStringBuilder.Create;
-  try
-    sb.AppendLine(FProject.Describe);
-    sb.AppendLine;
-    sb.AppendLine(Format('undo stack: %d   redo stack: %d', [FCmds.UndoCount, FCmds.RedoCount]));
-    sb.AppendLine(Format('autosave: %s   backups on disk: %s',
-      [AutosaveIntervalName(FRecovery.Interval),
-       IfThen(FProject.FileName <> '', IntToStr(FRecovery.AutosaveCount(FProject.FileName)), '0')]));
-    memProject.Lines.Text := sb.ToString;
-  finally
-    sb.Free;
-  end;
 end;
 
 procedure TfrmMain.ProjectTick;
@@ -6559,6 +8567,59 @@ begin
   end;
 end;
 
+{ The Project Startup screen: shown once the main window is up unless the user turned it off
+  (Settings, or its own "Show on Startup" box - one shared setting). It only reports a choice;
+  the same handlers the Project menu uses carry it out. }
+procedure TfrmMain.ShowProjectStartScreen;
+{$IFNDEF FPC}
+var
+  dlg: TfrmProjectStart;
+  recent: TArray<string>;
+  i: Integer;
+  path: string;
+begin
+  if (App = nil) or (App.Config = nil) then Exit;
+  if not App.Config.GetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_START, True) then Exit;
+  { the Timeline is shown and painted before the screen opens over it }
+  RedrawWindow(Handle, nil, 0, RDW_INVALIDATE or RDW_UPDATENOW or RDW_ALLCHILDREN);
+  Application.ProcessMessages;
+  SetLength(recent, 0);
+  for i := 0 to PROJECT_START_RECENT_COUNT - 1 do
+  begin
+    path := App.Config.GetString('project', 'recent_' + IntToStr(i), '');
+    if path <> '' then recent := recent + [path];
+  end;
+  dlg := TfrmProjectStart.Create(Self);
+  try
+    dlg.Prepare('Version ' + UDAWDisplayVersionString, recent, True);
+    dlg.ShowModal;
+    if dlg.ShowOnStartup <> App.Config.GetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_START, True) then
+    begin
+      App.Config.SetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_START, dlg.ShowOnStartup);
+      if not App.Config.Save then Logger.Warn('ui', 'Could not persist the Show on Startup setting');
+      chkSetShowStart.Checked := dlg.ShowOnStartup;
+    end;
+    case dlg.Choice of
+      pscNew: btnProjectNewClick(nil);
+      pscOpen: btnProjectOpenClick(nil);
+      pscRecent:
+        try
+          OpenProjectFile(dlg.RecentPath, FRecovery.HasUncleanShutdown(dlg.RecentPath));
+        except
+          on E: Exception do ReportProjectError('Recent project', E);
+        end;
+      pscHelp: btnHelpAboutClick(nil);
+      pscAbout: btnAboutClick(nil);
+    end;
+  finally
+    dlg.Free;
+  end;
+end;
+{$ELSE}
+begin
+end;
+{$ENDIF}
+
 procedure TfrmMain.RecentProjectClick(Sender: TObject);
 var path: string;
 begin
@@ -6567,7 +8628,7 @@ begin
   path := TMenuItem(Sender).Hint;
   try
     OpenProjectFile(path, FRecovery.HasUncleanShutdown(path));
-    pgc.ActivePage := tabProject;
+    pgc.ActivePage := tabTimeline;
     pgcChange(pgc);
   except
     on E: Exception do ReportProjectError('Recent project', E);
@@ -6668,7 +8729,12 @@ begin
   RefreshProjectTab;
   RefreshMidiTab;
   RefreshTimelineTab;
+  TrkProjectChanged;
+  DrumApplyProject;
   RestoreWindowLayout;
+  { the Mixer strips (and the effects assigned to them) come from the project just read }
+  FMixSig := '';
+  RefreshMixerTab;
 end;
 
 procedure TfrmMain.btnProjectNewClick(Sender: TObject);
@@ -6712,9 +8778,13 @@ begin
   FMidiClipIndex := -1;
   FMidiTrackIndex := 0;
   Logger.Info('ui', 'new project created');
+  FMixSig := '';
+  RefreshMixerTab;
+  DrumApplyProject;
   RefreshProjectTab;
   RefreshMidiTab;
   RefreshTimelineTab;
+  TrkProjectChanged;
 end;
 
 procedure TfrmMain.btnProjectOpenClick(Sender: TObject);
@@ -6760,6 +8830,76 @@ begin
       on E: Exception do
         ReportProjectError('Set author', E);
     end;
+end;
+
+procedure SelOrAddCombo(ACombo: TGLCombo; const AValue: string); forward;
+
+{ Settings > Export: the values live in the project (saved with it), so this
+  fills the controls from FProject whenever the project tab refreshes - which
+  includes right after a project is opened. }
+procedure TfrmMain.RefreshExportSettings;
+const
+  BITRATES: array[0..7] of Integer = (0, 1000, 2000, 4000, 8000, 12000, 20000, 40000);
+  WIDTHS: array[0..6] of Integer = (0, 640, 1280, 1920, 2560, 3840, 7680);
+  AUDIO_RATES: array[0..6] of Integer = (0, 96, 128, 160, 192, 256, 320);
+var
+  i: Integer;
+  es: TExportSettings;
+begin
+  if FProject = nil then Exit;
+  FSyncingExport := True;
+  try
+    if cboExpBitrate.Items.Count = 0 then
+      for i := 0 to High(BITRATES) do
+        if BITRATES[i] = 0 then cboExpBitrate.Items.Add('Automatic')
+        else cboExpBitrate.Items.Add(IntToStr(BITRATES[i]) + ' kbps');
+    if cboExpAudio.Items.Count = 0 then
+      for i := 0 to High(AUDIO_RATES) do
+        if AUDIO_RATES[i] = 0 then cboExpAudio.Items.Add('Automatic')
+        else cboExpAudio.Items.Add(IntToStr(AUDIO_RATES[i]) + ' kbps');
+    if cboExpWidth.Items.Count = 0 then
+      for i := 0 to High(WIDTHS) do
+        if WIDTHS[i] = 0 then cboExpWidth.Items.Add('Original size')
+        else cboExpWidth.Items.Add(IntToStr(WIDTHS[i]) + ' px');
+    es := FProject.ExportSettings;
+    { a value saved by another build that is not in the list is shown as-is }
+    if es.VideoBitrateKbps = 0 then cboExpBitrate.ItemIndex := 0
+    else SelOrAddCombo(cboExpBitrate, IntToStr(es.VideoBitrateKbps) + ' kbps');
+    if es.AudioBitrateKbps = 0 then cboExpAudio.ItemIndex := 0
+    else SelOrAddCombo(cboExpAudio, IntToStr(es.AudioBitrateKbps) + ' kbps');
+    if es.MaxWidth = 0 then cboExpWidth.ItemIndex := 0
+    else SelOrAddCombo(cboExpWidth, IntToStr(es.MaxWidth) + ' px');
+    if not edExpAuthor.Focused then
+      edExpAuthor.Text := FProject.Author;
+  finally
+    FSyncingExport := False;
+  end;
+end;
+
+procedure TfrmMain.cboExportChange(Sender: TObject);
+var
+  es: TExportSettings;
+begin
+  if FSyncingExport or (FProject = nil) then Exit;
+  es.VideoBitrateKbps := 0;
+  es.MaxWidth := 0;
+  es.AudioBitrateKbps := 0;
+  if cboExpAudio.ItemIndex > 0 then
+    es.AudioBitrateKbps := StrToIntDef(Copy(cboExpAudio.Text, 1, Pos(' ', cboExpAudio.Text) - 1), 0);
+  if cboExpBitrate.ItemIndex > 0 then
+    es.VideoBitrateKbps := StrToIntDef(Copy(cboExpBitrate.Text, 1, Pos(' ', cboExpBitrate.Text) - 1), 0);
+  if cboExpWidth.ItemIndex > 0 then
+    es.MaxWidth := StrToIntDef(Copy(cboExpWidth.Text, 1, Pos(' ', cboExpWidth.Text) - 1), 0);
+  FProject.ExportSettings := es;   // marks the project modified so it is saved with it
+  RefreshProjectTab;
+end;
+
+procedure TfrmMain.edExpAuthorExit(Sender: TObject);
+begin
+  if FProject = nil then Exit;
+  edtProjectAuthor.Text := edExpAuthor.Text;
+  edtProjectAuthorExit(nil);
+  RefreshExportSettings;
 end;
 
 procedure TfrmMain.btnProjectSaveClick(Sender: TObject);
@@ -7029,8 +9169,8 @@ begin
   for i := 0 to n - 1 do
   begin
     ph := 2 * Pi * 440.0 * i / SR;
-    planar[0][i] := 0.5 * Sin(ph);
-    planar[1][i] := 0.5 * Sin(ph * 1.5);   // a perfect fifth on the right
+    planar[0][i] := 0.5 * FastSin(ph);
+    planar[1][i] := 0.5 * FastSin(ph * 1.5);   // a perfect fifth on the right
   end;
 
   try
@@ -7063,8 +9203,8 @@ begin
   for i := 0 to n - 1 do
   begin
     ph := 2 * Pi * 220.0 * i / SR;
-    src[0][i] := 0.7 * Sin(ph);
-    src[1][i] := 0.7 * Sin(ph * 2);
+    src[0][i] := 0.7 * FastSin(ph);
+    src[1][i] := 0.7 * FastSin(ph * 2);
   end;
 
   fn := IncludeTrailingPathDelimiter(App.Paths.Cache) + 'udaw-wav-roundtrip.wav';
@@ -7178,8 +9318,8 @@ begin
   for i := 0 to AFrames - 1 do
   begin
     ph := 2 * Pi * i / 44100.0;
-    Result[0][i] := 0.55 * Sin(ph * AFreqL);
-    Result[1][i] := 0.55 * Sin(ph * AFreqR);
+    Result[0][i] := 0.55 * FastSin(ph * AFreqL);
+    Result[1][i] := 0.55 * FastSin(ph * AFreqR);
   end;
 end;
 
@@ -7444,20 +9584,45 @@ begin
   if FProject = nil then Exit;
   for i := 0 to FProject.Timeline.TrackCount - 1 do
     Inc(Result, FTlView.TrackTitleHeight + FProject.Timeline.GetTrack(i).Height);
+  { one more channel's worth of empty space below the last track, so there is always room to
+    add a new channel without the list being scrolled flush against the bottom }
+  if FProject.Timeline.TrackCount > 0 then
+    Inc(Result, FTlView.TrackTitleHeight + FProject.Timeline.GetTrack(FProject.Timeline.TrackCount - 1).Height)
+  else
+    Inc(Result, FTlView.TrackTitleHeight + 80);
 end;
 
-{ Fixed rect of the per-track header mute button, shared by pbTimelinePaint
-  (drawing it) and pbTimelineMouseDown (hit-testing it) so the two can never
-  drift out of sync. }
-function TfrmMain.TlMuteButtonRect(ATop: Integer): TRect;
+{ the "+ Add channel" placeholder in the spare space under the last track (scrolled with the
+  lanes); empty when there is no project }
+function TfrmMain.TlAddChannelRect: TRect;
+var
+  i, top, extraH: Integer;
 begin
-  Result := Rect(4, ATop + 3, 20, ATop + 19);
+  Result := Rect(0, 0, 0, 0);
+  if FProject = nil then Exit;
+  top := FTlView.RulerHeight - FTlVScrollY;
+  for i := 0 to FProject.Timeline.TrackCount - 1 do
+    Inc(top, FTlView.TrackTitleHeight + FProject.Timeline.GetTrack(i).Height);
+  extraH := FTlView.TrackTitleHeight + 80;
+  if FProject.Timeline.TrackCount > 0 then
+    extraH := FTlView.TrackTitleHeight + FProject.Timeline.GetTrack(FProject.Timeline.TrackCount - 1).Height;
+  Result := Rect(FTlView.HeaderWidth + 8, top + 6, Max(FTlView.HeaderWidth + 9, pbTimeline.Width - 8),
+    top + extraH - 6);
 end;
 
-{ Fixed rect of the "?" (tempo unknown) button, bottom-right of a track header. }
-function TfrmMain.TlTempoUnknownRect(ATop, ALaneH: Integer): TRect;
+{ The audio track armed for recording (header R button), else 0. }
+function TfrmMain.TlArmedAudioTrackId: Integer;
+var
+  i: Integer;
+  trk: TTimelineTrack;
 begin
-  Result := Rect(FTlView.HeaderWidth - 26, ATop + ALaneH - 21, FTlView.HeaderWidth - 8, ATop + ALaneH - 4);
+  Result := 0;
+  if FProject = nil then Exit;
+  for i := 0 to FProject.Timeline.TrackCount - 1 do
+  begin
+    trk := FProject.Timeline.GetTrack(i);
+    if trk.Armed and (trk.Kind = tkAudio) then Exit(trk.Id);
+  end;
 end;
 
 { True only for the PRIMARY channel (the first track holding audio) while any of
@@ -7845,7 +10010,7 @@ end;
   of stbMain (anchored bottom/right in the .dfm/.lfm so it tracks the bar
   across resizes); ProcessMessages keeps the UI paint pump alive across the
   synchronous work these imports do without pulling in a worker thread. }
-procedure TfrmMain.FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TMemo);
+procedure TfrmMain.FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TLogSink);
 begin
   FFxName := AName;
   FFxItems := AItems;
@@ -7893,13 +10058,14 @@ end;
 procedure TfrmMain.ShowStatusProgress(const AText: string; AMax: Integer);
 begin
   if AMax < 1 then AMax := 1;
+  JobBegin;
   FSyncProgressActive := True;
   prgStatus.Style := pbstNormal;
   prgStatus.Min := 0;
   prgStatus.Max := AMax;
   prgStatus.Position := 0;
   prgStatus.Visible := True;
-  stbMain.SimpleText := AText;
+  stbMain.SimpleText := JobStatusText(AText);
   stbMain.Update;
   prgStatus.Update;
 end;
@@ -7912,18 +10078,23 @@ end;
   calls one at a time). }
 procedure TfrmMain.ShowStatusBusy(const AText: string);
 begin
+  JobBegin;
   FSyncProgressActive := True;
   prgStatus.Style := pbstMarquee;
   prgStatus.MarqueeInterval := 30;
   prgStatus.Visible := True;
-  stbMain.SimpleText := AText;
+  stbMain.SimpleText := JobStatusText(AText);
   stbMain.Update;
   prgStatus.Update;
 end;
 
 procedure TfrmMain.UpdateStatusProgress(AValue: Integer; const AText: string);
 begin
-  if AText <> '' then stbMain.SimpleText := AText;
+  { keep the UI alive, and honour Esc: roll the job back and unwind }
+  Application.ProcessMessages;
+  JobPollEscape;
+  if FTlJobCancelled and (prgStatus.Style = pbstNormal) then JobCancelNow;
+  if AText <> '' then stbMain.SimpleText := JobStatusText(AText) else JobRefreshStatus;
   if AValue < prgStatus.Min then AValue := prgStatus.Min;
   if AValue > prgStatus.Max then AValue := prgStatus.Max;
   prgStatus.Position := AValue;
@@ -7936,7 +10107,9 @@ begin
   prgStatus.Style := pbstNormal;
   prgStatus.Visible := False;
   prgStatus.Position := 0;
+  prgStatus.Text := '';
   FSyncProgressActive := False;
+  FJobBaseText := '';
 end;
 
 { ---- Registration (Settings > Registration) ----
@@ -7950,6 +10123,8 @@ begin
   {$IFDEF FPC}
   Result := True;   // Windows-only licensing for now; the FPC leg is unrun
   {$ELSE}
+  Result := True;   // registration disabled: full version, every feature unlocked
+  { Original registration gate:
   Result := TUDAWLicense.IsRegistered;
   if Result then Exit;
   pgc.ActivePage := tabSettings;
@@ -7960,9 +10135,28 @@ begin
     'Enter the username, password and serial number key from your ultimanium.com ' +
     'account on this Registration tab to unlock exporting and AI.',
     mtInformation, [mbOK], 0);
+  }
   {$ENDIF}
 end;
 
+procedure TfrmMain.UpdateRegistrationUI;
+begin
+  { Registration disabled - the full version has nothing to show here; keep the
+    plain title (no "Registered to" / "UNREGISTERED" / offline-shutdown suffix). }
+  Caption := Format('UDAW - by Ultimanium Designs (C) 2026 - %s', [UDAWDisplayVersionString]);
+end;
+
+procedure TfrmMain.btnRegRegisterClick(Sender: TObject);
+begin
+  { Registration disabled (the Registration page is hidden). }
+end;
+
+procedure TfrmMain.btnRegUnregisterClick(Sender: TObject);
+begin
+  { Registration disabled (the Registration page is hidden). }
+end;
+
+(* Original registration handlers, disabled:
 procedure TfrmMain.UpdateRegistrationUI;
 {$IFNDEF FPC}
 var
@@ -8070,6 +10264,8 @@ begin
   edtRegPassword.Text := '';
   {$ENDIF}
 end;
+
+*)
 
 procedure TfrmMain.btnRegCheckUpdateClick(Sender: TObject);
 begin
@@ -8325,8 +10521,7 @@ begin
         if (AFraction > 0) and (AFraction < 1) then Exit;
         lastValue := Max(lastValue, AProgressBase + Round(AFraction * AProgressSpan));
         UpdateStatusProgress(lastValue,
-          Format('Building waveform for %s (%d%%)...',
-            [ExtractFileName(src.Path), Round(AFraction * 100)]));
+          Format('Building waveform for %s...', [ExtractFileName(src.Path)]));
       end);
   except
     on E: Exception do
@@ -8346,6 +10541,65 @@ begin
   end;
 end;
 
+{ The clip's source is the module file itself (the song is rendered on demand
+  and cached), not a bounced WAV. Its Source BPM is the module's own tempo, so
+  tempo conforming brings it in line with the Timeline; as the first audio on
+  the Timeline it sets the Timeline BPM like any baseline clip. }
+procedure TfrmMain.AddLiveTrackerClip(const AFileName, AKindLabel: string);
+var
+  tl: TTimeline;
+  src: TMediaSource;
+  addCmd: TAddTimelineClipCommand;
+  planar: TAudioPlanar;
+  frames, ti, ci, audioCount, trackId: Integer;
+  bpm: Double;
+  trk: TTimelineTrack;
+begin
+  ShowStatusProgress('Preparing ' + AKindLabel + ' "' + ExtractFileName(AFileName) + '"...', 100);
+  try
+    UpdateStatusProgress(20, 'Rendering ' + ExtractFileName(AFileName) + ' for the Timeline...');
+    if not TrackerRenderFile(AFileName, planar, frames, bpm) then
+    begin
+      memTimeline.Lines.Insert(0, AKindLabel + ' module could not be rendered: ' + AFileName);
+      Exit;
+    end;
+    planar := nil;
+    tl := FProject.Timeline;
+    trackId := TlNewAudioTrackId;
+    src := tl.AddSource(AFileName, TRACKER_SOURCE_RATE, 2, frames);
+    addCmd := TAddTimelineClipCommand.Create(FProject, trackId, src.Id,
+      ExtractFileName(AFileName), FTlView.Snap(tl.PlayheadSeconds), 0, frames / TRACKER_SOURCE_RATE);
+    FCmds.Perform(addCmd);
+    UpdateStatusProgress(70, 'Building waveform...');
+    WarmClipWaveform(src.Id);
+    FTlSelClipId := addCmd.CreatedId;
+    if bpm > 0 then
+    begin
+      FCmds.Perform(TSetTimelineClipSourceBpmCommand.Create(FProject, addCmd.CreatedId, bpm));
+      audioCount := 0;
+      for ti := 0 to tl.TrackCount - 1 do
+      begin
+        trk := tl.GetTrack(ti);
+        for ci := 0 to trk.ClipCount - 1 do
+          if not trk.GetClip(ci).IsMidiClip then Inc(audioCount);
+      end;
+      if (audioCount = 1) and (App <> nil) and
+         App.Config.GetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_AUTO, True) then
+      begin
+        FCmds.Perform(TSetTempoCommand.Create(FProject, bpm));
+        edtTlTempo.Text := FormatFloat('0.###', FProject.TempoBPM);
+      end;
+      memTimeline.Lines.Insert(0, Format(
+        'Module clip "%s": tempo %.2f BPM, conformed to the Timeline tempo (%.2f).',
+        [ExtractFileName(AFileName), bpm, FProject.TempoBPM]));
+    end;
+    Logger.Info('ui', AKindLabel + ' module added as a live clip: ' + AFileName);
+    RefreshTimelineTab;
+  finally
+    HideStatusProgress;
+  end;
+end;
+
 procedure TfrmMain.ImportTrackerModuleToTimeline(AModule: TTrackerModule;
   const ASourceFileName, AKindLabel: string);
 const
@@ -8360,7 +10614,23 @@ var
   trackId: Integer;
   addCmd: TAddTimelineClipCommand;
   frameCount: Integer;
+  moduleMixer: TMixerModel;
 begin
+  moduleMixer := nil;
+  case MessageDlg(Format('Add this %s module to the Timeline?' + sLineBreak + sLineBreak +
+      'Yes - show it as notation; the tracker plays it when the Timeline reaches the clip, following the Timeline tempo.' + sLineBreak +
+      'No - convert it once to an audio (WAV) clip at its own tempo.' + sLineBreak +
+      'Cancel - keep it in the Tracker only.',
+      [AKindLabel]), mtConfirmation, [mbYes, mbNo, mbCancel], 0) of
+    mrYes:
+      begin
+        AddLiveTrackerClip(ASourceFileName, AKindLabel);
+        Exit;
+      end;
+    mrNo: ;
+  else
+    Exit;
+  end;
   sampleRate := FProject.SampleRate;
   channels := FProject.Channels;
   if channels < 1 then channels := 2;
@@ -8372,6 +10642,20 @@ begin
     { RenderSongToPlanar reuses whatever sample rate the player is already
       prepared at, so pin it to the project's rate (not the player's
       UDAW_DEFAULT_SAMPLE_RATE construction default) before rendering. }
+    { the Tracker mixer (strip faders, pans, effects, master EQ) is applied before the WAV is written,
+      so the Timeline lane arrives with its effects already in. A module loaded from a file is
+      mixed through a copy of the Tracker mixer fitted to its channel count (strip n = channel n). }
+    if AModule = FProject.Tracker then
+    begin
+      EnsureTrackerMixerStrips(FProject.TrackerMixer, AModule.Channels, AModule);
+      player.AttachMixer(FProject.TrackerMixer);
+    end
+    else
+    begin
+      moduleMixer := FProject.TrackerMixer.Clone;
+      EnsureTrackerMixerStrips(moduleMixer, AModule.Channels);
+      player.AttachMixer(moduleMixer);
+    end;
     player.Prepare(sampleRate, 1024, channels);
     try
       planar := player.RenderSongToPlanar(maxFrames, channels, 1024, TrkImportRenderProgress);
@@ -8421,8 +10705,81 @@ begin
     RefreshTimelineTab;
   finally
     player.Free;
+    moduleMixer.Free;
     HideStatusProgress;
   end;
+end;
+
+{ Loads a .mod / .xm / .it / .mptm picked in the browser panel into the Tracker player
+  (as the Tracker tab's Import buttons do) and shows the Tracker tab. }
+function TfrmMain.ImportTrackerFileToTimeline(const APath: string; AShowTracker: Boolean): Boolean;
+var
+  fs: TFileStream;
+  data: TBytes;
+  modInfo: TModImportInfo;
+  xmInfo: TXmImportInfo;
+  mptmInfo: TMPTMImportInfo;
+  legInfo: TLegacyImportInfo;
+  ext, name, summary: string;
+begin
+  Result := False;
+  if FProject = nil then Exit;
+  ext := LowerCase(ExtractFileExt(APath));
+  name := ExtractFileName(APath);
+  { the player reads FProject.Tracker; the import replaces it }
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
+  try
+    fs := TFileStream.Create(APath, fmOpenRead or fmShareDenyWrite);
+    try
+      SetLength(data, fs.Size);
+      if Length(data) > 0 then fs.ReadBuffer(data[0], Length(data));
+    finally
+      fs.Free;
+    end;
+    if ext = '.mod' then
+    begin
+      if not FileLooksLikeMod(APath) then
+        raise Exception.Create('not a recognisable ProTracker / Soundtracker MOD');
+      ModToModule(data, modInfo).Free;   { parse once for the report }
+      FCmds.Perform(TImportModCommand.Create(FProject, data, name));
+      summary := modInfo.Summary;
+    end
+    else if ext = '.xm' then
+    begin
+      if not FileLooksLikeXm(APath) then
+        raise Exception.Create('not a recognisable FastTracker 2 Extended Module');
+      XmToModule(data, xmInfo).Free;
+      FCmds.Perform(TImportXmCommand.Create(FProject, data, name));
+      summary := xmInfo.Summary;
+    end
+    else if IsLegacyModuleExt(ext) then
+    begin
+      LegacyToModule(data, legInfo).Free;   { parse once for the report (raises on a bad file) }
+      FCmds.Perform(TImportLegacyCommand.Create(FProject, data, LegacyFormatName(legInfo.Format)));
+      summary := legInfo.Summary;
+    end
+    else
+    begin
+      if not FileLooksLikeMptm(APath) then
+        raise Exception.Create('not a recognisable IMPM (IT / MPTM) module');
+      MptmToModule(data, mptmInfo).Free;
+      FCmds.Perform(TImportMptmCommand.Create(FProject, data, name));
+      summary := mptmInfo.Summary;
+    end;
+    FTrkPreview := 'imported ' + name + sLineBreak + summary;
+    Logger.Info('ui', 'Tracker module imported: ' + APath);
+    Result := True;
+  except
+    on E: Exception do
+      MessageDlg('Tracker import failed:' + sLineBreak + name + sLineBreak + E.Message,
+        mtError, [mbOK], 0);
+  end;
+  FTrkSelRow := 0;
+  FTrkSelChn := 0;
+  FTrkGridRowScroll := -1;
+  FTrkGridChnScroll := 0;
+  if AShowTracker then ShowDockPage(tabTracker);
+  RefreshTrackerTab;
 end;
 
 procedure TfrmMain.mnuTlImportModClick(Sender: TObject);
@@ -8492,6 +10849,28 @@ begin
   except
     on E: Exception do
       MessageDlg('XM import to timeline FAILED:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+  end;
+end;
+
+{ Import > ScreamTracker .s3m / .stm or Composer .669 module onto the Timeline (the project's
+  own tracker module is left alone, as with the other module imports) }
+procedure TfrmMain.mnuTlImportLegacyClick(Sender: TObject);
+var
+  module: TTrackerModule;
+  info: TLegacyImportInfo;
+begin
+  if FProject = nil then Exit;
+  if not dlgOpenTrkAny.Execute then Exit;
+  try
+    module := LoadLegacyFile(dlgOpenTrkAny.FileName, info);
+    try
+      ImportTrackerModuleToTimeline(module, dlgOpenTrkAny.FileName, LegacyFormatName(info.Format));
+    finally
+      module.Free;
+    end;
+  except
+    on E: Exception do
+      MessageDlg('Module import to timeline FAILED:' + sLineBreak + E.Message, mtError, [mbOK], 0);
   end;
 end;
 
@@ -8914,7 +11293,10 @@ begin
     sbTlVert.LargeChange := Max(1, visibleH);
     sbTlVert.SmallChange := Max(1, visibleH div 8);
     sbTlVert.Position := FTlVScrollY;
-    sbTlVert.Visible := maxScrollY > 0;
+    { always at the far right of the lanes in ARRANGE (0), not only once the channels overflow;
+      the full-page editor modes own the page }
+    sbTlVert.Visible := FTlMode = 0;
+    sbTlVert.Enabled := maxScrollY > 0;
   finally
     FTlScrollGuard := False;
   end;
@@ -8932,7 +11314,7 @@ procedure TfrmMain.SyncTimelineMenuState;
 var
   tl: TTimeline;
   sel: TTimelineClip;
-  ctxTrack: TTimelineTrack;
+  ctxTrack, toolTrk: TTimelineTrack;
   ctxIndex: Integer;
 begin
   if FProject = nil then Exit;
@@ -8943,6 +11325,10 @@ begin
 
   mnuTlDeleteClip.Enabled := sel <> nil;
   pmTlDeleteClip.Enabled := sel <> nil;
+  mnuTlLockClip.Enabled := sel <> nil;
+  pmTlLockClip.Enabled := sel <> nil;
+  if (sel <> nil) and sel.Locked then mnuTlLockClip.Caption := 'Unlock Clip' else mnuTlLockClip.Caption := 'Lock Clip';
+  pmTlLockClip.Caption := mnuTlLockClip.Caption;
   mnuTlRemoveTrack.Enabled := FTlCtxTrackId >= 0;
   pmTlRemoveTrack.Enabled := FTlCtxTrackId >= 0;
   mnuTlSplit.Enabled := (sel <> nil) and sel.ContainsSeconds(tl.PlayheadSeconds);
@@ -8989,7 +11375,21 @@ begin
     ctxTrack := tl.TrackById(FTlCtxTrackId);   // nil if the project was replaced under a stale id
   mnuTlMuteTrack.Enabled := ctxTrack <> nil;
   pmTlMuteTrack.Enabled := mnuTlMuteTrack.Enabled;
-  if ctxTrack <> nil then
+  { Clamp to Last / Next Segment act on the selected clip(s): disabled with no clip selected }
+  mnuTlClampTo.Enabled := (FTlSelClipId >= 0) and (tl.ClipById(FTlSelClipId) <> nil);
+  pmTlClampTo.Enabled := mnuTlClampTo.Enabled;
+  mnuTlClampLast.Enabled := mnuTlClampTo.Enabled;
+  mnuTlClampNext.Enabled := mnuTlClampTo.Enabled;
+  pmTlClampLast.Enabled := mnuTlClampTo.Enabled;
+  pmTlClampNext.Enabled := mnuTlClampTo.Enabled;
+  pmTlCreateScore.Enabled := (ctxTrack <> nil) and (ctxTrack.Kind = tkAudio);
+  { Tools act on audio: only offered when an audio lane is the selected / right-clicked one }
+  pmTlFxGrpTools.Enabled := (ctxTrack <> nil) and (ctxTrack.Kind = tkAudio);
+  if (not pmTlFxGrpTools.Enabled) and (FTlSelectedTrackId >= 0) then
+  begin
+    toolTrk := tl.TrackById(FTlSelectedTrackId);
+    pmTlFxGrpTools.Enabled := (toolTrk <> nil) and (toolTrk.Kind = tkAudio);
+  end;  if ctxTrack <> nil then
   begin
     mnuTlMuteTrack.Checked := ctxTrack.Muted;
     pmTlMuteTrack.Checked := mnuTlMuteTrack.Checked;
@@ -9240,10 +11640,12 @@ var
   kept: TArray<Integer>;
 begin
   if FProject = nil then Exit;
+  if TabIs(tabPattern) then PatRefreshUI;
   TlHealMissingEffectSources;
+  TlPushTempoToPlayer;
   tl := FProject.Timeline;
   { The video pane only takes space while a video channel holds a clip. }
-  pnlTlVideo.Visible := TlHasVideo;
+  pnlTlVideo.Visible := (not FVideoPanelOff) and TlHasVideo and (FTlMode = 0);
   TlUpdateVideoFxPreview;
 
   { same TProjectDocument.TempoBPM the Project tab edits (TSetTempoCommand,
@@ -9254,7 +11656,8 @@ begin
     edtTlTempo.Text := FormatFloat('0.###', FProject.TempoBPM);
 
   FTlView.SetGrid(TimelineGrid);
-  FTlView.SetHeaderWidth(tl.HeaderWidth);
+  TlApplyViewMetrics;
+  ibTlStage.SetButtonEnabled(0, Length(FStageLaunches) > 0);
   FTlView.SetViewportWidth(pbTimeline.Width);
   FTlView.SetContentSeconds(Max(30.0, tl.TotalDurationSeconds + 8.0));
 
@@ -9284,10 +11687,10 @@ begin
     end;
   FTlSelClipIds := kept;
 
-  lblTlPos.Caption := Format('Playhead  %s   %s   %s',
-    [FormatBarsBeats(TimelineGrid, tl.PlayheadSeconds),
-     FormatTimecode(tl.PlayheadSeconds),
-     IfThen(FTlPlaying, '[PLAYING]', '')]);
+  lblTlTime.Caption := FormatTimecode(tl.PlayheadSeconds);
+  lblTlBars.Caption := FormatBarsBeats(TimelineGrid, tl.PlayheadSeconds);
+  ibTlTransport.ActiveIndex := IfThen(FTlPlaying, 1, -1);   // 'play' is the second button
+  ibTlTransport.LitMask := TlTransportLit;
 
   lblTlMasterVol.Caption := Format('Master Vol  %.1f dB', [tl.MasterVolumeDb]);
   if not FTlVolGuard then
@@ -9416,17 +11819,76 @@ end;
   bar/second the mouse is pointing at stays put - the usual DAW/DAW-adjacent
   timeline convention - rather than always re-centring on the lane midpoint
   like the toolbar zoom buttons do. }
+{ scrolls the Timeline lanes up or down by one wheel notch (wheel up = towards the first lane) }
+procedure TfrmMain.TlWheelScroll(AWheelDelta: Integer);
+begin
+  FTlVScrollY := EnsureRange(FTlVScrollY - Sign(AWheelDelta) * 60, 0, TlMaxVScroll);
+  FTlScrollGuard := True;
+  try
+    sbTlVert.Position := FTlVScrollY;
+  finally
+    FTlScrollGuard := False;
+  end;
+  pbTimeline.Invalidate;
+end;
+
+{ Ctrl + wheel over the lane titles scrolls the Timeline vertically, the same as over the lanes }
+procedure TfrmMain.pnlTlHeadersMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer;
+  MousePos: TPoint; var Handled: Boolean);
+begin
+  if (FProject = nil) or not (ssCtrl in Shift) then Exit;
+  TlWheelScroll(WheelDelta);
+  Handled := True;
+end;
+
 procedure TfrmMain.pbTimelineMouseWheel(Sender: TObject; Shift: TShiftState;
   WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
 var
+  wheelPts: TTempoPoints;
+  wheelIdx, wheelI: Integer;
   anchorX: Integer;
   p: TPoint;
 begin
   if FProject = nil then Exit;
   p := pbTimeline.ScreenToClient(MousePos);
+  if FStageVisible and (p.X >= TlHdrW) and (p.X < FTlView.HeaderWidth) then
+  begin
+    { Ctrl + wheel over the Clip Stage scrolls the Timeline vertically, as over the lanes }
+    if ssCtrl in Shift then
+    begin
+      TlWheelScroll(WheelDelta);
+      Handled := True;
+      Exit;
+    end;
+    { wheel over the Clip Stage scrolls its scene columns }
+    FStageScroll := EnsureRange(FStageScroll + IfThen(WheelDelta > 0, -1, 1), 0,
+      Max(0, FProject.Timeline.RegionCount - 1));
+    Handled := True;
+    RefreshTimelineTab;
+    Exit;
+  end;
+  if TlTempoLaneAt(p.X, p.Y) then
+  begin
+    { wheel over the tempo lane: one BPM per notch (Shift = a tenth) }
+    wheelPts := TlTempoPoints;
+    wheelIdx := 0;
+    for wheelI := 0 to High(wheelPts) do
+      if wheelPts[wheelI].Seconds <= FTlView.XToSeconds(p.X) then wheelIdx := wheelI;
+    TlTempoSetPoint(wheelIdx, wheelPts[wheelIdx].Bpm + IfThen(WheelDelta > 0, 1, -1) * IfThen(ssShift in Shift, 0.1, 1.0),
+      wheelPts[wheelIdx].Seconds, 'Retune tempo change');
+    Handled := True;
+    Exit;
+  end;
   anchorX := p.X;
   if (anchorX < FTlView.HeaderWidth) or (anchorX > pbTimeline.Width) then
     anchorX := FTlView.HeaderWidth + TlLaneWidth div 2;
+  if ssCtrl in Shift then
+  begin
+    { Ctrl+wheel: scroll the lanes vertically (wheel up = towards the first lane) }
+    TlWheelScroll(WheelDelta);
+    Handled := True;
+    Exit;
+  end;
   if ssShift in Shift then
   begin
     { Shift+wheel: horizontal scroll instead of zoom - the FL-Studio-style
@@ -9526,6 +11988,8 @@ begin
   if (App <> nil) and (App.Audio <> nil) then
     App.Audio.ClearSource;
   FTlPlaying := False;
+  FStageLaunches := nil;          // launched clips end with the transport
+  FStageActiveScene := -1;
   if FTlVideo <> nil then
   begin
     FTlVideo.Stop;
@@ -9604,7 +12068,8 @@ begin
     audio can play - can take real time for a project with many/long
     sources, so it gets the same status-bar progress treatment as import. }
   FTlPlayer.SetStretchTempo(FProject.TempoBPM);   // clips with a Source BPM conform to the timeline tempo
-  FTlPlayer.SetMetronome(chkTlMetronome.Checked, FProject.TempoBPM, 4, -12);
+  FTlPlayer.SetMetronome(FMetronomeOn, FProject.TempoBPM, 4, -12);
+  FTlPlayer.SetTempoMap(FProject.TempoBPM, FProject.TempoMap);
   { Decoded sources and stretched copies are cached between Plays; they are
     only redone for a source/clip whose tempo actually changed. With a warm
     cache there is nothing to prepare, so skip the job and start immediately. }
@@ -9690,7 +12155,7 @@ var
 begin
   FTlFxJob := nil;
   if FTlVideo <> nil then FTlVideo.SetRendered('', 0, 0);
-  if (FTlVideo = nil) or (FProject = nil) or not pnlTlVideo.Visible then Exit;
+  if (FTlVideo = nil) or (FProject = nil) or not TlVideoActive then Exit;
   dir := IncludeTrailingPathDelimiter(App.Paths.Cache) + 'video-fx';
   FTlFxPlan := PlanVideoFxRender(FProject.Timeline, FProject.TempoBPM, dir);
   if not FTlFxPlan.Needed then Exit;
@@ -9736,11 +12201,12 @@ procedure TfrmMain.BeginTimelineAudio;
 begin
   { Open + position the video first: opening a file is slow and must not stall
     the UI after the audio is already running. }
-  if (FTlVideo <> nil) and pnlTlVideo.Visible then
+  if (FTlVideo <> nil) and TlVideoActive then
   begin
     FTlVideo.StretchBPM := FProject.TempoBPM;
     FTlVideo.Prepare(FProject.Timeline, FProject.Timeline.PlayheadSeconds);
   end;
+  TlStagePushToPlayer;   // a launch made while stopped starts with the transport
   App.Audio.SetSource(FTlPlayer.AsSource);
   if (FTlMixerProc.LastError <> '') and not FTlMixerProc.IsPrepared then
     Logger.Warn('ui', 'Mixer routing is invalid (' + FTlMixerProc.LastError +
@@ -9797,7 +12263,7 @@ end;
 { UI timer period while the Timeline plays, from the user's refresh rate. }
 function TfrmMain.TlPlayIntervalMs: Integer;
 begin
-  if (FTlRefreshHz < 5) or (FTlRefreshHz > 40) then FTlRefreshHz := DEFAULT_TL_REFRESH_HZ;
+  if (FTlRefreshHz < 5) or (FTlRefreshHz > 60) then FTlRefreshHz := DEFAULT_TL_REFRESH_HZ;
   Result := 1000 div FTlRefreshHz;
 end;
 
@@ -9824,12 +12290,20 @@ end;
 procedure TfrmMain.SyncEffectMenus;
 var
   trk: TTimelineTrack;
-  isVideo: Boolean;
+  isVideo, isAudio: Boolean;
 begin
   trk := TlContextTrack;
   isVideo := (trk <> nil) and (trk.Kind = tkVideo);
   mnuTlEffects.Enabled := FTlRangeActive and not isVideo;
   pmTlEffects.Enabled := mnuTlEffects.Enabled;
+  { Save Selection as WAV/PCM/FLAC is audio-only: needs a range and an audio channel. }
+  isAudio := FTlRangeActive and (trk <> nil) and (trk.Kind = tkAudio);
+  mnuTlSaveSelWav.Enabled := isAudio;
+  mnuTlSaveSelPcm.Enabled := isAudio;
+  mnuTlSaveSelFlac.Enabled := isAudio;
+  pmTlSaveSelWav.Enabled := isAudio;
+  pmTlSaveSelPcm.Enabled := isAudio;
+  pmTlSaveSelFlac.Enabled := isAudio;
   mnuTlVideoEffects.Enabled := isVideo;
   pmTlVideoEffects.Enabled := isVideo;
 end;
@@ -10005,7 +12479,7 @@ begin
   try
     for n := 0 to High(ids) do
     begin
-      UpdateStatusProgress(n, Format('Removing video effect %d of %d...', [n + 1, Length(ids)]));
+      UpdateStatusProgress(n, 'Removing video effects...');
       FCmds.Perform(TRemoveVideoEffectCommand.Create(FProject, ids[n]));
     end;
     UpdateStatusProgress(Length(ids), 'Video effects removed');
@@ -10015,9 +12489,5971 @@ begin
   end;
 end;
 
+{ ======================= Clip Stage (clip launcher) =======================
+  MorningDAW-style launcher column in the Timeline header zone. A scene is a
+  Timeline region (a named range such as Intro / Verse / Chorus); a slot is one
+  track's own content of that region. Launching a slot loops that track's slice
+  of the region on the quantum while the arrangement carries on silently
+  underneath for it; launching a scene does it for every track (a track with
+  nothing in the region stops). "Back to arrangement" drops every override.
+  The audio side is TTimelinePlayer.SetTrackLaunch. }
+
+const
+  LANE_RULER_H = 26;      // the ruler proper (bar numbers + time)
+  LANE_MARK_H = 22;       // Markers lane
+  LANE_CHORD_H = 26;      // Chords lane (optional, between Markers and Tempo)
+  LANE_TEMPO_H = 34;      // Tempo lane
+  LANE_SIG_H = 22;        // Time-signature lane
+  STAGE_CELL_W = 118;
+  STAGE_GREEN = $0040E080;    // BGR - playing outline / triangle / progress
+  STAGE_AMBER = $0030C0F0;    // BGR - queued, waiting for the quantum
+  STAGE_ICON_W = 18;                        // one control of a scene panel
+  STAGE_TITLE_X = 3 + 3 * STAGE_ICON_W;     // where its title segment starts
+
+{ which part of a scene panel a point lies on: 0 play, 1 stop, 2 remove, 3 title }
+function TlStageScenePart(ALocalX: Integer): Integer;
+begin
+  if (ALocalX < 3) or (ALocalX >= STAGE_TITLE_X) then Exit(3);
+  Result := (ALocalX - 3) div STAGE_ICON_W;
+end;
+
+{ mix two TColor values by T in [0,1] (the paint routine's local Mix, usable
+  by the other Timeline drawing helpers) }
+function TlMix(A, B: TColor; T: Double): TColor;
+var
+  ca, cb: LongInt;
+  ar, ag, ab, br, bg, bb: Byte;
+begin
+  ca := ColorToRGB(A);
+  cb := ColorToRGB(B);
+  ar := ca and $FF; ag := (ca shr 8) and $FF; ab := (ca shr 16) and $FF;
+  br := cb and $FF; bg := (cb shr 8) and $FF; bb := (cb shr 16) and $FF;
+  Result := TColor(Byte(Round(ar + (br - ar) * T)) or
+    (Byte(Round(ag + (bg - ag) * T)) shl 8) or
+    (Byte(Round(ab + (bb - ab) * T)) shl 16));
+end;
+
+{ The accent colour a track's header stripe, clips, waveform and stage slots
+  share: the track's own colour when it has one, else a rotating palette. }
+function TlTrackAccent(ATrk: TTimelineTrack; AIndex: Integer): TColor;
+const
+  PALETTE: array[0..7] of TColor = (
+    $4F53D9, $D8864A, $3AB0D4, $D0599B, $82BE3D, $457BE0, $C9A73A, $8F51E0);
+begin
+  if (ATrk <> nil) and (ATrk.Color >= 0) then Exit(TColor(ATrk.Color));
+  Result := PALETTE[AIndex mod Length(PALETTE)];
+end;
+
+function TfrmMain.TlStageCols: Integer;
+begin
+  if FProject = nil then Exit(1);
+  Result := Min(3, Max(1, FProject.Timeline.RegionCount - FStageScroll + 1));
+end;
+
+function TfrmMain.TlStageWidth: Integer;
+begin
+  if FStageVisible then Result := TlStageCols * STAGE_CELL_W + 6
+  else Result := 0;
+end;
+
+{ Width of the track-header column proper (the view's HeaderWidth also covers
+  the Clip Stage column to its right). }
+function TfrmMain.TlHdrW: Integer;
+begin
+  if FProject <> nil then Result := FProject.Timeline.HeaderWidth
+  else Result := 150;
+end;
+
+function TfrmMain.TlStageSceneRect(ACol: Integer): TRect;
+begin
+  Result := Rect(TlHdrW + 3 + ACol * STAGE_CELL_W, 3,
+    TlHdrW + 3 + (ACol + 1) * STAGE_CELL_W - 3, LANE_RULER_H - 3);
+end;
+
+function TfrmMain.TlStageCellRect(ACol, ATop, ALaneH: Integer): TRect;
+begin
+  Result := Rect(TlHdrW + 3 + ACol * STAGE_CELL_W, ATop + 3,
+    TlHdrW + 3 + (ACol + 1) * STAGE_CELL_W - 3, ATop + ALaneH - 3);
+end;
+
+{ "Back to arrangement" button on a launched track's lane banner (shared by the
+  painter and the mouse hit-test). }
+function TfrmMain.TlStageBackRect(ATop, ALaneH: Integer): TRect;
+var
+  bh, bt, br: Integer;
+begin
+  bh := Min(30, ALaneH - 4);
+  bt := ATop + (ALaneH - bh) div 2;
+  br := Min(FTlView.HeaderWidth + 10 + 430, pbTimeline.Width - 10);
+  Result := Rect(br - 156, bt + 3, br - 4, bt + bh - 3);
+end;
+
+function TfrmMain.TlStageQuantSeconds: Double;
+var
+  g: TGridContext;
+begin
+  g := TimelineGrid;
+  Result := 0;
+  if not g.IsValid then Exit;
+  case FStageQuantIdx of
+    1: Result := g.SecondsPerBeat;
+    2: Result := g.SecondsPerBar;
+    3: Result := g.SecondsPerBar * 2;
+    4: Result := g.SecondsPerBar * 4;
+  end;
+end;
+
+{ When a launch made now takes effect: the next quantum boundary while the
+  transport runs (never closer than a few ms, so the audio thread always sees
+  it in advance), otherwise the playhead - launching while stopped starts the
+  transport and plays straight away. }
+function TfrmMain.TlStageActivateTime: Double;
+var
+  t, q, b: Double;
+begin
+  t := FProject.Timeline.PlayheadSeconds;
+  Result := t;
+  if not FTlPlaying then Exit;
+  q := TlStageQuantSeconds;
+  if q <= 0 then Exit;
+  b := Ceil(t / q - 1E-9) * q;
+  if b - t < 0.06 then b := b + q;
+  Result := b;
+end;
+
+function TfrmMain.TlStageLaunchIndex(ATrackId: Integer): Integer;
+var
+  i: Integer;
+begin
+  for i := 0 to High(FStageLaunches) do
+    if FStageLaunches[i].TrackId = ATrackId then Exit(i);
+  Result := -1;
+end;
+
+function TfrmMain.TlRegionById(AId: Integer): TTimelineRegion;
+var
+  i: Integer;
+begin
+  Result := nil;
+  if FProject = nil then Exit;
+  for i := 0 to FProject.Timeline.RegionCount - 1 do
+    if FProject.Timeline.GetRegion(i).Id = AId then Exit(FProject.Timeline.GetRegion(i));
+end;
+
+{ True when the track has any clip overlapping the scene's range. }
+function TfrmMain.TlStageSlotHasClips(ATrk: TTimelineTrack; ARegion: TTimelineRegion): Boolean;
+var
+  j: Integer;
+  c: TTimelineClip;
+begin
+  Result := False;
+  for j := 0 to ATrk.ClipCount - 1 do
+  begin
+    c := ATrk.GetClip(j);
+    if (c.EndSeconds > ARegion.StartSeconds + 1E-6) and
+       (c.StartSeconds < ARegion.EndSeconds - 1E-6) then Exit(True);
+  end;
+end;
+
+procedure TfrmMain.TlStageSetLaunch(ATrk: TTimelineTrack; ARegion: TTimelineRegion;
+  ASilent: Boolean; AActivateAt: Double);
+var
+  L: TStageLaunch;
+  i: Integer;
+begin
+  L.TrackId := ATrk.Id;
+  L.SceneId := -1;
+  L.StartSec := 0;
+  L.LengthSec := 0;
+  L.Continuous := False;
+  if ARegion <> nil then
+  begin
+    L.SceneId := ARegion.Id;
+    L.Continuous := ARegion.Continuous;
+    L.StartSec := ARegion.StartSeconds;
+    L.LengthSec := ARegion.LengthSeconds;
+  end;
+  L.Silent := ASilent or (L.LengthSec <= 0);
+  L.ActivateAt := AActivateAt;
+  i := TlStageLaunchIndex(ATrk.Id);
+  if i >= 0 then
+    FStageLaunches[i] := L
+  else
+  begin
+    SetLength(FStageLaunches, Length(FStageLaunches) + 1);
+    FStageLaunches[High(FStageLaunches)] := L;
+  end;
+  if FTlPlayer <> nil then
+  begin
+    if L.Silent then FTlPlayer.SetTrackLaunch(L.TrackId, tlmSilent, 0, 0, L.ActivateAt)
+    else FTlPlayer.SetTrackLaunch(L.TrackId, tlmLoop, L.StartSec, L.LengthSec, L.ActivateAt, L.Continuous);
+  end;
+end;
+
+{ Re-sends every override to the (new) player - a launch made while stopped is
+  recorded first and reaches the engine when the transport starts. }
+procedure TfrmMain.TlStagePushToPlayer;
+var
+  i: Integer;
+begin
+  if FTlPlayer = nil then Exit;
+  FTlPlayer.ClearTrackLaunches;
+  for i := 0 to High(FStageLaunches) do
+    with FStageLaunches[i] do
+      if Silent then FTlPlayer.SetTrackLaunch(TrackId, tlmSilent, 0, 0, ActivateAt)
+      else FTlPlayer.SetTrackLaunch(TrackId, tlmLoop, StartSec, LengthSec, ActivateAt, Continuous);
+end;
+
+{ the scene picked with a click, else the last one launched }
+function TfrmMain.TlPickedScene: TTimelineRegion;
+begin
+  Result := TlRegionById(FStageCtxSceneId);
+  if Result = nil then Result := TlRegionById(FStageActiveScene);
+end;
+
+{ a scene's region changed (resized): launches made from it follow the new span }
+procedure TfrmMain.TlStageSceneChanged(ASceneId: Integer);
+var
+  reg: TTimelineRegion;
+  i: Integer;
+begin
+  reg := TlRegionById(ASceneId);
+  if reg = nil then Exit;
+  for i := 0 to High(FStageLaunches) do
+    if FStageLaunches[i].SceneId = ASceneId then
+    begin
+      FStageLaunches[i].StartSec := reg.StartSeconds;
+      FStageLaunches[i].LengthSec := reg.LengthSeconds;
+      FStageLaunches[i].Continuous := reg.Continuous;
+    end;
+  TlStagePushToPlayer;
+end;
+
+{ A scene launched without its Continuous flag plays its region once and stops: when every launch has
+  run its region to the end (and none repeats), the transport stops and the tracks go back to the
+  arrangement. }
+procedure TfrmMain.TlStageCheckFinished;
+var
+  i: Integer;
+  any: Boolean;
+  t: Double;
+begin
+  if (FProject = nil) or (not FTlPlaying) or (Length(FStageLaunches) = 0) then Exit;
+  t := FProject.Timeline.PlayheadSeconds;
+  any := False;
+  for i := 0 to High(FStageLaunches) do
+    with FStageLaunches[i] do
+    begin
+      if Silent then Continue;
+      if Continuous then Exit;                       // loops on - nothing to stop
+      any := True;
+      if t < ActivateAt + LengthSec then Exit;       // still inside its region (or not started)
+    end;
+  if any then
+  begin
+    memTimeline.Lines.Insert(0, 'Clip Stage: scene finished - stopped (set Continuous on the scene to keep it looping)');
+    StopTimelinePlayback;
+  end;
+end;
+
+{ Ctrl + drag on a lane: grabs the start or end edge of the picked scene (shown as a coloured line
+  with a handle) so it can be resized; the Markers lane's edit machinery does the drag }
+function TfrmMain.TlSceneEdgeGrab(X: Integer): Boolean;
+var
+  reg: TTimelineRegion;
+begin
+  Result := False;
+  reg := TlPickedScene;
+  if (reg = nil) or (FProject = nil) then Exit;
+  if Abs(FTlView.SecondsToX(reg.StartSeconds) - X) <= 6 then FLaneEdit := 3
+  else if Abs(FTlView.SecondsToX(reg.EndSeconds) - X) <= 6 then FLaneEdit := 4
+  else Exit;
+  FLaneEditId := reg.Id;
+  FLaneEditMoved := False;
+  FLaneEditStartX := X;
+  FStageCtxSceneId := reg.Id;
+  Result := True;
+end;
+
+procedure TfrmMain.pmStgContinuousClick(Sender: TObject);
+var
+  reg: TTimelineRegion;
+begin
+  reg := TlRegionById(FStageCtxSceneId);
+  if reg = nil then Exit;
+  reg.Continuous := not reg.Continuous;
+  FProject.Touch;
+  TlStageSceneChanged(reg.Id);
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlStageLaunchCell(ATrk: TTimelineTrack; ARegion: TTimelineRegion);
+var
+  at: Double;
+begin
+  if (FProject = nil) or (ATrk = nil) or (ARegion = nil) or (ATrk.Kind = tkVideo) then Exit;
+  at := TlStageActivateTime;
+  if (not FTlPlaying) and (FTlPrepJob = nil) then StartTimelinePlayback(False, False, False);
+  TlStageSetLaunch(ATrk, ARegion, not TlStageSlotHasClips(ATrk, ARegion), at);
+  memTimeline.Lines.Insert(0, Format('Clip Stage: %s on %s %s', [ARegion.Name, ATrk.Name,
+    IfThen(at > FProject.Timeline.PlayheadSeconds + 0.001, 'queued for the next ' +
+      cboTlStageQuant.Text, 'launched')]));
+  RefreshTimelineTab;
+end;
+
+{ A scene takes over the song: every track plays its slice of the region, and a
+  track with nothing in it stops. }
+procedure TfrmMain.TlStageLaunchScene(ARegion: TTimelineRegion);
+var
+  i: Integer;
+  at: Double;
+  trk: TTimelineTrack;
+begin
+  if (FProject = nil) or (ARegion = nil) then Exit;
+  at := TlStageActivateTime;
+  if (not FTlPlaying) and (FTlPrepJob = nil) then StartTimelinePlayback(False, False, False);
+  for i := 0 to FProject.Timeline.TrackCount - 1 do
+  begin
+    trk := FProject.Timeline.GetTrack(i);
+    if trk.Kind = tkVideo then Continue;
+    TlStageSetLaunch(trk, ARegion, not TlStageSlotHasClips(trk, ARegion), at);
+  end;
+  FStageActiveScene := ARegion.Id;
+  memTimeline.Lines.Insert(0, Format('Clip Stage: scene "%s" %s', [ARegion.Name,
+    IfThen(at > FProject.Timeline.PlayheadSeconds + 0.001, 'queued for the next ' +
+      cboTlStageQuant.Text, 'launched')]));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlStageBack;
+begin
+  FStageLaunches := nil;
+  FStageActiveScene := -1;
+  if FTlPlayer <> nil then FTlPlayer.ClearTrackLaunches;
+  RefreshTimelineTab;
+end;
+
+{ New scene from the ruler range selection, else the loop region, else four
+  bars from the playhead. }
+procedure TfrmMain.TlStageAddScene;
+var
+  tl: TTimeline;
+  st, len: Double;
+  g: TGridContext;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  g := TimelineGrid;
+  if FTlRangeActive then
+  begin
+    st := Min(FTlRangeStartSec, FTlRangeEndSec);
+    len := Abs(FTlRangeEndSec - FTlRangeStartSec);
+  end
+  else if tl.LoopLengthSeconds > 0 then
+  begin
+    st := tl.LoopStartSeconds;
+    len := tl.LoopLengthSeconds;
+  end
+  else
+  begin
+    st := FTlView.Snap(tl.PlayheadSeconds);
+    len := 0;
+  end;
+  if len < 0.05 then
+  begin
+    if g.IsValid then len := g.SecondsPerBar * 4 else len := 8;
+  end;
+  FCmds.Perform(TAddTimelineRegionCommand.Create(FProject,
+    Format('Scene %d', [tl.RegionCount + 1]), st, len, 0));
+  FStageScroll := Max(0, tl.RegionCount - 3);
+  RefreshTimelineTab;
+end;
+
+{ Clicks in the stage column: a scene button launches the scene (right-click:
+  scene menu), the "+" slot adds one, a slot launches that track's content. }
+function TfrmMain.TlStageMouseDown(X, Y: Integer; Button: TMouseButton): Boolean;
+var
+  tl: TTimeline;
+  col, idx, ti: Integer;
+  pt: TPoint;
+begin
+  Result := False;
+  if (not FStageVisible) or (FProject = nil) or (X < TlHdrW) or (X >= FTlView.HeaderWidth) then Exit;
+  Result := True;
+  tl := FProject.Timeline;
+  col := (X - TlHdrW - 3) div STAGE_CELL_W;
+  if (col < 0) or (col >= TlStageCols) then Exit;
+  idx := FStageScroll + col;
+  if Y < LANE_RULER_H then
+  begin
+    if idx < tl.RegionCount then
+    begin
+      { any click on a scene selects it (it stays marked until another is picked) }
+      FStageCtxSceneId := tl.GetRegion(idx).Id;
+      if Button = mbLeft then
+      begin
+        case TlStageScenePart(X - TlStageSceneRect(col).Left) of
+          1: TlStageStopScene(tl.GetRegion(idx));
+          2: TlStageDeleteScene(tl.GetRegion(idx).Id);
+        else
+          TlStageLaunchScene(tl.GetRegion(idx));
+        end;
+        RefreshTimelineTab;
+      end
+      else if Button = mbRight then
+      begin
+        RefreshTimelineTab;
+        pt := pbTimeline.ClientToScreen(Point(X, Y));
+        GLShowPopup(pmTlStage, pt.X, pt.Y);
+      end;
+    end
+    else if Button = mbLeft then
+      TlStageAddScene
+    else if Button = mbRight then
+    begin
+      FStageCtxSceneId := -1;
+      pt := pbTimeline.ClientToScreen(Point(X, Y));
+      GLShowPopup(pmTlStage, pt.X, pt.Y);
+    end;
+    Exit;
+  end;
+  { the slot area: a click makes that channel lane the active one; left launches the slot, right
+    opens the scene menu for the scene column it was on }
+  if (idx < tl.RegionCount) and TlTrackAtY(Y, ti) then
+  begin
+    FTlExtraTrackIds := nil;
+    FTlSelectedTrackId := tl.GetTrack(ti).Id;
+    FStageCtxSceneId := tl.GetRegion(idx).Id;
+    if Button = mbLeft then
+      TlStageLaunchCell(tl.GetTrack(ti), tl.GetRegion(idx))
+    else if Button = mbRight then
+    begin
+      RefreshTimelineTab;
+      pt := pbTimeline.ClientToScreen(Point(X, Y));
+      GLShowPopup(pmTlStage, pt.X, pt.Y);
+    end;
+  end;
+end;
+
+{ ---- stage scene panel, in the ruler band above the slot column ----
+  Each scene is a rounded container: the controls (play, stop, remove) down its left side
+  and the scene's name on a title segment in the scene's colour. }
+
+{ the colour of a scene: its own, else the rotating palette the Markers lane uses for its bar }
+function TfrmMain.TlStageSceneColor(AIndex: Integer): TColor;
+var
+  reg: TTimelineRegion;
+begin
+  reg := FProject.Timeline.GetRegion(AIndex);
+  if reg.Color <> 0 then Result := TColor(reg.Color)
+  else Result := TlTrackAccent(nil, AIndex);
+end;
+
+procedure TfrmMain.TlStagePaintSceneHeader(cv: TGLCanvas);
+var
+  theme: TUDAWTheme;
+  tl: TTimeline;
+  col, idx, cx, cy: Integer;
+  r: TRect;
+  reg: TTimelineRegion;
+  active, picked: Boolean;
+  lab: string;
+  li: Integer;
+  tcol, ink, tink: TColor;
+begin
+  if FProject = nil then Exit;
+  theme := CurrentTheme;
+  tl := FProject.Timeline;
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := TlMix(theme.PanelBackground, theme.Background, 0.35);
+  cv.FillRect(Rect(TlHdrW, 0, FTlView.HeaderWidth, FTlView.RulerHeight));
+  for col := 0 to TlStageCols - 1 do
+  begin
+    r := TlStageSceneRect(col);
+    idx := FStageScroll + col;
+    if idx < tl.RegionCount then
+    begin
+      reg := tl.GetRegion(idx);
+      active := False;
+      for li := 0 to High(FStageLaunches) do
+        if (FStageLaunches[li].SceneId = reg.Id) and not FStageLaunches[li].Silent then active := True;
+      tcol := TlStageSceneColor(idx);
+      { the rounded container: an outline (green while the scene plays), then its body }
+      cv.Pen.Style := psClear;
+      cv.Brush.Style := bsSolid;
+      { the active scene (last launched, or the one picked) is outlined thick and lit }
+      picked := (reg.Id = FStageActiveScene) or (reg.Id = FStageCtxSceneId);
+      if active then cv.Brush.Color := STAGE_GREEN
+      else if picked then cv.Brush.Color := theme.Accent
+      else cv.Brush.Color := theme.Border;
+      cv.RoundRect(r.Left, r.Top, r.Right, r.Bottom, 9, 9);
+      if picked and not active then cv.Brush.Color := TlMix(theme.PanelBackground, theme.Accent, 0.30)
+      else cv.Brush.Color := TlMix(theme.PanelBackground, theme.Background, 0.15);
+      cv.RoundRect(r.Left + 1, r.Top + 1, r.Right - 1, r.Bottom - 1, 8, 8);
+      { the title segment, square on its left where it meets the controls }
+      cv.Brush.Color := tcol;
+      cv.RoundRect(r.Left + STAGE_TITLE_X - 2, r.Top + 1, r.Right - 1, r.Bottom - 1, 8, 8);
+      cv.FillRect(Rect(r.Left + STAGE_TITLE_X - 2, r.Top + 1, r.Left + STAGE_TITLE_X + 8, r.Bottom - 1));
+      { controls: play, stop, remove }
+      cy := (r.Top + r.Bottom) div 2;
+      ink := theme.Text;
+      cx := r.Left + 3 + STAGE_ICON_W div 2;
+      if active then cv.Brush.Color := STAGE_GREEN else cv.Brush.Color := ink;
+      cv.Polygon([Point(cx - 3, cy - 5), Point(cx - 3, cy + 5), Point(cx + 5, cy)]);
+      cx := cx + STAGE_ICON_W;
+      if active then cv.Brush.Color := ink else cv.Brush.Color := theme.SecondaryText;
+      cv.FillRect(Rect(cx - 4, cy - 4, cx + 4, cy + 4));
+      cx := cx + STAGE_ICON_W;
+      cv.Pen.Style := psSolid;
+      cv.Pen.Color := ink;
+      cv.Pen.Width := 2;
+      cv.MoveTo(cx - 4, cy - 4); cv.LineTo(cx + 4, cy + 4);
+      cv.MoveTo(cx + 4, cy - 4); cv.LineTo(cx - 4, cy + 4);
+      cv.Pen.Width := 1;
+      { the name: black or white, whichever reads better on the scene's colour }
+      if ((ColorToRGB(tcol) and $FF) * 299 + ((ColorToRGB(tcol) shr 8) and $FF) * 587 +
+          ((ColorToRGB(tcol) shr 16) and $FF) * 114) > 140000 then tink := clBlack else tink := clWhite;
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := tink;
+      lab := reg.Name;
+      if cv.TextWidth(lab) > r.Right - r.Left - STAGE_TITLE_X - 6 then
+      begin
+        while (Length(lab) > 1) and (cv.TextWidth(lab + '..') > r.Right - r.Left - STAGE_TITLE_X - 6) do
+          SetLength(lab, Length(lab) - 1);
+        lab := lab + '..';
+      end;
+      cv.TextOut(r.Left + STAGE_TITLE_X + 3, cy - cv.TextHeight(lab) div 2, lab);
+    end
+    else
+    begin
+      cv.Brush.Style := bsClear;
+      cv.Pen.Style := psSolid;
+      cv.Pen.Color := theme.Border;
+      cv.Pen.Style := psDash;
+      cv.Rectangle(r.Left, r.Top, r.Right, r.Bottom);
+      cv.Pen.Style := psSolid;
+      cv.Font.Color := theme.SecondaryText;
+      cv.TextOut(r.Left + (r.Right - r.Left - cv.TextWidth('+ Scene')) div 2, r.Top + 3, '+ Scene');
+    end;
+  end;
+  cv.Pen.Style := psSolid;
+  cv.Brush.Style := bsSolid;
+end;
+
+{ hint text for the controls of a scene panel }
+procedure TfrmMain.TlStageUpdateHint(X, Y: Integer);
+var
+  s: string;
+  col, idx: Integer;
+  r: TRect;
+begin
+  s := '';
+  if FStageVisible and (FProject <> nil) and (Y >= 0) and (Y < LANE_RULER_H) and
+     (X >= TlHdrW) and (X < FTlView.HeaderWidth) then
+  begin
+    col := (X - TlHdrW - 3) div STAGE_CELL_W;
+    idx := FStageScroll + col;
+    if (col >= 0) and (col < TlStageCols) and (idx < FProject.Timeline.RegionCount) then
+    begin
+      r := TlStageSceneRect(col);
+      case TlStageScenePart(X - r.Left) of
+        0: s := 'Play scene "' + FProject.Timeline.GetRegion(idx).Name + '"';
+        1: s := 'Stop scene "' + FProject.Timeline.GetRegion(idx).Name + '" and return its tracks to the Timeline';
+        2: s := 'Remove scene "' + FProject.Timeline.GetRegion(idx).Name + '" from the project';
+      end;
+    end;
+  end;
+  if pbTimeline.Hint <> s then
+  begin
+    pbTimeline.Hint := s;
+    pbTimeline.ShowHint := s <> '';
+    Application.CancelHint;
+  end;
+end;
+
+{ stops one scene: the tracks it launched go back to the arrangement }
+procedure TfrmMain.TlStageStopScene(ARegion: TTimelineRegion);
+var
+  i, n: Integer;
+begin
+  if ARegion = nil then Exit;
+  n := 0;
+  for i := 0 to High(FStageLaunches) do
+    if FStageLaunches[i].SceneId <> ARegion.Id then
+    begin
+      FStageLaunches[n] := FStageLaunches[i];
+      Inc(n);
+    end;
+  SetLength(FStageLaunches, n);
+  if FStageActiveScene = ARegion.Id then FStageActiveScene := -1;
+  TlStagePushToPlayer;
+  RefreshTimelineTab;
+end;
+
+{ ---- mini previews of a slot's content ---- }
+procedure TfrmMain.TlStageMiniWave(cv: TGLCanvas; AClip: TTimelineClip; ARegion: TTimelineRegion;
+  const ARect: TRect; AColor: TColor);
+var
+  src: TMediaSource;
+  cols: TWavePeakArray;
+  c, n, midY, half: Integer;
+  t, srcSec: Double;
+  spc: Integer;
+  pk: TWavePeak;
+begin
+  src := FProject.Timeline.SourceById(AClip.SourceId);
+  if (src = nil) or (src.Waveform = nil) or (src.SampleRate <= 0) or (ARegion.LengthSeconds <= 0) then Exit;
+  n := ARect.Right - ARect.Left;
+  if n < 2 then Exit;
+  midY := (ARect.Top + ARect.Bottom) div 2;
+  half := Max(1, (ARect.Bottom - ARect.Top) div 2 - 1);
+  spc := Max(1, Round(ARegion.LengthSeconds / n * src.SampleRate));
+  cv.Pen.Style := psSolid;
+  cv.Pen.Color := AColor;
+  for c := 0 to n - 1 do
+  begin
+    t := ARegion.StartSeconds + (c / n) * ARegion.LengthSeconds;
+    if (t < AClip.StartSeconds) or (t >= AClip.EndSeconds) then Continue;
+    srcSec := AClip.SourceOffsetSeconds + (t - AClip.StartSeconds);
+    src.Waveform.GetColumns(0, Round(srcSec * src.SampleRate), spc, 1, cols);
+    if Length(cols) = 0 then Continue;
+    pk := cols[0];
+    cv.MoveTo(ARect.Left + c, EnsureRange(Round(midY - pk.MaxV * half), ARect.Top, ARect.Bottom));
+    cv.LineTo(ARect.Left + c, EnsureRange(Round(midY - pk.MinV * half), ARect.Top, ARect.Bottom));
+  end;
+end;
+
+{ ---- slot cells of one track ---- }
+procedure TfrmMain.TlStagePaintCells(cv: TGLCanvas; ATrk: TTimelineTrack; ATop, ALaneH: Integer;
+  AColor: TColor);
+var
+  theme: TUDAWTheme;
+  tl: TTimeline;
+  col, idx, li, j, cx: Integer;
+  r, prev: TRect;
+  reg: TTimelineRegion;
+  has, thisOne, active, queued: Boolean;
+  frac, now_: Double;
+  c: TTimelineClip;
+  x1, x2: Integer;
+begin
+  theme := CurrentTheme;
+  tl := FProject.Timeline;
+  now_ := tl.PlayheadSeconds;
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := TlMix(theme.PanelBackground, theme.Background, 0.35);
+  cv.FillRect(Rect(TlHdrW + 1, ATop, FTlView.HeaderWidth, ATop + ALaneH));
+  cv.Pen.Color := theme.Border;
+  cv.MoveTo(FTlView.HeaderWidth - 1, ATop);
+  cv.LineTo(FTlView.HeaderWidth - 1, ATop + ALaneH);
+  if ATrk.Kind = tkVideo then
+  begin
+    cv.Brush.Style := bsClear;
+    cv.Font.Color := theme.SecondaryText;
+    cv.TextOut(TlHdrW + 10, ATop + ALaneH div 2 - 7, 'video / Timeline only');
+    cv.Brush.Style := bsSolid;
+    Exit;
+  end;
+  li := TlStageLaunchIndex(ATrk.Id);
+  for col := 0 to TlStageCols - 1 do
+  begin
+    idx := FStageScroll + col;
+    if idx >= tl.RegionCount then Continue;
+    reg := tl.GetRegion(idx);
+    r := TlStageCellRect(col, ATop, ALaneH);
+    has := TlStageSlotHasClips(ATrk, reg);
+    thisOne := (li >= 0) and (not FStageLaunches[li].Silent) and (FStageLaunches[li].SceneId = reg.Id);
+    active := thisOne and (now_ >= FStageLaunches[li].ActivateAt);
+    queued := thisOne and not active;
+    cv.Brush.Style := bsSolid;
+    if has then cv.Brush.Color := TlMix(AColor, theme.Background, 0.62)
+    else cv.Brush.Color := TlMix(theme.Background, theme.PanelBackground, 0.4);
+    if active then cv.Pen.Color := STAGE_GREEN
+    else if queued then cv.Pen.Color := STAGE_AMBER
+    else if has then cv.Pen.Color := TlMix(AColor, clBlack, 0.35)
+    else cv.Pen.Color := theme.Border;
+    cv.Pen.Width := IfThen(active or queued, 2, 1);
+    cv.RoundRect(r.Left, r.Top, r.Right, r.Bottom, 6, 6);
+    cv.Pen.Width := 1;
+    if not has then
+    begin
+      { empty slot: a dot - clicking it stops this track while the scene plays }
+      cv.Brush.Color := theme.SecondaryText;
+      cv.Pen.Style := psClear;
+      cx := (r.Left + r.Right) div 2;
+      cv.Ellipse(cx - 2, (r.Top + r.Bottom) div 2 - 2, cx + 3, (r.Top + r.Bottom) div 2 + 3);
+      cv.Pen.Style := psSolid;
+      Continue;
+    end;
+    { launch triangle }
+    if active then cv.Brush.Color := STAGE_GREEN
+    else if queued then cv.Brush.Color := STAGE_AMBER
+    else cv.Brush.Color := clWhite;
+    cv.Pen.Style := psClear;
+    cv.Polygon([Point(r.Left + 6, (r.Top + r.Bottom) div 2 - 6), Point(r.Left + 6, (r.Top + r.Bottom) div 2 + 6),
+      Point(r.Left + 15, (r.Top + r.Bottom) div 2)]);
+    cv.Pen.Style := psSolid;
+    { mini content preview: the slot's clips across the scene's length }
+    prev := Rect(r.Left + 20, r.Top + 4, r.Right - 4, r.Bottom - 8);
+    if (prev.Right > prev.Left + 4) and (prev.Bottom > prev.Top + 2) and (reg.LengthSeconds > 0) then
+    begin
+      cv.PushClip(prev);
+      try
+        for j := 0 to ATrk.ClipCount - 1 do
+        begin
+          c := ATrk.GetClip(j);
+          if (c.EndSeconds <= reg.StartSeconds) or (c.StartSeconds >= reg.EndSeconds) then Continue;
+          x1 := prev.Left + Round((Max(c.StartSeconds, reg.StartSeconds) - reg.StartSeconds) /
+            reg.LengthSeconds * (prev.Right - prev.Left));
+          x2 := prev.Left + Round((Min(c.EndSeconds, reg.EndSeconds) - reg.StartSeconds) /
+            reg.LengthSeconds * (prev.Right - prev.Left));
+          if x2 <= x1 then x2 := x1 + 1;
+          cv.Brush.Color := TlMix(AColor, theme.Background, 0.35);
+          cv.Pen.Style := psClear;
+          cv.FillRect(Rect(x1, prev.Top, x2, prev.Top + 2));
+          cv.Pen.Style := psSolid;
+          if c.IsMidiClip then
+            TlDrawMidiDashes(cv, c, Rect(x1, prev.Top + 3, x2, prev.Bottom),
+              Max(c.StartSeconds, reg.StartSeconds), Min(c.EndSeconds, reg.EndSeconds),
+              TlMix(AColor, clWhite, 0.55), 2)
+          else
+            TlStageMiniWave(cv, c, reg, Rect(x1, prev.Top + 3, x2, prev.Bottom),
+              TlMix(AColor, clWhite, 0.5));
+        end;
+      finally
+        cv.PopClip;
+      end;
+    end;
+    { progress bar of the looping slot }
+    if active and (FStageLaunches[li].LengthSec > 0) then
+    begin
+      frac := (now_ - FStageLaunches[li].ActivateAt) / FStageLaunches[li].LengthSec;
+      frac := frac - Floor(frac);
+      cv.Brush.Color := STAGE_GREEN;
+      cv.FillRect(Rect(r.Left + 3, r.Bottom - 5, r.Left + 3 + Round(frac * (r.Right - r.Left - 6)), r.Bottom - 3));
+    end;
+  end;
+  cv.Brush.Style := bsSolid;
+end;
+
+{ ---- lane banner while a track is overridden by the stage ---- }
+procedure TfrmMain.TlStagePaintBanner(cv: TGLCanvas; ATrk: TTimelineTrack; ALaunch: Integer;
+  ATop, ALaneH, AWidth: Integer; AColor: TColor);
+var
+  theme: TUDAWTheme;
+  L: TStageLaunch;
+  reg: TTimelineRegion;
+  r, b: TRect;
+  bh, bt, bl, br: Integer;
+  txt: string;
+  active: Boolean;
+  frac: Double;
+begin
+  theme := CurrentTheme;
+  L := FStageLaunches[ALaunch];
+  active := FProject.Timeline.PlayheadSeconds >= L.ActivateAt;
+  reg := TlRegionById(L.SceneId);
+  if active then
+  begin
+    { the arrangement is bypassed for this track: dim its clips behind the banner }
+    cv.Alpha := 0.6;
+    cv.Brush.Style := bsSolid;
+    cv.Brush.Color := theme.Background;
+    cv.Pen.Style := psClear;
+    cv.FillRect(Rect(FTlView.HeaderWidth, ATop, AWidth, ATop + ALaneH));
+    cv.Pen.Style := psSolid;
+    cv.Alpha := 1;
+  end;
+  bh := Min(30, ALaneH - 4);
+  if bh < 10 then Exit;
+  bt := ATop + (ALaneH - bh) div 2;
+  bl := FTlView.HeaderWidth + 10;
+  br := Min(bl + 430, AWidth - 10);
+  if br - bl < 180 then Exit;
+  r := Rect(bl, bt, br, bt + bh);
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := TlMix(AColor, theme.Background, 0.4);
+  if not active then cv.Pen.Color := STAGE_AMBER
+  else if L.Silent then cv.Pen.Color := TlMix(AColor, clBlack, 0.3)
+  else cv.Pen.Color := STAGE_GREEN;
+  cv.Pen.Width := 2;
+  cv.RoundRect(r.Left, r.Top, r.Right, r.Bottom, 8, 8);
+  cv.Pen.Width := 1;
+  { state icon: green triangle (looping), grey square (stopped), amber (queued) }
+  cv.Pen.Style := psClear;
+  if not active then
+  begin
+    cv.Brush.Color := STAGE_AMBER;
+    cv.Polygon([Point(r.Left + 10, bt + bh div 2 - 6), Point(r.Left + 10, bt + bh div 2 + 6),
+      Point(r.Left + 19, bt + bh div 2)]);
+    txt := 'Queued: ' + IfThen(reg <> nil, reg.Name, 'stop') + ' - launches on the next ' +
+      cboTlStageQuant.Text;
+  end
+  else if L.Silent then
+  begin
+    cv.Brush.Color := clSilver;
+    cv.FillRect(Rect(r.Left + 10, bt + bh div 2 - 5, r.Left + 20, bt + bh div 2 + 5));
+    txt := 'Stopped by the Clip Stage';
+  end
+  else
+  begin
+    cv.Brush.Color := STAGE_GREEN;
+    cv.Polygon([Point(r.Left + 10, bt + bh div 2 - 6), Point(r.Left + 10, bt + bh div 2 + 6),
+      Point(r.Left + 19, bt + bh div 2)]);
+    txt := 'Clip Stage: ' + IfThen(reg <> nil, reg.Name, 'scene') + '  (looping)';
+  end;
+  cv.Pen.Style := psSolid;
+  b := TlStageBackRect(ATop, ALaneH);
+  cv.Brush.Style := bsClear;
+  cv.Font.Color := clWhite;
+  cv.TextRect(Rect(r.Left + 26, bt, b.Left - 6, bt + bh), r.Left + 26, bt + (bh - cv.TextHeight(txt)) div 2, txt);
+  if active and (not L.Silent) and (L.LengthSec > 0) then
+  begin
+    frac := (FProject.Timeline.PlayheadSeconds - L.ActivateAt) / L.LengthSec;
+    frac := frac - Floor(frac);
+    cv.Brush.Style := bsSolid;
+    cv.Brush.Color := STAGE_GREEN;
+    cv.FillRect(Rect(r.Left + 26, r.Bottom - 5, r.Left + 26 + Round(frac * (b.Left - 6 - r.Left - 26)), r.Bottom - 3));
+  end;
+  { Back to arrangement }
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := TlMix(theme.PanelBackground, theme.Background, 0.2);
+  cv.Pen.Color := theme.Border;
+  cv.RoundRect(b.Left, b.Top, b.Right, b.Bottom, 6, 6);
+  cv.Brush.Style := bsClear;
+  cv.Font.Color := theme.Text;
+  cv.TextOut(b.Left + (b.Right - b.Left - cv.TextWidth('Back to Timeline')) div 2, b.Top + (b.Bottom - b.Top - cv.TextHeight('Back to Timeline')) div 2,
+    'Back to Timeline');
+  cv.Brush.Style := bsSolid;
+end;
+
+{ A MIDI clip's notes as piano-roll dashes: time across ARect (AT0..AT1 are the
+  timeline seconds of its left/right edges), pitch up. }
+{ A tracker module on the Timeline is drawn as notation - its notes as dashes
+  (time across, pitch up) - instead of a waveform. Returns False for any clip
+  whose source is not a module. The parsed notes are cached per source. }
+function TfrmMain.TlDrawTrackerNotation(cv: TGLCanvas; AClip: TTimelineClip; ASrc: TMediaSource;
+  const ARect: TRect; AColor: TColor; AThick: Integer): Boolean;
+var
+  nt: TTrackerNotation;
+  i, x1, x2, y, lo, hi, h: Integer;
+  scale, t0, t1: Double;
+  d: TTrackerDash;
+begin
+  Result := False;
+  if (ASrc = nil) or AClip.IsMidiClip then Exit;
+  if FTrkNotation = nil then FTrkNotation := TDictionary<Integer, TTrackerNotation>.Create;
+  if not FTrkNotation.TryGetValue(ASrc.Id, nt) then
+  begin
+    nt.Dashes := nil;
+    nt.Channels := 0;
+    try
+      if (ASrc.Kind <> mkVideoFile) and TrackerSniffFile(ASrc.Path) then
+        TrackerNotationFile(ASrc.Path, nt);
+    except
+      on E: Exception do
+      begin
+        Logger.Warn('ui', 'tracker notation failed: ' + E.Message);
+        nt.Dashes := nil;
+      end;
+    end;
+    FTrkNotation.AddOrSetValue(ASrc.Id, nt);
+  end;
+  if Length(nt.Dashes) = 0 then Exit;
+  Result := True;
+  if (ARect.Right <= ARect.Left) or (ARect.Bottom <= ARect.Top) then Exit;
+
+  { the clip plays tempo-conformed: one source second spans 1/scale timeline seconds }
+  scale := 1.0;
+  if (AClip.SourceBPM > 0) and (FProject.TempoBPM > 0) then
+  begin
+    scale := FProject.TempoBPM / AClip.SourceBPM;
+    if (scale < 0.25) or (scale > 4.0) then scale := 1.0;
+  end;
+  lo := nt.MinNote;
+  hi := nt.MaxNote;
+  if hi - lo < 11 then
+  begin
+    lo := Max(0, (lo + hi) div 2 - 6);
+    hi := lo + 12;
+  end;
+  h := Max(1, ARect.Bottom - ARect.Top - AThick);
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := AColor;
+  cv.Pen.Style := psClear;
+  for i := 0 to High(nt.Dashes) do
+  begin
+    d := nt.Dashes[i];
+    t0 := AClip.StartSeconds + (d.StartSec - AClip.SourceOffsetSeconds) * scale;
+    t1 := AClip.StartSeconds + (d.EndSec - AClip.SourceOffsetSeconds) * scale;
+    if (t1 < AClip.StartSeconds) or (t0 > AClip.StartSeconds + AClip.LengthSeconds) then Continue;
+    x1 := Max(ARect.Left, Round(FTlView.SecondsToX(t0)));
+    x2 := Min(ARect.Right, Round(FTlView.SecondsToX(t1)));
+    if x2 <= x1 then x2 := x1 + 1;
+    if x1 >= ARect.Right then Continue;
+    y := ARect.Bottom - AThick - Round((d.Note - lo) / Max(1, hi - lo) * h);
+    y := EnsureRange(y, ARect.Top, ARect.Bottom - AThick);
+    cv.FillRect(Rect(x1, y, x2, y + AThick));
+  end;
+end;
+
+procedure TfrmMain.TlDrawMidiDashes(cv: TGLCanvas; AClip: TTimelineClip; const ARect: TRect;
+  AT0, AT1: Double; AColor: TColor; AThick: Integer);
+var
+  seq: TMidiSequence;
+  trk: TMidiTrackSeq;
+  tr, k, lo, hi, x1, x2, y, total, h: Integer;
+  nt: TMidiNote;
+  ts, te, pps: Double;
+begin
+  if (FProject = nil) or (not AClip.IsMidiClip) or (AT1 <= AT0) or (ARect.Right <= ARect.Left) or
+     (ARect.Bottom <= ARect.Top) then Exit;
+  seq := FProject.Midi.ClipById(AClip.MidiClipId);
+  if seq = nil then Exit;
+  lo := 127;
+  hi := 0;
+  total := 0;
+  for tr := 0 to seq.TrackCount - 1 do
+  begin
+    trk := seq.GetTrack(tr);
+    Inc(total, trk.NoteCount);
+    for k := 0 to trk.NoteCount - 1 do
+    begin
+      nt := trk.Notes[k];
+      if nt.Note < lo then lo := nt.Note;
+      if nt.Note > hi then hi := nt.Note;
+    end;
+  end;
+  if total = 0 then Exit;
+  if hi - lo < 11 then
+  begin
+    lo := Max(0, (lo + hi) div 2 - 6);
+    hi := lo + 12;
+  end;
+  h := Max(1, ARect.Bottom - ARect.Top - AThick);
+  pps := (ARect.Right - ARect.Left) / (AT1 - AT0);
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := AColor;
+  cv.Pen.Style := psClear;
+  for tr := 0 to seq.TrackCount - 1 do
+  begin
+    trk := seq.GetTrack(tr);
+    for k := 0 to trk.NoteCount - 1 do
+    begin
+      nt := trk.Notes[k];
+      ts := AClip.StartSeconds + seq.TickToSeconds(nt.StartTick) - AClip.SourceOffsetSeconds;
+      te := AClip.StartSeconds + seq.TickToSeconds(nt.StartTick + nt.LengthTick) - AClip.SourceOffsetSeconds;
+      if (te < AT0) or (ts > AT1) or (ts >= AClip.EndSeconds) then Continue;
+      te := Min(te, AClip.EndSeconds);
+      x1 := ARect.Left + Round((Max(ts, AT0) - AT0) * pps);
+      x2 := ARect.Left + Round((Min(te, AT1) - AT0) * pps);
+      if x2 <= x1 then x2 := x1 + 1;
+      y := ARect.Bottom - AThick - Round((nt.Note - lo) / (hi - lo + 1) * h);
+      cv.FillRect(Rect(x1, y, x2, y + AThick));
+    end;
+  end;
+  cv.Pen.Style := psSolid;
+end;
+
+{ ---- toolbar + popup menu handlers ---- }
+procedure TfrmMain.cboTlStageQuantChange(Sender: TObject);
+begin
+  FStageQuantIdx := Max(0, cboTlStageQuant.ItemIndex);
+end;
+
+procedure TfrmMain.ibTlStageClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  TlStageBack;
+end;
+
+{ TRANSPORT icon bar: play / stop / record / loop. Record opens the Recording
+  view (arming and take management live there); play and stop are the same
+  commands as the Timeline menu and Space. }
+procedure TfrmMain.ibTlTransportClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if AId = 'play' then
+  begin
+    if FTlPlaying then StopTimelinePlayback else btnTlPlayClick(nil);
+    RefreshTimelineTab;
+  end
+  else if AId = 'stop' then btnTlStopClick(nil)
+  else if AId = 'video' then
+  begin
+    { turns the video playback panel on or off; off hides the whole panel (the sound of a
+      video clip is its own audio lane and keeps playing) }
+    FVideoPanelOff := not FVideoPanelOff;
+    if FVideoPanelOff and (FTlVideo <> nil) and not TlVideoActive then FTlVideo.Stop;
+    RefreshTimelineTab;
+  end
+  else if AId = 'editor' then
+  begin
+    TlSetEditor(not FEditorOn);
+    RefreshTimelineTab;
+  end
+  else if AId = 'stage' then
+  begin
+    FStageVisible := not FStageVisible;
+    RefreshTimelineTab;
+  end
+  else if AId = 'browser' then
+  begin
+    TlSetBrowser(FBrowserOff);
+    RefreshTimelineTab;
+  end
+  else if AId = 'metronome' then
+  begin
+    TlSetMetronome(not FMetronomeOn);
+    RefreshTimelineTab;
+  end
+  else if AId = 'lanes' then
+  begin
+    FLanesVisible := not FLanesVisible;
+    RefreshTimelineTab;
+  end
+  else if AId = 'chords' then
+  begin
+    FChordsVisible := not FChordsVisible;
+    RefreshTimelineTab;
+  end
+  else if AId = 'tostart' then TlGotoEnd(False)
+  else if AId = 'toend' then TlGotoEnd(True)
+  else if AId = 'record' then ShowDockPage(tabRecording)
+  else if AId = 'loop' then btnTlLoopToggleClick(nil)
+  else if AId = 'deletecache' then TlDeleteCache;
+end;
+
+{ ---- Track header widgets (see UDAW.UI.TimelineHeader) ---- }
+
+function TfrmMain.TlHeaderSub(ATrk: TTimelineTrack; out AColor: TColor): string;
+var
+  li: Integer;
+  reg: TTimelineRegion;
+begin
+  AColor := clNone;
+  li := TlStageLaunchIndex(ATrk.Id);
+  if li >= 0 then
+  begin
+    if FStageLaunches[li].Silent then Result := 'stage stopped'
+    else
+    begin
+      AColor := $0040E080;
+      reg := TlRegionById(FStageLaunches[li].SceneId);
+      if reg <> nil then Result := 'stage ' + reg.Name
+      else Result := 'stage';
+    end;
+  end
+  else if TlLinkedStrip(ATrk.Id) <> nil then
+    Result := Format('%s  %.1f dB', [TrackKindDisplay(ATrk.Kind), TlLinkedStrip(ATrk.Id).FaderDb])
+  else Result := Format('%s  %.1f dB', [TrackKindDisplay(ATrk.Kind), ATrk.GainDb]);
+end;
+
+{ what decides how many header widgets there are and what they are made of;
+  the moving values (selection, M/S/R, volume, pan, sub-label, scroll position)
+  are pushed every paint by TlHeaderUpdate instead }
+function TfrmMain.TlHeaderSignature: string;
+var
+  sb: TStringBuilder;
+  i: Integer;
+  trk: TTimelineTrack;
+begin
+  if FProject = nil then Exit('<none>');
+  sb := TStringBuilder.Create;
+  try
+    sb.Append(TlHdrW).Append('x').Append(pbTimeline.Height).Append('r').Append(FTlView.RulerHeight);
+    for i := 0 to FProject.Timeline.TrackCount - 1 do
+    begin
+      trk := FProject.Timeline.GetTrack(i);
+      sb.Append('|').Append(trk.Id).Append(':').Append(trk.Name).Append(':').Append(Ord(trk.Kind))
+        .Append(':').Append(trk.Height).Append(':').Append(Integer(TlTrackAccent(trk, i)))
+        .Append(':').Append(Ord(TlPrimaryTempoUnknown(trk)));
+    end;
+    Result := sb.ToString;
+  finally
+    sb.Free;
+  end;
+end;
+
+procedure TfrmMain.TlHeaderTick;
+begin
+  if not FRightFilled then
+  begin
+    FRightFilled := True;   { the browser panel's first fill, once the form is up }
+    TlRightFill;
+  end;
+  if FTlHdrSyncPosted then Exit;
+  if TlHeaderSignature <> FTlHdrSig then
+  begin
+    FTlHdrSyncPosted := True;
+    PostMessage(Handle, WM_TLSYNC, 0, 0);
+  end
+  else TlHeaderUpdate;
+end;
+
+procedure TfrmMain.WMTlSync(var Msg: TMessage);
+begin
+  TlHeaderSync;
+end;
+
+procedure TfrmMain.TlHeaderSync;
+var
+  i, j: Integer;
+  trk: TTimelineTrack;
+  h: TGLTrackHeader;
+  existing: TObjectList<TGLTrackHeader>;
+  info: TTlHeaderInfo;
+begin
+  FTlHdrSyncPosted := False;
+  existing := TObjectList<TGLTrackHeader>.Create(False);
+  try
+    for i := 0 to pnlTlHeaders.ControlCount - 1 do
+      if pnlTlHeaders.Controls[i] is TGLTrackHeader then
+        existing.Add(TGLTrackHeader(pnlTlHeaders.Controls[i]));
+    for j := existing.Count - 1 downto 0 do
+      if (FProject = nil) or (FProject.Timeline.TrackById(existing[j].TrackId) = nil) then
+      begin
+        existing[j].Free;
+        existing.Delete(j);
+      end;
+    if FProject <> nil then
+      for i := 0 to FProject.Timeline.TrackCount - 1 do
+      begin
+        trk := FProject.Timeline.GetTrack(i);
+        h := nil;
+        for j := 0 to existing.Count - 1 do
+          if existing[j].TrackId = trk.Id then
+          begin
+            h := existing[j];
+            Break;
+          end;
+        if h = nil then
+        begin
+          h := TGLTrackHeader.Create(pnlTlHeaders);
+          h.Parent := pnlTlHeaders;
+          h.OnSelect := TlHdrSelect;
+          h.OnFlag := TlHdrFlag;
+          h.OnGain := TlHdrGain;
+          h.OnPan := TlHdrPan;
+          h.OnTempoUnknown := TlHdrTempo;
+          h.OnRename := TlHdrRename;
+          h.OnPassMouse := TlHdrPassMouse;
+          h.PopupMenu := nil;
+          existing.Add(h);
+        end;
+        info := Default(TTlHeaderInfo);
+        info.TrackId := trk.Id;
+        info.Name := trk.Name;
+        info.Tint := TlTrackAccent(trk, i);
+        case trk.Kind of
+          tkAudio: info.Glyph := tgAudio;
+          tkMidi, tkInstrument, tkTracker: info.Glyph := tgMidi;
+          tkVideo: info.Glyph := tgVideo;
+          tkBus, tkAux, tkFolder, tkMaster: info.Glyph := tgBus;
+        else
+          info.Glyph := tgOther;
+        end;
+        info.CanArm := trk.Kind = tkAudio;
+        info.NoMeter := trk.Kind = tkVideo;   // a video lane carries no audio level
+        info.TempoUnknown := TlPrimaryTempoUnknown(trk);
+        h.Configure(info);
+      end;
+  finally
+    existing.Free;
+  end;
+  FTlHdrSig := TlHeaderSignature;
+  TlHeaderUpdate;
+end;
+
+{ positions the headers over their tracks (they scroll with the lanes) and
+  pushes the moving values into them }
+procedure TfrmMain.TlHeaderUpdate;
+var
+  i, j, ti, hdrW: Integer;
+  pkDb: Double;
+  strip: TMixStrip;
+  h: TGLTrackHeader;
+  trk: TTimelineTrack;
+  live: TTlHeaderLive;
+begin
+  if (FProject = nil) or (pnlTlHeaders = nil) then Exit;
+  hdrW := Max(0, TlHdrW - 8);   { the last 8 px stay the canvas' column-resize grip }
+  pnlTlHeaders.SetBounds(pbTimeline.Left, pbTimeline.Top + FTlView.RulerHeight, hdrW,
+    Max(0, pbTimeline.Height - FTlView.RulerHeight));
+  pnlTlHeaders.OnAddClick := btnTlAddTrackClick;
+  with TlAddChannelRect do
+    pnlTlHeaders.AddRect := Rect(4, Top - FTlView.RulerHeight, hdrW - 4, Bottom - FTlView.RulerHeight);
+  for i := 0 to pnlTlHeaders.ControlCount - 1 do
+  begin
+    if not (pnlTlHeaders.Controls[i] is TGLTrackHeader) then Continue;
+    h := TGLTrackHeader(pnlTlHeaders.Controls[i]);
+    ti := TlTrackIndexById(h.TrackId);
+    if ti < 0 then Continue;
+    trk := FProject.Timeline.GetTrack(ti);
+    h.SetBounds(0, TlTrackTop(ti) - FTlView.RulerHeight, hdrW, trk.Height);
+    live.Sub := TlHeaderSub(trk, live.SubColor);
+    live.Muted := trk.Muted;
+    live.Soloed := trk.Soloed;
+    live.Armed := trk.Armed;
+    live.Selected := (trk.Id = FTlSelectedTrackId) or TlTrackHasSelectedClip(trk);
+    live.GainDb := trk.GainDb;
+    live.Pan := trk.Pan;
+    strip := TlLinkedStrip(trk.Id);
+    if strip <> nil then
+    begin
+      live.GainDb := Max(TL_GAIN_MIN, Min(TL_GAIN_MAX, strip.FaderDb));   // the Mixer owns these for a linked lane
+      live.Pan := strip.Pan;
+    end;
+    live.Level := 0;
+    if FTlPlaying and (trk.Kind <> tkVideo) then
+    begin
+      if FTlPlayer <> nil then live.Level := FTlPlayer.TrackPeak(trk.Id);
+      if live.Level <= 0 then
+        { a track fed through a Mixer strip is not summed by the player: read that strip's meter }
+        for j := 0 to FProject.Mixer.StripCount - 1 do
+          if FProject.Mixer.GetStrip(j).InputSourceId = trk.Id then
+          begin
+            pkDb := Max(FProject.Mixer.GetStrip(j).MeterPeakDbL, FProject.Mixer.GetStrip(j).MeterPeakDbR);
+            if pkDb > -80 then live.Level := FastExp10(pkDb / 20);
+            Break;
+          end;
+    end;
+    h.UpdateLive(live);
+  end;
+end;
+
+procedure TfrmMain.TlHdrSelect(Sender: TGLTrackHeader);
+begin
+  FTlExtraTrackIds := nil;
+  FTlSelectedTrackId := Sender.TrackId;
+  RefreshTimelineTab;
+end;
+
+{ M / S / R: live toggles, same monitoring-only semantics as the Mute Track
+  menu item - not run through the undo stack, and read per audio block by
+  TTimelinePlayer; R arms the track for the next recording }
+procedure TfrmMain.TlHdrFlag(Sender: TGLTrackHeader; AFlag: Integer; AValue: Boolean);
+var
+  trk: TTimelineTrack;
+begin
+  if FProject = nil then Exit;
+  trk := FProject.Timeline.TrackById(Sender.TrackId);
+  if trk = nil then Exit;
+  case AFlag of
+    0: trk.Muted := AValue;
+    1: trk.Soloed := AValue;
+  else
+    trk.Armed := AValue;
+  end;
+  FProject.Touch;
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlHdrGain(Sender: TGLTrackHeader; AValue: Double);
+var
+  trk: TTimelineTrack;
+  strip: TMixStrip;
+begin
+  if FProject = nil then Exit;
+  trk := FProject.Timeline.TrackById(Sender.TrackId);
+  if trk = nil then Exit;
+  trk.GainDb := AValue;   { read live by TTimelinePlayer, like mute / solo }
+  { a lane with a Mixer strip: the strip's fader IS this volume (the player hands that lane
+    to the mixer flat, so the lane's own gain is ignored) - same mergeable command the
+    Mixer's fader uses, so the Mixer follows and Undo covers both }
+  strip := TlLinkedStrip(trk.Id);
+  if strip <> nil then
+    FCmds.Perform(TSetMixStripFloatCommand.Create(FProject, strip.Id, mffFader, AValue));
+  FProject.Touch;
+  pbTimeline.Invalidate;
+end;
+
+procedure TfrmMain.TlHdrPan(Sender: TGLTrackHeader; AValue: Double);
+var
+  trk: TTimelineTrack;
+  strip: TMixStrip;
+begin
+  if FProject = nil then Exit;
+  trk := FProject.Timeline.TrackById(Sender.TrackId);
+  if trk = nil then Exit;
+  trk.Pan := AValue;
+  strip := TlLinkedStrip(trk.Id);
+  if strip <> nil then
+    FCmds.Perform(TSetMixStripFloatCommand.Create(FProject, strip.Id, mffPan, AValue));
+  FProject.Touch;
+  pbTimeline.Invalidate;
+end;
+
+{ the Mixer strip fed by this lane (TMixStrip.InputSourceId), nil when it has none }
+function TfrmMain.TlLinkedStrip(ATrackId: Integer): TMixStrip;
+var
+  j: Integer;
+begin
+  Result := nil;
+  if FProject = nil then Exit;
+  for j := 0 to FProject.Mixer.StripCount - 1 do
+    if (FProject.Mixer.GetStrip(j).Kind = skAudioTrack) and
+       (FProject.Mixer.GetStrip(j).InputSourceId = ATrackId) then
+      Exit(FProject.Mixer.GetStrip(j));
+end;
+
+procedure TfrmMain.TlHdrTempo(Sender: TGLTrackHeader);
+begin
+  FTlSelectedTrackId := Sender.TrackId;
+  TlTempoUnknownClick;
+end;
+
+{ a press on a header's own background behaves exactly as the same press on the
+  Timeline canvas did: selects the track, opens the track menu on right-click }
+procedure TfrmMain.TlHdrPassMouse(Sender: TGLTrackHeader; ADown: Boolean; AButton: TMouseButton;
+  AShift: TShiftState; X, Y: Integer);
+var
+  pt: TPoint;
+begin
+  pt := pbTimeline.ScreenToClient(Sender.ClientToScreen(Point(X, Y)));
+  if ADown then pbTimelineMouseDown(pbTimeline, AButton, AShift, pt.X, pt.Y)
+  else pbTimelineMouseUp(pbTimeline, AButton, AShift, pt.X, pt.Y);
+end;
+
+{ the master volume + meter group sits at the band's right edge }
+procedure TfrmMain.pnlTimelineTopResize(Sender: TObject);
+var
+  right: Integer;
+begin
+  right := pnlTimelineTop.Width - 12;
+  pbTlMeters.Left := right - pbTlMeters.Width;
+  tbTlMasterVol.Left := pbTlMeters.Left - tbTlMasterVol.Width - 8;
+  lblTlMasterVol.Left := tbTlMasterVol.Left + 2;
+end;
+
+
+procedure TfrmMain.pmTlStagePopup(Sender: TObject);
+var
+  reg: TTimelineRegion;
+begin
+  reg := TlRegionById(FStageCtxSceneId);
+  pmStgLaunch.Enabled := reg <> nil;
+  pmStgRename.Enabled := reg <> nil;
+  pmStgDelete.Enabled := reg <> nil;
+  pmStgSetRange.Enabled := (reg <> nil) and FTlRangeActive;
+  pmStgAdd.Enabled := True;
+  { the segment items work on the scene and the selected channel lane }
+  reg := TlSegmentScene;
+  pmStgDeleteSegment.Enabled := (reg <> nil) and (FTlSelectedTrackId >= 0);
+  pmStgCopySegment.Enabled := (reg <> nil) and (FTlSelectedTrackId >= 0);
+  pmStgPasteSegment.Enabled := (reg <> nil) and (FTlSelectedTrackId >= 0) and FTlHaveSelectionClipboard;
+  { the Timeline's looping flag: ticked while looping is on }
+  pmStgLooping.Checked := (FProject <> nil) and FProject.Timeline.LoopEnabled;
+  { the scene's own flag: keep looping after its region instead of stopping }
+  reg := TlRegionById(FStageCtxSceneId);
+  pmStgContinuous.Enabled := reg <> nil;
+  pmStgContinuous.Checked := (reg <> nil) and reg.Continuous;
+end;
+
+procedure TfrmMain.pmStgLaunchClick(Sender: TObject);
+begin
+  TlStageLaunchScene(TlRegionById(FStageCtxSceneId));
+end;
+
+procedure TfrmMain.pmStgAddClick(Sender: TObject);
+begin
+  TlStageAddScene;
+end;
+
+procedure TfrmMain.pmStgRenameClick(Sender: TObject);
+var
+  reg: TTimelineRegion;
+  nm: string;
+begin
+  reg := TlRegionById(FStageCtxSceneId);
+  if reg = nil then Exit;
+  nm := reg.Name;
+  if InputQuery('Rename scene', 'Scene name:', nm) and (Trim(nm) <> '') then
+  begin
+    reg.Name := Trim(nm);
+    FProject.Touch;
+    RefreshTimelineTab;
+  end;
+end;
+
+procedure TfrmMain.pmStgSetRangeClick(Sender: TObject);
+var
+  reg: TTimelineRegion;
+begin
+  reg := TlRegionById(FStageCtxSceneId);
+  if (reg = nil) or not FTlRangeActive then Exit;
+  reg.StartSeconds := Min(FTlRangeStartSec, FTlRangeEndSec);
+  reg.LengthSeconds := Max(0.05, Abs(FTlRangeEndSec - FTlRangeStartSec));
+  FProject.Touch;
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlStageDeleteScene(ASceneId: Integer);
+var
+  reg: TTimelineRegion;
+  st, len: Double;
+  tl: TTimeline;
+begin
+  reg := TlRegionById(ASceneId);
+  if reg = nil then Exit;
+  st := reg.StartSeconds;
+  len := reg.LengthSeconds;
+  tl := FProject.Timeline;
+  TlStageBack;   // overrides referring to the scene go with it
+  FCmds.Perform(TRemoveTimelineRegionCommand.Create(FProject, ASceneId));
+  { a scene is often made from the ruler selection or the loop region: that marked area
+    goes with the scene, so nothing of it is left on the Timeline }
+  if FTlRangeActive and (Abs(Min(FTlRangeStartSec, FTlRangeEndSec) - st) < 0.01) and
+     (Abs(Abs(FTlRangeEndSec - FTlRangeStartSec) - len) < 0.01) then
+    FTlRangeActive := False;
+  if (tl.LoopLengthSeconds > 0) and (Abs(tl.LoopStartSeconds - st) < 0.01) and
+     (Abs(tl.LoopLengthSeconds - len) < 0.01) then
+  begin
+    tl.LoopLengthSeconds := 0;
+    tl.LoopEnabled := False;
+    FProject.Touch;
+  end;
+  FStageScroll := EnsureRange(FStageScroll, 0, Max(0, FProject.Timeline.RegionCount - 1));
+  RefreshTimelineTab;
+end;
+
+{ ---- Clip Stage scene menu: the segment of a scene on the selected channel lane ----
+  A segment is whatever the selected lane holds between a scene's start and end. The scene is the one
+  right-clicked (else the last one launched). Delete, Copy and Paste reuse the range Cut / Copy / Paste
+  of the Timeline, so effects, titles and fades travel with the clips and every step is undoable. }
+
+function TfrmMain.TlSegmentScene: TTimelineRegion;
+begin
+  Result := nil;
+  if FProject = nil then Exit;
+  Result := TlRegionById(FStageCtxSceneId);
+  if Result = nil then Result := TlRegionById(FStageActiveScene);
+end;
+
+procedure TfrmMain.pmStgDeleteSegmentClick(Sender: TObject);
+var
+  reg: TTimelineRegion;
+  wasActive: Boolean;
+  wasStart, wasEnd: Double;
+begin
+  reg := TlSegmentScene;
+  if (reg = nil) or (FTlSelectedTrackId < 0) then Exit;
+  wasActive := FTlRangeActive;
+  wasStart := FTlRangeStartSec;
+  wasEnd := FTlRangeEndSec;
+  try
+    FTlRangeActive := True;
+    FTlRangeStartSec := reg.StartSeconds;
+    FTlRangeEndSec := reg.EndSeconds;
+    TlClearRangeOnTracks([FTlSelectedTrackId], False);
+    FTlSelClipId := -1;
+    SetLength(FTlSelClipIds, 0);
+  finally
+    FTlRangeActive := wasActive;
+    FTlRangeStartSec := wasStart;
+    FTlRangeEndSec := wasEnd;
+  end;
+  memTimeline.Lines.Insert(0, Format('Deleted the segment of "%s" on the selected channel', [reg.Name]));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.pmStgCopySegmentClick(Sender: TObject);
+var
+  reg: TTimelineRegion;
+  wasActive: Boolean;
+  wasStart, wasEnd: Double;
+begin
+  reg := TlSegmentScene;
+  if (reg = nil) or (FTlSelectedTrackId < 0) then Exit;
+  wasActive := FTlRangeActive;
+  wasStart := FTlRangeStartSec;
+  wasEnd := FTlRangeEndSec;
+  try
+    FTlRangeActive := True;
+    FTlRangeStartSec := reg.StartSeconds;
+    FTlRangeEndSec := reg.EndSeconds;
+    if TlCopyRangeToClipboard([FTlSelectedTrackId]) then
+    begin
+      { a segment is the lane's clips only: the timeline-wide markers and regions stay behind }
+      FTlRangeMarkers := nil;
+      FTlRangeRegions := nil;
+      FTlHaveSelectionClipboard := Length(FTlRangeClips) > 0;
+    end;
+  finally
+    FTlRangeActive := wasActive;
+    FTlRangeStartSec := wasStart;
+    FTlRangeEndSec := wasEnd;
+  end;
+end;
+
+procedure TfrmMain.pmStgPasteSegmentClick(Sender: TObject);
+var
+  reg: TTimelineRegion;
+begin
+  reg := TlSegmentScene;
+  if (reg = nil) or (FTlSelectedTrackId < 0) or not FTlHaveSelectionClipboard then Exit;
+  TlPasteRangeClipboardAt(reg.StartSeconds);
+end;
+
+procedure TfrmMain.pmStgLoopingClick(Sender: TObject);
+begin
+  btnTlLoopToggleClick(Sender);
+end;
+
+procedure TfrmMain.pmStgDeleteClick(Sender: TObject);
+begin
+  TlStageDeleteScene(FStageCtxSceneId);
+  FStageCtxSceneId := -1;
+end;
+
+{ ======================= Markers / Tempo / Signature lanes =======================
+  The MorningDAW-style lane stack directly under the ruler: a Markers lane
+  (markers as flags, regions as bars; double-click adds a marker, drag makes a
+  region, right-click renames/deletes), a Tempo lane and a Signature lane. }
+
+function TfrmMain.TlChordH: Integer;
+begin
+  if FChordsVisible then Result := LANE_CHORD_H
+  else Result := 0;
+end;
+
+function TfrmMain.TlLaneStackH: Integer;
+begin
+  if FLanesVisible then Result := LANE_MARK_H + TlChordH + LANE_TEMPO_H + LANE_SIG_H
+  else Result := 0;
+end;
+
+{ chord colour: one hue per root letter, so a progression reads at a glance }
+function TlChordColor(const AName: string): TColor;
+const
+  ROOTS: array[0..6] of TColor = ($0090D060, $0060B0E0, $00E0A050, $00C070D0, $0070C0C0, $006080E0, $00A0A0E0);
+var
+  c: Char;
+begin
+  if AName = '' then Exit(ROOTS[0]);
+  c := UpCase(AName[1]);
+  if (c >= 'A') and (c <= 'G') then Result := ROOTS[Ord(c) - Ord('A')]
+  else Result := ROOTS[0];
+end;
+
+function TfrmMain.TlChordAtSec(ASec: Double): TTimelineChord;
+begin
+  Result := nil;
+  if FProject = nil then Exit;
+  Result := FProject.Timeline.ChordAt(ASec);
+end;
+
+{ every chord edit swaps the lane's whole snapshot through one undoable command;
+  AEdit is applied to a scratch copy of the lane first }
+procedure TfrmMain.TlChordsCommit(const AWhat, ANewSnapshot: string);
+begin
+  if FProject = nil then Exit;
+  FCmds.Perform(TSetTimelineChordsCommand.Create(FProject, ANewSnapshot, AWhat));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlChordAdd(ASec: Double);
+var
+  tl: TTimeline;
+  old, snap, nm: string;
+  len: Double;
+  j: Integer;
+  g: TGridContext;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  g := TimelineGrid;
+  if g.IsValid then len := g.SecondsPerBar else len := 2.0;
+  for j := 0 to tl.ChordCount - 1 do
+    if tl.GetChord(j).StartSeconds > ASec + 0.001 then
+      len := Min(len, tl.GetChord(j).StartSeconds - ASec);
+  nm := 'C';
+  if not InputQuery('Add chord', 'Chord symbol (for example C, Am7, F#m, G7sus4):', nm) then Exit;
+  nm := Trim(nm);
+  if nm = '' then Exit;
+  old := tl.ChordsSnapshot;
+  tl.AddChord(nm, ASec, len);
+  snap := tl.ChordsSnapshot;
+  tl.RestoreChords(old);
+  TlChordsCommit('Add chord "' + nm + '"', snap);
+end;
+
+procedure TfrmMain.TlChordRename(AId: Integer);
+var
+  tl: TTimeline;
+  ch: TTimelineChord;
+  old, snap, nm: string;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  ch := tl.ChordById(AId);
+  if ch = nil then Exit;
+  nm := ch.Name;
+  if not InputQuery('Rename chord', 'Chord symbol:', nm) then Exit;
+  nm := Trim(nm);
+  if nm = '' then Exit;
+  old := tl.ChordsSnapshot;
+  ch.Name := nm;
+  snap := tl.ChordsSnapshot;
+  tl.RestoreChords(old);
+  TlChordsCommit('Rename chord "' + nm + '"', snap);
+end;
+
+procedure TfrmMain.TlChordDelete(AId: Integer);
+var
+  tl: TTimeline;
+  old, snap: string;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  old := tl.ChordsSnapshot;
+  tl.RemoveChord(AId);
+  snap := tl.ChordsSnapshot;
+  tl.RestoreChords(old);
+  TlChordsCommit('Delete chord', snap);
+end;
+
+{ a chord drag: AMode 5 moves it, 7 moves its end }
+procedure TfrmMain.TlChordDrag(AId, AMode: Integer; ASec: Double);
+var
+  tl: TTimeline;
+  ch: TTimelineChord;
+  old, snap: string;
+  s, e: Double;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  ch := tl.ChordById(AId);
+  if ch = nil then Exit;
+  old := tl.ChordsSnapshot;
+  if AMode = 5 then
+  begin
+    s := FTlView.Snap(Max(0.0, ASec - FLaneEditGrabSec));
+    FTlSnapGuideSec := s;
+    ch.StartSeconds := s;
+    snap := tl.ChordsSnapshot;
+    tl.RestoreChords(old);
+    FCmds.Perform(TSetTimelineChordsCommand.Create(FProject, snap, 'Move chord'));
+  end
+  else
+  begin
+    s := ch.StartSeconds;
+    e := Max(FTlView.Snap(ASec), s + 0.05);
+    FTlSnapGuideSec := e;
+    ch.LengthSeconds := e - s;
+    snap := tl.ChordsSnapshot;
+    tl.RestoreChords(old);
+    FCmds.Perform(TSetTimelineChordsCommand.Create(FProject, snap, 'Resize chord'));
+  end;
+end;
+
+{ header/lane geometry of the view: track header + Clip Stage column on the
+  left, ruler + lane stack on top }
+procedure TfrmMain.TlApplyViewMetrics;
+begin
+  if FProject = nil then Exit;
+  FTlView.SetHeaderWidth(FProject.Timeline.HeaderWidth + TlStageWidth);
+  FTlView.SetRulerHeight(LANE_RULER_H + TlLaneStackH);
+end;
+
+procedure TfrmMain.TlPaintLaneStack(cv: TGLCanvas; AWidth: Integer);
+var
+  theme: TUDAWTheme;
+  tl: TTimeline;
+  g: TGridContext;
+  y0, yC, yT, yS, yE, j, hdrW, hw, x1, x2, regCol, dotX: Integer;
+  px, py, nx: Integer;
+  chd: TTimelineChord;
+  chCol: TColor;
+  tpts: TTempoPoints;
+  sx, tSec: Double;
+  mk: TTimelineMarker;
+  rg: TTimelineRegion;
+  bi: Integer;
+  lab: string;
+begin
+  if FProject = nil then Exit;
+  theme := CurrentTheme;
+  tl := FProject.Timeline;
+  g := TimelineGrid;
+  hdrW := TlHdrW;
+  hw := FTlView.HeaderWidth;
+  y0 := LANE_RULER_H;
+  yC := y0 + LANE_MARK_H;
+  yT := yC + TlChordH;
+  yS := yT + LANE_TEMPO_H;
+  yE := yS + LANE_SIG_H;
+
+  { row backgrounds: header column + stage zone, then the lanes }
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := TlMix(theme.PanelBackground, theme.Background, 0.35);
+  cv.FillRect(Rect(0, y0, hw, yE));
+  cv.Brush.Color := TlMix(theme.Background, theme.PanelBackground, 0.10);
+  cv.FillRect(Rect(hw, y0, AWidth, yT));
+  cv.Brush.Color := TlMix(theme.Background, theme.PanelBackground, 0.20);
+  cv.FillRect(Rect(hw, yT, AWidth, yS));
+  cv.Brush.Color := TlMix(theme.Background, theme.PanelBackground, 0.10);
+  cv.FillRect(Rect(hw, yS, AWidth, yE));
+
+  { bar lines through the lanes }
+  if g.IsValid then
+  begin
+    bi := Max(0, Trunc(SecondsToBars(g, FTlView.VisibleStartSeconds)) - 1);
+    repeat
+      sx := FTlView.SecondsToX(BarsToSeconds(g, bi));
+      if sx >= hw then
+      begin
+        cv.Pen.Color := theme.Grid;
+        cv.MoveTo(Round(sx), y0);
+        cv.LineTo(Round(sx), yE);
+      end;
+      Inc(bi);
+    until sx > AWidth;
+  end;
+
+  { separators }
+  cv.Pen.Color := theme.Border;
+  if FChordsVisible then begin cv.MoveTo(0, yC); cv.LineTo(AWidth, yC); end;
+  cv.MoveTo(0, yT); cv.LineTo(AWidth, yT);
+  cv.MoveTo(0, yS); cv.LineTo(AWidth, yS);
+  cv.MoveTo(0, yE); cv.LineTo(AWidth, yE);
+  cv.MoveTo(hdrW, y0); cv.LineTo(hdrW, yE);
+
+  { ---- header column labels ---- }
+  cv.Brush.Style := bsClear;
+  cv.Font.Color := theme.Text;
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := theme.Automation;
+  cv.Pen.Style := psClear;
+  cv.Polygon([Point(10, y0 + 5), Point(10, y0 + 15), Point(17, y0 + 10)]);   // flag glyph
+  cv.Pen.Style := psSolid;
+  cv.Brush.Style := bsClear;
+  cv.TextOut(24, y0 + 3, 'Markers');
+  if FChordsVisible then
+  begin
+    cv.Brush.Style := bsSolid;
+    cv.Brush.Color := $00E0A050;
+    cv.Pen.Style := psClear;
+    cv.Ellipse(10, yC + 9, 16, yC + 15);
+    cv.Ellipse(16, yC + 6, 22, yC + 12);
+    cv.Pen.Style := psSolid;
+    cv.Brush.Style := bsClear;
+    cv.TextOut(28, yC + 5, 'Chords');
+  end;
+  cv.TextOut(10, yT + 3, 'Tempo');
+  cv.Font.Color := theme.SecondaryText;
+  { the tempo in force at the playhead (it changes as playback passes a tempo point) }
+  if g.IsValid then
+    cv.TextOut(10, yT + 17, Format('%.1f BPM', [g.TempoAt(FProject.Timeline.PlayheadSeconds)]))
+  else
+    cv.TextOut(10, yT + 17, Format('%.1f BPM', [FProject.TempoBPM]));
+  cv.Font.Color := theme.Text;
+  cv.TextOut(10, yS + 4, 'Signature');
+  if g.IsValid then
+  begin
+    lab := Format('%d/%d', [g.TSigNum, g.TSigDen]);
+    cv.Font.Color := theme.SecondaryText;
+    cv.TextOut(hdrW - 12 - cv.TextWidth(lab), yS + 4, lab);
+  end;
+
+  cv.PushClip(Rect(hw, y0, AWidth, yE));
+  try
+    { ---- Markers lane: hint, regions (bars), markers (flags), drag preview ---- }
+    if (tl.MarkerCount = 0) and (tl.RegionCount = 0) then
+    begin
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := theme.SecondaryText;
+      cv.TextOut(hw + 8, y0 + 3, 'Markers: double-click to add - drag a flag to move it - drag empty space to make a region');
+    end;
+    for j := 0 to tl.RegionCount - 1 do
+    begin
+      rg := tl.GetRegion(j);
+      x1 := Round(EnsureRange(FTlView.SecondsToX(rg.StartSeconds), -1000000, 1000000));
+      x2 := Round(EnsureRange(FTlView.SecondsToX(rg.EndSeconds), -1000000, 1000000));
+      if (x2 < hw) or (x1 > AWidth) then Continue;
+      if rg.Color <> 0 then regCol := rg.Color
+      else regCol := TlTrackAccent(nil, j);
+      cv.Alpha := 0.55;
+      cv.Brush.Style := bsSolid;
+      cv.Brush.Color := regCol;
+      cv.Pen.Style := psClear;
+      cv.FillRect(Rect(x1, y0 + 3, Max(x2, x1 + 2), y0 + LANE_MARK_H - 2));
+      cv.Alpha := 1;
+      cv.Pen.Style := psSolid;
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := theme.Text;
+      { the name sits centred in the bar, which is tall enough to show it whole }
+      cv.TextRect(Rect(x1, y0 + 3, x2, y0 + LANE_MARK_H - 2), x1 + 4,
+        y0 + 3 + (LANE_MARK_H - 5 - cv.TextHeight(rg.Name)) div 2, rg.Name);
+      if rg.Locked and (x2 - x1 > 40) then
+        TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, y0 + 3, x2 - 3, y0 + LANE_MARK_H - 2), theme.Text);
+    end;
+    for j := 0 to tl.MarkerCount - 1 do
+    begin
+      mk := tl.GetMarker(j);
+      sx := FTlView.SecondsToX(mk.Seconds);
+      if (sx < hw) or (sx > AWidth) then Continue;
+      cv.Brush.Style := bsSolid;
+      cv.Brush.Color := theme.Automation;
+      cv.Pen.Color := theme.Automation;
+      cv.MoveTo(Round(sx), y0 + 2); cv.LineTo(Round(sx), y0 + LANE_MARK_H - 1);
+      cv.Polygon([Point(Round(sx), y0 + 3), Point(Round(sx) + 8, y0 + 7), Point(Round(sx), y0 + 11)]);
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := theme.Text;
+      cv.TextOut(Round(sx) + 11, y0 + 3, mk.Name);
+      if mk.Locked then
+        TGLIconBar.DrawIcon(cv, 'lock', Rect(Round(sx) + 14 + cv.TextWidth(mk.Name), y0 + 3, Round(sx) + 30 + cv.TextWidth(mk.Name), y0 + 18), theme.Text);
+    end;
+    if FLaneDragging then
+    begin
+      x1 := Round(FTlView.SecondsToX(Min(FLaneDragStartSec, FLaneDragCurSec)));
+      x2 := Round(FTlView.SecondsToX(Max(FLaneDragStartSec, FLaneDragCurSec)));
+      cv.Alpha := 0.4;
+      cv.Brush.Style := bsSolid;
+      cv.Brush.Color := theme.Accent;
+      cv.Pen.Style := psClear;
+      cv.FillRect(Rect(x1, y0 + 3, Max(x2, x1 + 2), y0 + LANE_MARK_H - 2));
+      cv.Alpha := 1;
+      cv.Pen.Style := psSolid;
+    end;
+
+    { ---- Chords lane: one chip per chord, coloured by its root ---- }
+    if FChordsVisible then
+    begin
+      if tl.ChordCount = 0 then
+      begin
+        cv.Brush.Style := bsClear;
+        cv.Font.Color := theme.SecondaryText;
+        cv.TextOut(hw + 8, yC + 6, 'Chords: double-click to add one, drag to move it, drag its right edge to resize');
+      end;
+      for j := 0 to tl.ChordCount - 1 do
+      begin
+        chd := tl.GetChord(j);
+        x1 := Round(EnsureRange(FTlView.SecondsToX(chd.StartSeconds), -1000000, 1000000));
+        x2 := Round(EnsureRange(FTlView.SecondsToX(chd.EndSeconds), -1000000, 1000000));
+        if (x2 < hw) or (x1 > AWidth) then Continue;
+        chCol := TlChordColor(chd.Name);
+        cv.Brush.Style := bsSolid;
+        cv.Brush.Color := TlMix(theme.Background, chCol, 0.7);
+        cv.Pen.Style := psSolid;
+        cv.Pen.Color := chCol;
+        cv.RoundRect(x1, yC + 3, Max(x2 - 1, x1 + 6), yT - 3, 6, 6);
+        cv.Brush.Style := bsClear;
+        cv.Font.Color := clBlack;
+        cv.TextRect(Rect(x1 + 2, yC + 3, Max(x2 - 1, x1 + 6), yT - 3), x1 + 6, yC + 6, chd.Name);
+        if chd.Locked and (x2 - x1 > 40) then
+          TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, yC + 3, x2 - 3, yT - 3), clBlack);
+      end;
+    end;
+
+    { ---- Tempo lane: the tempo as a step line: each point holds its tempo until the next one;
+      height reflects the value (40 BPM at the bottom of the lane, 240 at the top) }
+    tpts := TlTempoPoints;
+    cv.Pen.Color := $0050B050;
+    for j := 0 to High(tpts) do
+    begin
+      px := Round(EnsureRange(FTlView.SecondsToX(tpts[j].Seconds), -100000, 100000));
+      py := TlTempoY(yT, tpts[j].Bpm) + 3;
+      if j < High(tpts) then
+        nx := Round(EnsureRange(FTlView.SecondsToX(tpts[j + 1].Seconds), -100000, 100000))
+      else
+        nx := AWidth + 4;
+      cv.Pen.Width := 2;
+      if nx > hw then
+      begin
+        cv.MoveTo(Max(hw, px), py);
+        cv.LineTo(Min(AWidth, nx), py);
+      end;
+      if (j < High(tpts)) and (nx >= hw) and (nx <= AWidth) then
+      begin
+        cv.MoveTo(nx, py);
+        cv.LineTo(nx, TlTempoY(yT, tpts[j + 1].Bpm) + 3);
+      end;
+      cv.Pen.Width := 1;
+      if (px >= hw - 3) and (px <= AWidth) then
+      begin
+        cv.Brush.Style := bsSolid;
+        cv.Brush.Color := $0050B050;
+        cv.Pen.Style := psClear;
+        cv.Ellipse(px - 3, py - 3, px + 4, py + 4);
+        cv.Pen.Style := psSolid;
+      end;
+      { the value rides with its point, like an effect's name on its clip: it scrolls along with
+        the lane while the Timeline plays and is clipped at the lane's left edge }
+      if (nx - px > 44) and (px + 8 < AWidth) and (px + 8 + cv.TextWidth(Format('%.1f', [tpts[j].Bpm])) > hw) then
+      begin
+        cv.Brush.Style := bsClear;
+        cv.Font.Color := theme.Text;
+        cv.TextOut(px + 8, Max(yT + 2, py - 14), Format('%.1f', [tpts[j].Bpm]));
+      end;
+    end;
+    dotX := Round(FTlView.SecondsToX(0));
+    if dotX < hw + 6 then dotX := hw + 6;
+
+    { ---- Signature lane: the time-signature chip at the start ---- }
+    if g.IsValid then
+    begin
+      lab := Format('%d/%d', [g.TSigNum, g.TSigDen]);
+      cv.Brush.Style := bsSolid;
+      cv.Brush.Color := TlMix($0050B050, theme.Background, 0.7);
+      cv.Pen.Color := $0050B050;
+      cv.RoundRect(dotX - 3, yS + 3, dotX + 12 + cv.TextWidth(lab), yS + LANE_SIG_H - 3, 5, 5);
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := theme.Text;
+      cv.TextOut(dotX + 3, yS + 4, lab);
+    end;
+  finally
+    cv.PopClip;
+  end;
+  cv.Brush.Style := bsSolid;
+  tSec := 0;
+  if tSec < 0 then Exit;
+end;
+
+{ Mouse in the lane stack. Markers lane: double-click empty adds a marker,
+  double-click a marker renames it, left-drag makes a region, right-click a
+  marker/region opens its menu. Tempo lane: double-click edits the tempo. }
+function TfrmMain.TlLaneMouseDown(X, Y: Integer; Shift: TShiftState; Button: TMouseButton): Boolean;
+var
+  tl: TTimeline;
+  j, ti: Integer;
+  sec: Double;
+  pt: TPoint;
+  chd: TTimelineChord;
+begin
+  Result := False;
+  if (not FLanesVisible) or (FProject = nil) or (X < FTlView.HeaderWidth) or
+     (Y < LANE_RULER_H) or (Y >= FTlView.RulerHeight) then Exit;
+  Result := True;
+  tl := FProject.Timeline;
+  sec := Max(0.0, FTlView.XToSeconds(X));
+  if Y < LANE_RULER_H + LANE_MARK_H then
+  begin
+    FLaneCtxKind := 0;
+    FLaneCtxId := -1;
+    for j := 0 to tl.MarkerCount - 1 do
+      if Abs(FTlView.SecondsToX(tl.GetMarker(j).Seconds) - X) <= 7 then
+      begin
+        FLaneCtxKind := 1;
+        FLaneCtxId := tl.GetMarker(j).Id;
+        Break;
+      end;
+    if (FLaneCtxKind = 0) and (Y >= LANE_RULER_H + 11) then
+      for j := 0 to tl.RegionCount - 1 do
+        if (sec >= tl.GetRegion(j).StartSeconds) and (sec <= tl.GetRegion(j).EndSeconds) then
+        begin
+          FLaneCtxKind := 2;
+          FLaneCtxId := tl.GetRegion(j).Id;
+          Break;
+        end;
+    if Button = mbRight then
+    begin
+      if FLaneCtxKind <> 0 then
+      begin
+        pt := pbTimeline.ClientToScreen(Point(X, Y));
+        GLShowPopup(pmTlMarker, pt.X, pt.Y);
+      end;
+      Exit;
+    end;
+    if Button <> mbLeft then Exit;
+    if ssDouble in Shift then
+    begin
+      if FLaneCtxKind = 1 then
+        pmMkRenameClick(nil)
+      else if FLaneCtxKind = 0 then
+      begin
+        FCmds.Perform(TAddTimelineMarkerCommand.Create(FProject,
+          Format('Marker %d', [tl.MarkerCount + 1]), FTlView.Snap(sec)));
+        RefreshTimelineTab;
+      end;
+      Exit;
+    end;
+    if FLaneCtxKind = 0 then
+    begin
+      FLaneDragging := True;
+      FLaneDragStartSec := FTlView.Snap(sec);
+      FLaneDragCurSec := FLaneDragStartSec;
+    end
+    else if FLaneCtxKind = 1 then
+    begin
+      { drag a marker to move it; a click without movement jumps the playhead to it }
+      FLaneEdit := 1;
+      FLaneEditId := FLaneCtxId;
+      FLaneEditMoved := False;
+      FLaneEditStartX := X;
+    end
+    else if FLaneCtxKind = 2 then
+    begin
+      { drag a region's body to move it, or its start / end edge to resize it }
+      for j := 0 to tl.RegionCount - 1 do
+        if tl.GetRegion(j).Id = FLaneCtxId then
+        begin
+          FLaneEditId := FLaneCtxId;
+          FLaneEditMoved := False;
+          FLaneEditStartX := X;
+          if Abs(FTlView.SecondsToX(tl.GetRegion(j).StartSeconds) - X) <= 5 then FLaneEdit := 3
+          else if Abs(FTlView.SecondsToX(tl.GetRegion(j).EndSeconds) - X) <= 5 then FLaneEdit := 4
+          else
+          begin
+            FLaneEdit := 2;
+            FLaneEditGrabSec := sec - tl.GetRegion(j).StartSeconds;
+          end;
+          Break;
+        end;
+    end;
+    Exit;
+  end;
+  if FChordsVisible and (Y < LANE_RULER_H + LANE_MARK_H + LANE_CHORD_H) then
+  begin
+    { Chords lane: double-click empty adds a chord, double-click a chord renames it,
+      drag moves it, drag its right edge resizes it, right-click renames / deletes }
+    chd := TlChordAtSec(sec);
+    FLaneCtxKind := 0;
+    FLaneCtxId := -1;
+    if chd <> nil then
+    begin
+      FLaneCtxKind := 3;
+      FLaneCtxId := chd.Id;
+    end;
+    if Button = mbRight then
+    begin
+      if chd <> nil then
+      begin
+        pt := pbTimeline.ClientToScreen(Point(X, Y));
+        GLShowPopup(pmTlMarker, pt.X, pt.Y);
+      end;
+      Exit;
+    end;
+    if Button <> mbLeft then Exit;
+    if ssDouble in Shift then
+    begin
+      if chd <> nil then TlChordRename(chd.Id)
+      else TlChordAdd(FTlView.Snap(sec));
+      Exit;
+    end;
+    if chd <> nil then
+    begin
+      FLaneEditId := chd.Id;
+      FLaneEditMoved := False;
+      FLaneEditStartX := X;
+      if Abs(FTlView.SecondsToX(chd.EndSeconds) - X) <= 6 then FLaneEdit := 7
+      else
+      begin
+        FLaneEdit := 5;
+        FLaneEditGrabSec := sec - chd.StartSeconds;
+      end;
+    end;
+    Exit;
+  end;
+  if Y < LANE_RULER_H + LANE_MARK_H + TlChordH + LANE_TEMPO_H then
+  begin
+    ti := TlTempoPointAt(X, Y);
+    if Button = mbRight then
+    begin
+      { right-click a tempo change to delete it (the base tempo stays) }
+      if ti > 0 then TlTempoDeletePoint(ti);
+      Exit;
+    end;
+    if Button <> mbLeft then Exit;
+    if ssDouble in Shift then
+    begin
+      if ti = 0 then
+      begin
+        ActiveControl := edtTlTempo;
+        edtTlTempo.SelectAll;
+      end
+      else if ti > 0 then TlTempoPrompt(ti)
+      else TlTempoAddPoint(sec);
+      Exit;
+    end;
+    if ti >= 0 then
+    begin
+      { drag a tempo point: up / down = tempo, left / right = position (not the first) }
+      FTempoPt := ti;
+      FTempoDrag := True;
+      FTempoDragStartY := Y;
+      FTempoDragStartBpm := TlTempoPoints[ti].Bpm;
+    end;
+    Exit;
+  end;
+  if (Button = mbLeft) and (ssDouble in Shift) then TlSignaturePrompt;
+end;
+
+function TfrmMain.TlTempoLaneAt(X, Y: Integer): Boolean;
+begin
+  Result := FLanesVisible and (FProject <> nil) and (X >= FTlView.HeaderWidth) and
+    (Y >= LANE_RULER_H + LANE_MARK_H + TlChordH) and
+    (Y < LANE_RULER_H + LANE_MARK_H + TlChordH + LANE_TEMPO_H);
+end;
+
+procedure TfrmMain.TlSetBpm(AValue: Double);
+begin
+  AValue := EnsureRange(AValue, 20.0, 300.0);
+  if Abs(AValue - FProject.TempoBPM) < 1e-6 then Exit;
+  FCmds.Perform(TSetTempoCommand.Create(FProject, AValue));
+  RefreshTimelineTab;
+end;
+
+{ a running Timeline player picks up tempo edits straight away (metronome, MIDI clips) }
+procedure TfrmMain.TlPushTempoToPlayer;
+var
+  sig: Double;
+  m: TTempoPoints;
+  i: Integer;
+begin
+  if (FTlPlayer = nil) or (FProject = nil) then Exit;
+  m := FProject.TempoMap;
+  sig := FProject.TempoBPM + Length(m) * 1000003.0;
+  for i := 0 to High(m) do sig := sig + m[i].Seconds * (i + 1) * 7.0 + m[i].Bpm * (i + 3);
+  if sig = FTlPushedTempoSig then Exit;
+  FTlPushedTempoSig := sig;
+  FTlPlayer.SetTempoMap(FProject.TempoBPM, m);
+end;
+
+{ the base tempo followed by every tempo change }
+function TfrmMain.TlTempoPoints: TTempoPoints;
+var
+  m: TTempoPoints;
+  i: Integer;
+begin
+  m := FProject.TempoMap;
+  SetLength(Result, Length(m) + 1);
+  Result[0].Seconds := 0;
+  Result[0].Bpm := FProject.TempoBPM;
+  for i := 0 to High(m) do Result[i + 1] := m[i];
+end;
+
+function TfrmMain.TlTempoY(AYTop: Integer; ABpm: Double): Integer;
+begin
+  Result := AYTop + LANE_TEMPO_H - 8 -
+    Round(EnsureRange((ABpm - 40) / 200, 0, 1) * (LANE_TEMPO_H - 16));
+end;
+
+{ index of the tempo point under (X, Y) in the tempo lane, or -1 }
+function TfrmMain.TlTempoPointAt(X, Y: Integer): Integer;
+var
+  pts: TTempoPoints;
+  j, yTop: Integer;
+begin
+  Result := -1;
+  if FProject = nil then Exit;
+  yTop := LANE_RULER_H + LANE_MARK_H + TlChordH;
+  pts := TlTempoPoints;
+  for j := High(pts) downto 0 do
+    if (Abs(FTlView.SecondsToX(pts[j].Seconds) - X) <= 7) and
+       (Abs(TlTempoY(yTop, pts[j].Bpm) + 3 - Y) <= 9) then
+      Exit(j);
+end;
+
+{ change one tempo point: AIndex 0 is the base tempo, others live in the map }
+procedure TfrmMain.TlTempoSetPoint(AIndex: Integer; ABpm, ASeconds: Double; const ALabel: string);
+var
+  map: TTempoPoints;
+  lo, hi: Double;
+begin
+  ABpm := EnsureRange(ABpm, 20.0, 300.0);
+  if AIndex = 0 then
+  begin
+    TlSetBpm(ABpm);
+    Exit;
+  end;
+  map := Copy(FProject.TempoMap);
+  if (AIndex < 1) or (AIndex > Length(map)) then Exit;
+  { a point stays between its neighbours }
+  if AIndex = 1 then lo := 0.01 else lo := map[AIndex - 2].Seconds + 0.01;
+  if AIndex < Length(map) then hi := map[AIndex].Seconds - 0.01 else hi := 1.0E9;
+  map[AIndex - 1].Bpm := ABpm;
+  map[AIndex - 1].Seconds := EnsureRange(ASeconds, lo, Max(lo, hi));
+  FCmds.Perform(TSetTempoMapCommand.Create(FProject, map, ALabel));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlTempoDragMove(X, Y: Integer; AFine: Boolean);
+var
+  pts: TTempoPoints;
+  bpm, sec: Double;
+begin
+  pts := TlTempoPoints;
+  if (FTempoPt < 0) or (FTempoPt > High(pts)) then Exit;
+  { one BPM per two pixels; fine = a tenth of that, rounded to 0.1 }
+  if AFine then bpm := Round((FTempoDragStartBpm + (FTempoDragStartY - Y) * 0.05) * 10) / 10
+  else bpm := Round(FTempoDragStartBpm + (FTempoDragStartY - Y) * 0.5);
+  sec := pts[FTempoPt].Seconds;
+  if FTempoPt > 0 then
+  begin
+    sec := FTlView.Snap(Max(0.0, FTlView.XToSeconds(X)));
+    FTlSnapGuideOn := FTlView.SnapEnabled;
+    FTlSnapGuideSec := sec;
+  end;
+  TlTempoSetPoint(FTempoPt, bpm, sec, 'Move tempo change');
+end;
+
+{ double-click empty tempo lane: a new tempo change at that time, same tempo as before it }
+procedure TfrmMain.TlTempoAddPoint(ASeconds: Double);
+var
+  map: TTempoPoints;
+begin
+  if FProject = nil then Exit;
+  ASeconds := FTlView.Snap(Max(0.0, ASeconds));
+  if ASeconds < 0.01 then Exit;
+  map := Copy(FProject.TempoMap);
+  SetLength(map, Length(map) + 1);
+  map[High(map)].Seconds := ASeconds;
+  map[High(map)].Bpm := FProject.GridContext.TempoAt(ASeconds);
+  FCmds.Perform(TSetTempoMapCommand.Create(FProject, map, 'Add tempo change'));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlTempoDeletePoint(AIndex: Integer);
+var
+  map, res: TTempoPoints;
+  i: Integer;
+begin
+  if FProject = nil then Exit;
+  map := FProject.TempoMap;
+  if (AIndex < 1) or (AIndex > Length(map)) then Exit;
+  SetLength(res, 0);
+  for i := 0 to High(map) do
+    if i <> AIndex - 1 then res := res + [map[i]];
+  FCmds.Perform(TSetTempoMapCommand.Create(FProject, res, 'Delete tempo change'));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlTempoPrompt(AIndex: Integer);
+var
+  pts: TTempoPoints;
+  txt: string;
+  v: Double;
+begin
+  pts := TlTempoPoints;
+  if (AIndex < 1) or (AIndex > High(pts)) then Exit;
+  txt := FormatFloat('0.###', pts[AIndex].Bpm);
+  if InputQuery('Tempo change', Format('Tempo (BPM) from %s:', [FormatTimecode(pts[AIndex].Seconds)]), txt) and
+     TryStrToFloat(txt, v) then
+    TlTempoSetPoint(AIndex, v, pts[AIndex].Seconds, 'Set tempo change');
+end;
+
+{ double-click the signature lane: type a new time signature such as 3/4 or 6/8 }
+procedure TfrmMain.TlSignaturePrompt;
+var
+  txt: string;
+  p, n, d: Integer;
+begin
+  if FProject = nil then Exit;
+  txt := Format('%d/%d', [FProject.TimeSigNum, FProject.TimeSigDen]);
+  if not InputQuery('Time signature', 'Time signature (for example 3/4):', txt) then Exit;
+  p := Pos('/', txt);
+  if (p > 1) and TryStrToInt(Trim(Copy(txt, 1, p - 1)), n) and TryStrToInt(Trim(Copy(txt, p + 1, MaxInt)), d) and
+     (n in [1..32]) and (d in [1, 2, 4, 8, 16, 32]) then
+  begin
+    FCmds.Perform(TSetTimeSignatureCommand.Create(FProject, n, d));
+    RefreshTimelineTab;
+  end
+  else
+    MessageDlg('Enter a time signature such as 4/4, 3/4 or 6/8.', mtWarning, [mbOK], 0);
+end;
+
+{ marker / region drags in the lane stack: snapped, undoable, one undo step per drag }
+procedure TfrmMain.TlLaneEditMove(X: Integer);
+var
+  tl: TTimeline;
+  sec, s, e, len: Double;
+  r: TTimelineRegion;
+  i: Integer;
+begin
+  tl := FProject.Timeline;
+  if Abs(X - FLaneEditStartX) > 3 then FLaneEditMoved := True;
+  if not FLaneEditMoved then Exit;
+  if TlLaneEditLocked then Exit;   // a locked marker / scene / chord does not move
+  sec := Max(0.0, FTlView.XToSeconds(X));
+  FTlSnapGuideOn := FTlView.SnapEnabled;
+  try
+    case FLaneEdit of
+      5, 7: TlChordDrag(FLaneEditId, FLaneEdit, sec);
+      1:
+        begin
+          sec := FTlView.Snap(sec);
+          FTlSnapGuideSec := sec;
+          FCmds.Perform(TSetTimelineMarkerCommand.Create(FProject, FLaneEditId, sec, ''));
+        end;
+      2, 3, 4:
+        begin
+          r := nil;
+          for i := 0 to tl.RegionCount - 1 do
+            if tl.GetRegion(i).Id = FLaneEditId then r := tl.GetRegion(i);
+          if r = nil then Exit;
+          s := r.StartSeconds;
+          e := r.EndSeconds;
+          len := r.LengthSeconds;
+          case FLaneEdit of
+            2:
+              begin
+                s := FTlView.Snap(Max(0.0, sec - FLaneEditGrabSec));
+                e := s + len;
+                FTlSnapGuideSec := s;
+              end;
+            3:
+              begin
+                s := Min(FTlView.Snap(sec), e - 0.05);
+                FTlSnapGuideSec := s;
+              end;
+            4:
+              begin
+                e := Max(FTlView.Snap(sec), s + 0.05);
+                FTlSnapGuideSec := e;
+              end;
+          end;
+          FCmds.Perform(TSetTimelineRegionCommand.Create(FProject, FLaneEditId, s, e - s, ''));
+          TlStageSceneChanged(FLaneEditId);
+        end;
+    end;
+  except
+    on E: Exception do FLaneEdit := 0;
+  end;
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlLaneEditEnd;
+var
+  m: TTimelineMarker;
+  i: Integer;
+begin
+  if (FLaneEdit = 1) and not FLaneEditMoved and (FProject <> nil) then
+    for i := 0 to FProject.Timeline.MarkerCount - 1 do
+    begin
+      m := FProject.Timeline.GetMarker(i);
+      if m.Id = FLaneEditId then
+      begin
+        FProject.Timeline.PlayheadSeconds := m.Seconds;
+        FRecInsertSeconds := m.Seconds;
+        Break;
+      end;
+    end;
+  FLaneEdit := 0;
+  FTlSnapGuideOn := False;
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlLaneMouseUp;
+var
+  a, b: Double;
+begin
+  FLaneDragging := False;
+  if FProject = nil then Exit;
+  a := Min(FLaneDragStartSec, FLaneDragCurSec);
+  b := Max(FLaneDragStartSec, FLaneDragCurSec);
+  if b - a >= 0.1 then
+    FCmds.Perform(TAddTimelineRegionCommand.Create(FProject,
+      Format('Region %d', [FProject.Timeline.RegionCount + 1]), a, b - a, 0));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.pmMkRenameClick(Sender: TObject);
+var
+  tl: TTimeline;
+  j: Integer;
+  nm: string;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  if FLaneCtxKind = 1 then
+  begin
+    for j := 0 to tl.MarkerCount - 1 do
+      if tl.GetMarker(j).Id = FLaneCtxId then
+      begin
+        nm := tl.GetMarker(j).Name;
+        if InputQuery('Rename marker', 'Marker name:', nm) and (Trim(nm) <> '') then
+          FCmds.Perform(TSetTimelineMarkerCommand.Create(FProject, FLaneCtxId, tl.GetMarker(j).Seconds, Trim(nm)));
+        Break;
+      end;
+  end
+  else if FLaneCtxKind = 2 then
+  begin
+    for j := 0 to tl.RegionCount - 1 do
+      if tl.GetRegion(j).Id = FLaneCtxId then
+      begin
+        nm := tl.GetRegion(j).Name;
+        if InputQuery('Rename region', 'Region name:', nm) and (Trim(nm) <> '') then
+          FCmds.Perform(TSetTimelineRegionCommand.Create(FProject, FLaneCtxId, tl.GetRegion(j).StartSeconds,
+            tl.GetRegion(j).LengthSeconds, Trim(nm)));
+        Break;
+      end;
+  end
+  else if FLaneCtxKind = 3 then
+  begin
+    TlChordRename(FLaneCtxId);
+    Exit;
+  end;
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.pmMkDeleteClick(Sender: TObject);
+begin
+  if FProject = nil then Exit;
+  if FLaneCtxKind = 1 then
+    FCmds.Perform(TRemoveTimelineMarkerCommand.Create(FProject, FLaneCtxId))
+  else if FLaneCtxKind = 2 then
+  begin
+    TlStageBack;
+    FCmds.Perform(TRemoveTimelineRegionCommand.Create(FProject, FLaneCtxId));
+  end
+  else if FLaneCtxKind = 3 then
+  begin
+    TlChordDelete(FLaneCtxId);
+    Exit;
+  end;
+  RefreshTimelineTab;
+end;
+
+{ ======================= Timeline workspace dock =======================
+  MorningDAW-style workspace: the Mixer, MIDI piano roll, Tracker and Recording
+  editors share the Timeline page, in a dock under the arrangement that is shown
+  on request (the VIEWS buttons or Timeline > Show Editor) and hidden again with
+  Hide. They are the same pages as before, just hosted by pgcDock. }
+
+{ True when AAtab is the page the user is looking at: a docked editor counts
+  only while the Timeline page is up and the dock is open on it. }
+function TfrmMain.TabIs(ATab: TGLPage): Boolean;
+begin
+  if ATab.PageControl = pgcDock then
+    Result := (pgc.ActivePage = tabTimeline) and pnlTlDock.Visible and (pgcDock.ActivePage = ATab)
+  else
+    Result := pgc.ActivePage = ATab;
+end;
+
+{ Keyboard focus is inside the docked editor (so Timeline hotkeys stand down). }
+function TfrmMain.DockHasFocus: Boolean;
+begin
+  Result := pnlTlDock.Visible and (ActiveControl <> nil) and pnlTlDock.ContainsControl(ActiveControl);
+end;
+
+{ ======================= Right-hand browser panel =======================
+  Instruments / Effects / Samples / Presets beside the arrangement. Everything in
+  it is an action on the selected track: double-click adds, imports or applies. }
+
+const
+  RK_TRACK = 1;       // Index = ord of a TTrackKind: add a track of that kind
+  RK_TRKINSTR = 2;    // Index = tracker instrument number: add to the Timeline
+  RK_FX = 3;          // Index = cboMixInsertKind item: add the effect to the selected track's strip
+  RK_FXVST = 4;       // pick a VST2 plugin file
+  RK_DIR = 5;         // Path = folder (expands on demand)
+  RK_FILE = 6;        // Path = audio file
+  RK_PRESET = 7;      // Index = item of the mix-role menu
+  RK_FXSCAN = 8;      // scan the plug-in folders (VST2 / VST3)
+  RK_FXPLUG = 9;      // Path = a scanned plug-in file
+  RK_TRKFILE = 10;    // Path = tracker module (.mod / .xm / .it / .mptm)
+
+  TAB_RIGHT_TRACKER = 3;   // tsTlRight tab index of the Tracker tab
+
+function IsTrackerModuleExt(const AExt: string): Boolean;
+begin
+  Result := (AExt = '.mod') or (AExt = '.xm') or (AExt = '.it') or (AExt = '.mptm') or
+    IsLegacyModuleExt(AExt);
+end;
+
+procedure TfrmMain.TlRightAddItem(AParent: TGLTreeNode; const AText: string; AKind, AIndex: Integer;
+  const APath: string);
+var
+  n: TGLTreeNode;
+begin
+  SetLength(FRightItems, Length(FRightItems) + 1);
+  FRightItems[High(FRightItems)].Kind := AKind;
+  FRightItems[High(FRightItems)].Index := AIndex;
+  FRightItems[High(FRightItems)].Path := APath;
+  n := trTlRight.Items.AddChild(AParent, AText);
+  n.Data := Pointer(NativeInt(Length(FRightItems)));
+end;
+
+{ the strip of the selected Timeline track (the mixer strip linked to it), nil when none }
+function TfrmMain.TlSelectedTrackStrip: TMixStrip;
+var
+  i: Integer;
+begin
+  Result := nil;
+  if (FProject = nil) or (FTlSelectedTrackId < 0) then Exit;
+  EnsureMixerStripsForTimelineTracks;
+  for i := 0 to FProject.Mixer.StripCount - 1 do
+    if FProject.Mixer.GetStrip(i).InputSourceId = FTlSelectedTrackId then
+      Exit(FProject.Mixer.GetStrip(i));
+end;
+
+procedure TfrmMain.TlRightFill;
+const
+  FX_GROUPS: array[0..6] of record Name: string; Items: string; end = (
+    (Name: 'Gain and EQ';      Items: '0,1,2'),
+    (Name: 'Dynamics';         Items: '3,4,5,6,7,28'),
+    (Name: 'Modulation';       Items: '8,9,10,11,12'),
+    (Name: 'Distortion';       Items: '13,14,15,16,26,27,22'),
+    (Name: 'Space and time';   Items: '17,18,19'),
+    (Name: 'Stereo and pitch'; Items: '20,21,23'),
+    (Name: 'Mastering';        Items: '24,25'));
+var
+  q, txt: string;
+  g, i, idx: Integer;
+  parts: TArray<string>;
+  grp: TGLTreeNode;
+  mi: TMenuItem;
+
+  function Match(const AText: string): Boolean;
+  begin
+    Result := (q = '') or (Pos(q, LowerCase(AText)) > 0);
+  end;
+
+  procedure AddDirRoot(const ACaption, ADir: string);
+  var
+    d: TGLTreeNode;
+  begin
+    if (Trim(ADir) = '') or not DirectoryExists(ADir) then Exit;
+    d := trTlRight.Items.AddChild(nil, ACaption);
+    SetLength(FRightItems, Length(FRightItems) + 1);
+    FRightItems[High(FRightItems)].Kind := RK_DIR;
+    FRightItems[High(FRightItems)].Path := ADir;
+    d.Data := Pointer(NativeInt(Length(FRightItems)));
+    trTlRight.Items.AddChild(d, '...');   // expanded on demand
+  end;
+
+begin
+  q := LowerCase(Trim(edtTlRightSearch.Text));
+  SetLength(FRightItems, 0);
+  trTlRight.Items.BeginUpdate;
+  try
+    trTlRight.Items.Clear;
+    case tsTlRight.TabIndex of
+      0:
+        begin
+          lblTlRightHint.Caption := 'Double-click to add a track';
+          grp := trTlRight.Items.AddChild(nil, 'Tracks');
+          if Match('audio track') then TlRightAddItem(grp, 'Audio track', RK_TRACK, Ord(tkAudio), '');
+          if Match('midi instrument track') then TlRightAddItem(grp, 'MIDI instrument track', RK_TRACK, Ord(tkMidi), '');
+          if Match('bus') then TlRightAddItem(grp, 'Bus', RK_TRACK, Ord(tkBus), '');
+          if Match('aux') then TlRightAddItem(grp, 'Aux', RK_TRACK, Ord(tkAux), '');
+          if Match('video track') then TlRightAddItem(grp, 'Video track', RK_TRACK, Ord(tkVideo), '');
+          grp.Expand;
+          grp := trTlRight.Items.AddChild(nil, 'Tracker instruments');
+          for i := 0 to cboTrkInstrSel.Items.Count - 1 do
+            if Match(cboTrkInstrSel.Items[i]) then
+              TlRightAddItem(grp, cboTrkInstrSel.Items[i], RK_TRKINSTR, i, '');
+          if grp.Count = 0 then trTlRight.Items.AddChild(grp, '(none in this project)');
+          grp.Expand;
+        end;
+      2:
+        begin
+          lblTlRightHint.Caption := 'Double-click to add to the selected track';
+          for g := Low(FX_GROUPS) to High(FX_GROUPS) do
+          begin
+            grp := trTlRight.Items.AddChild(nil, FX_GROUPS[g].Name);
+            parts := FX_GROUPS[g].Items.Split([',']);
+            for i := 0 to High(parts) do
+            begin
+              idx := StrToInt(parts[i]);
+              if (idx < cboMixInsertKind.Items.Count) and Match(cboMixInsertKind.Items[idx]) then
+                TlRightAddItem(grp, cboMixInsertKind.Items[idx], RK_FX, idx, '');
+            end;
+            if grp.Count = 0 then grp.Delete
+            else grp.Expand;
+          end;
+          grp := trTlRight.Items.AddChild(nil, 'Plug-ins');
+          TlRightAddItem(grp, 'Scan for plug-ins...', RK_FXSCAN, 0, '');
+          TlRightAddItem(grp, 'Plug-in file (VST2 / VST3)...', RK_FXVST, 0, '');
+          for i := 0 to PluginScanner.Count - 1 do
+            if Match(PluginScanner.Item(i).Name) then
+              TlRightAddItem(grp, Format('%s  [%s]', [PluginScanner.Item(i).Name,
+                IfThen(PluginScanner.Item(i).Format = pfVST3, 'VST3', 'VST2')]),
+                RK_FXPLUG, 0, PluginScanner.Item(i).Path);
+          grp.Expand;
+        end;
+      1:
+        begin
+          lblTlRightHint.Caption := 'Double-click a sound to import it';
+          AddDirRoot('Audio library', edDirAudioLib.Text);
+          AddDirRoot('Sound effects', edDirSfx.Text);
+          AddDirRoot('Recordings', edDirRecordings.Text);
+          if trTlRight.Items.Count = 0 then
+            trTlRight.Items.AddChild(nil, '(set the folders under Settings)');
+        end;
+      TAB_RIGHT_TRACKER:
+        begin
+          lblTlRightHint.Caption := 'Double-click a module to Import';
+          AddDirRoot('Audio media', edDirAudioLib.Text);
+          if trTlRight.Items.Count = 0 then
+            trTlRight.Items.AddChild(nil, '(set the Audio / media library folder under Settings)');
+        end;
+    else
+      begin
+        lblTlRightHint.Caption := 'Double-click to apply to the selected track';
+        grp := trTlRight.Items.AddChild(nil, 'Mix roles');
+        for i := 0 to pmMixRoleMenu.Count - 1 do
+        begin
+          mi := pmMixRoleMenu.Items[i];
+          txt := StringReplace(mi.Caption, '&', '', [rfReplaceAll]);
+          if (mi.Caption <> '-') and Match(txt) then
+            TlRightAddItem(grp, txt, RK_PRESET, i, '');
+        end;
+        grp.Expand;
+      end;
+    end;
+  finally
+    trTlRight.Items.EndUpdate;
+  end;
+end;
+
+procedure TfrmMain.tsTlRightChange(Sender: TObject);
+begin
+  TlRightFill;
+end;
+
+procedure TfrmMain.edtTlRightSearchChange(Sender: TObject);
+begin
+  TlRightFill;
+end;
+
+{ shows or hides the browser panel at the right of the Timeline }
+procedure TfrmMain.TlSetBrowser(AOn: Boolean);
+begin
+  FBrowserOff := not AOn;
+  pnlTlRight.Visible := AOn;
+  if pnlTlRight.Visible then
+  begin
+    pnlTlRight.Left := tabTimeline.ClientWidth;   // rightmost
+    TlRightFill;
+  end;
+end;
+
+{ a folder expands into its sub-folders and audio files }
+procedure TfrmMain.trTlRightExpanding(Sender: TObject; Node: TGLTreeNode; var AllowExpansion: Boolean);
+var
+  it: TRightItem;
+  path, f: string;
+  sub: TGLTreeNode;
+  files, dirs: TArray<string>;
+  n: Integer;
+begin
+  AllowExpansion := True;
+  if (Node.Data = nil) or (Node.Count <> 1) or (Node.Item[0].Text <> '...') then Exit;
+  n := Integer(NativeInt(Node.Data)) - 1;
+  if (n < 0) or (n > High(FRightItems)) or (FRightItems[n].Kind <> RK_DIR) then Exit;
+  it := FRightItems[n];
+  path := it.Path;
+  Node.DeleteChildren;
+  try
+    dirs := BrowserSortedNames(TDirectory.GetDirectories(path));
+    for f in dirs do
+    begin
+      sub := trTlRight.Items.AddChild(Node, ExtractFileName(f));
+      SetLength(FRightItems, Length(FRightItems) + 1);
+      FRightItems[High(FRightItems)].Kind := RK_DIR;
+      FRightItems[High(FRightItems)].Path := f;
+      sub.Data := Pointer(NativeInt(Length(FRightItems)));
+      trTlRight.Items.AddChild(sub, '...');
+    end;
+    files := BrowserSortedNames(TDirectory.GetFiles(path));
+    n := 0;
+    for f in files do
+    begin
+      if tsTlRight.TabIndex = TAB_RIGHT_TRACKER then
+      begin
+        if not IsTrackerModuleExt(LowerCase(ExtractFileExt(f))) then Continue;
+      end
+      else if not BrowserIsAudioExt(LowerCase(ExtractFileExt(f))) then Continue;
+      if (Trim(edtTlRightSearch.Text) <> '') and
+         (Pos(LowerCase(Trim(edtTlRightSearch.Text)), LowerCase(ExtractFileName(f))) = 0) then Continue;
+      TlRightAddItem(Node, ExtractFileName(f),
+        IfThen(tsTlRight.TabIndex = TAB_RIGHT_TRACKER, RK_TRKFILE, RK_FILE), 0, f);
+      Inc(n);
+      if n >= 400 then Break;
+    end;
+  except
+    on E: Exception do
+      trTlRight.Items.AddChild(Node, '(cannot read: ' + E.Message + ')');
+  end;
+  if Node.Count = 0 then trTlRight.Items.AddChild(Node, '(empty)');
+end;
+
+procedure TfrmMain.trTlRightDblClick(Sender: TObject);
+var
+  node: TGLTreeNode;
+  n, trackId: Integer;
+  it: TRightItem;
+  strip: TMixStrip;
+  mi: TMenuItem;
+begin
+  node := trTlRight.Selected;
+  if (node = nil) or (node.Data = nil) or (FProject = nil) then Exit;
+  n := Integer(NativeInt(node.Data)) - 1;
+  if (n < 0) or (n > High(FRightItems)) then Exit;
+  it := FRightItems[n];
+  case it.Kind of
+    RK_TRACK:
+      begin
+        FCmds.Perform(TAddTimelineTrackCommand.Create(FProject, TTrackKind(it.Index),
+          Format('%s %d', [TrackKindDisplay(TTrackKind(it.Index)), FProject.Timeline.TrackCount + 1])));
+        RefreshTimelineTab;
+        RefreshMixerTab;
+      end;
+    RK_TRKINSTR:
+      begin
+        cboTrkInstrSel.ItemIndex := it.Index;
+        btnTrkInstrAddTimelineClick(nil);
+      end;
+    RK_FXSCAN:
+      begin
+        ScanPluginsNow;
+        TlRightFill;
+      end;
+    RK_FX, RK_FXVST, RK_FXPLUG, RK_PRESET:
+      begin
+        strip := TlSelectedTrackStrip;
+        if strip = nil then
+        begin
+          MessageDlg('Select a track on the Timeline first - effects and presets go on the selected track.',
+            mtInformation, [mbOK], 0);
+          Exit;
+        end;
+        MixSelectById(strip.Id);
+        if it.Kind = RK_FX then
+        begin
+          cboMixInsertKind.ItemIndex := it.Index;
+          btnMixAddEQClick(nil);
+        end
+        else if it.Kind = RK_FXVST then btnMixAddVSTClick(nil)
+        else if it.Kind = RK_FXPLUG then MixAddPluginFile(it.Path)
+        else
+        begin
+          mi := pmMixRoleMenu.Items[it.Index];
+          if mi.Count = 0 then pmMixRoleClick(mi);
+        end;
+        RefreshMixerTab;
+      end;
+    RK_FILE:
+      begin
+        trackId := TlSelectedAudioTrackId;
+        if trackId < 0 then trackId := TlNewAudioTrackId;
+        if ImportBrowserFileToTimeline(it.Path, trackId, FProject.Timeline.PlayheadSeconds) then
+          RefreshTimelineTab;
+      end;
+    RK_TRKFILE:
+      ImportTrackerFileToTimeline(it.Path);
+    RK_DIR:
+      if node.Expanded then node.Collapse else node.Expand;
+  end;
+end;
+
+{ ======================= INST mode: the drum machine =======================
+  A 4x4 bank of sample pads on MIDI notes 36..51 (C1 at the bottom left, as on a
+  hardware pad controller), with the selected pad's level, pan, mute, solo, choke
+  group and play mode beside it. Pads play from the mouse, from a connected MIDI
+  keyboard, and from channel-10 notes in MIDI clips (UDAW.Drum.Machine). The kit is
+  remembered between sessions. }
+
+function DrumPadRect(APad, AW, AH: Integer): TRect;
+const
+  GAP = 8;
+var
+  col, row, pw, ph: Integer;
+begin
+  col := APad mod 4;
+  row := 3 - (APad div 4);   // the bottom row holds pads 0..3
+  pw := (AW - 5 * GAP) div 4;
+  ph := (AH - 5 * GAP) div 4;
+  Result := Rect(GAP + col * (pw + GAP), GAP + row * (ph + GAP),
+    GAP + col * (pw + GAP) + pw, GAP + row * (ph + GAP) + ph);
+end;
+
+{ the colour of a pad: the stripe along its top and the title bar of its instrument panel.
+  It follows the note, not the position in the 4x4 view, so it stays put as the view scrolls. }
+function DrumPadColor(ANote: Integer): TColor;
+const
+  ROW_COLORS: array[0..3] of TColor = ($003C6EBE, $0032A078, $0078963C, $00C85A64);
+begin
+  Result := ROW_COLORS[((ANote div 4) + 3) mod 4];
+end;
+
+function TfrmMain.DrumKitFile: string;
+begin
+  if App <> nil then
+    Result := IncludeTrailingPathDelimiter(App.Paths.Config) + 'drumkit.cfg'
+  else
+    Result := '';
+end;
+
+procedure TfrmMain.DrumSaveKit;
+begin
+  if (FDrum <> nil) and (DrumKitFile <> '') then FDrum.SaveKit(DrumKitFile);
+end;
+
+function TfrmMain.DrumPadAt(X, Y: Integer): Integer;
+var
+  p: Integer;
+begin
+  Result := -1;
+  for p := 0 to DRUM_BANK_SIZE - 1 do
+    if PtInRect(DrumPadRect(p, pbDrumPads.Width, pbDrumPads.Height), Point(X, Y)) then Exit(FDrumBase + p);
+end;
+
+{ the drum machine is heard directly while the Timeline is not playing }
+procedure TfrmMain.DrumAudioAttach;
+begin
+  if (App = nil) or (App.Audio = nil) or (FDrumIntf = nil) or FDrumAudioOn or FTlPlaying then Exit;
+  try
+    if App.Audio.State in [aesIdle, aesFailed] then App.Audio.Open(True)
+    else App.Audio.Start;
+    App.Audio.SetSource(FDrumIntf);
+    FDrumAudioOn := True;
+  except
+    on E: Exception do
+      memTimeline.Lines.Insert(0, 'Drum machine audio: ' + E.Message);
+  end;
+end;
+
+procedure TfrmMain.DrumAudioDetach;
+begin
+  if not FDrumAudioOn then Exit;
+  FDrumAudioOn := False;
+  if (App <> nil) and (App.Audio <> nil) and not FTlPlaying then App.Audio.ClearSource;
+end;
+
+procedure TfrmMain.DrumRefreshEditor;
+var
+  i: Integer;
+begin
+  if FDrum = nil then Exit;
+  { keep the selected pad inside the 4x4 view, and the range bar / map in step with it }
+  if (FDrumPad < FDrumBase) or (FDrumPad >= FDrumBase + DRUM_BANK_SIZE) then
+    FDrumBase := EnsureRange(FDrumPad div 4 * 4 - 8, 0, DRUM_PAD_COUNT - DRUM_BANK_SIZE);
+  FDrumScrollBusy := True;
+  try
+    sbDrumRange.Position := 28 - FDrumBase div 4;
+  finally
+    FDrumScrollBusy := False;
+  end;
+  pbDrumMap.Invalidate;
+  for i := 0 to FDrumPanels.Count - 1 do
+    FDrumPanels[i].Selected := FDrumPanels[i].Note = FDrumPad;
+  DrumPanelReveal(FDrumPad);
+  pbDrumPads.Invalidate;
+end;
+
+procedure TfrmMain.DrumLoadInto(APad: Integer; const APath: string);
+var
+  err: string;
+begin
+  if FDrum = nil then Exit;
+  if FDrum.LoadPad(APad, APath, err) then
+  begin
+    FDrumPad := APad;
+    DrumSaveKit;
+    DrumProjectSync(APad);
+    DrumPanelsSync;
+    DrumRefreshEditor;
+    FDrum.Hit(APad, 100);
+  end
+  else
+    MessageDlg('Could not load ' + ExtractFileName(APath) + ':' + sLineBreak + err, mtWarning, [mbOK], 0);
+end;
+
+procedure TfrmMain.DrumLoadDialog(ANote: Integer);
+begin
+  if FDrum = nil then Exit;
+  dlgOpenWav.FileName := '';
+  if dlgOpenWav.Execute then DrumLoadInto(ANote, dlgOpenWav.FileName);
+end;
+
+{ ---- instrument panels: every pad that holds a sound has its own panel, its title bar in
+  the pad's colour and the sound's graph inside. The pads' state is kept in the project
+  (DrumKit) as it changes, so it is saved with the project and restored when it opens. ---- }
+
+function TfrmMain.DrumPanelFor(ANote: Integer): TDrumInstrumentPanel;
+var
+  i: Integer;
+begin
+  Result := nil;
+  if FDrumPanels = nil then Exit;
+  for i := 0 to FDrumPanels.Count - 1 do
+    if FDrumPanels[i].Note = ANote then Exit(FDrumPanels[i]);
+end;
+
+function TfrmMain.DrumPanelTitle(ANote: Integer): string;
+var
+  nm: string;
+  i: Integer;
+begin
+  nm := FDrum.Pads[ANote].Name;
+  if (nm = '') and FDrum.HasSample(ANote) then nm := ChangeFileExt(ExtractFileName(FDrum.Pads[ANote].Sample.Path), '');
+  if nm = '' then
+  begin
+    i := FProject.DrumKit.IndexOfNote(ANote);
+    if i >= 0 then nm := ChangeFileExt(ExtractFileName(FProject.DrumKit[i].Path), '');
+  end;
+  Result := Format('%s   MIDI %d', [DrumNoteName(ANote), ANote]);
+  if nm <> '' then Result := Result + '   -   ' + nm;
+end;
+
+procedure TfrmMain.DrumPanelUpdate(APanel: TDrumInstrumentPanel);
+var
+  p: TDrumPad;
+  i, k: Integer;
+  info: string;
+  d: TDrumKitPadData;
+  smp: TDrumSample;
+  mn, mx: TArray<Single>;
+  pk: TArray<SmallInt>;
+begin
+  p := FDrum.Pads[APanel.Note];
+  APanel.Title := DrumPanelTitle(APanel.Note);
+  APanel.SetState(p.Name, p.Level, p.Pan, p.Muted, p.Soloed, p.Choke, Ord(p.Mode));
+  smp := p.Sample;
+  i := FProject.DrumKit.IndexOfNote(APanel.Note);
+  if smp <> nil then
+  begin
+    info := Format('%.0f ms   %d Hz   %s', [smp.DurationSeconds * 1000, smp.Rate,
+      IfThen(smp.Channels > 1, 'stereo', 'mono')]);
+    if i >= 0 then pk := FProject.DrumKit[i].Peaks
+    else
+    begin
+      smp.Peaks(DRUMKIT_PEAK_COLUMNS, mn, mx);
+      SetLength(pk, Length(mn) * 2);
+      for k := 0 to High(mn) do
+      begin
+        pk[k * 2] := Round(mn[k] * DRUMKIT_PEAK_SCALE);
+        pk[k * 2 + 1] := Round(mx[k] * DRUMKIT_PEAK_SCALE);
+      end;
+    end;
+    APanel.SetWave(pk, DRUMKIT_PEAK_SCALE, info, False);
+  end
+  else if i >= 0 then
+  begin
+    d := FProject.DrumKit[i];
+    APanel.SetWave(d.Peaks, DRUMKIT_PEAK_SCALE, 'file not found: ' + ExtractFileName(d.Path), True);
+  end
+  else
+    APanel.SetWave(nil, DRUMKIT_PEAK_SCALE, '', False);
+end;
+
+{ creates the panels of pads that now hold a sound, drops the ones that no longer do, and
+  refreshes the rest }
+procedure TfrmMain.DrumPanelsSync;
+var
+  n, i: Integer;
+  pnl: TDrumInstrumentPanel;
+  wanted: Boolean;
+begin
+  if (FDrum = nil) or (FDrumPanels = nil) or (FProject = nil) or (sbDrumPanels = nil) then Exit;
+  for n := 0 to DRUM_PAD_COUNT - 1 do
+  begin
+    wanted := FDrum.HasSample(n) or (FProject.DrumKit.IndexOfNote(n) >= 0);
+    pnl := DrumPanelFor(n);
+    if wanted and (pnl = nil) then
+    begin
+      pnl := TDrumInstrumentPanel.CreateForNote(Self, n);
+      pnl.Parent := sbDrumPanels;
+      pnl.HeadColor := DrumPadColor(n);
+      pnl.OnChanged := DrumPanelChanged;
+      pnl.OnLoad := DrumPanelLoad;
+      pnl.OnPlay := DrumPanelPlay;
+      pnl.OnStop := DrumPanelStop;
+      pnl.OnClear := DrumPanelClear;
+      pnl.OnSelect := DrumPanelSelect;
+      pnl.OnToggle := DrumPanelToggle;
+      pnl.OnEdit := DrumPanelEdit;
+      i := 0;
+      while (i < FDrumPanels.Count) and (FDrumPanels[i].Note < n) do Inc(i);
+      FDrumPanels.Insert(i, pnl);
+    end
+    else if (not wanted) and (pnl <> nil) then
+    begin
+      FDrumPanels.Remove(pnl);
+      pnl.Free;
+      pnl := nil;
+    end;
+    if pnl <> nil then
+    begin
+      pnl.Selected := n = FDrumPad;
+      DrumPanelUpdate(pnl);
+    end;
+  end;
+  DrumPanelsLayout;
+end;
+
+{ the instrument panel box always spans the rest of the Instrument page, so it follows the window when it is resized or maximised }
+procedure TfrmMain.DrumFitToPage;
+var
+  w, h: Integer;
+begin
+  if (tabInst = nil) or (sbDrumPanels = nil) then Exit;
+  w := tabInst.ClientWidth - sbDrumPanels.Left - 18;
+  h := tabInst.ClientHeight - sbDrumPanels.Top - 12;
+  if (w < 100) or (h < 100) then Exit;
+  if (sbDrumPanels.Width <> w) or (sbDrumPanels.Height <> h) then
+  begin
+    Logger.Debug('ui', Format('Instrument panel box fitted to page %dx%d -> box %dx%d', [tabInst.ClientWidth, tabInst.ClientHeight, w, h]));
+    sbDrumPanels.SetBounds(sbDrumPanels.Left, sbDrumPanels.Top, w, h);
+    sbDrumPanels.Invalidate;
+  end;
+end;
+
+{ the panels stand in one row in note order, each against the right edge of the previous one
+  with a 5px gap; they never wrap underneath - the box scrolls horizontally instead }
+procedure TfrmMain.DrumPanelsLayout;
+var
+  i, x, pos, posX: Integer;
+begin
+  if (FDrumPanels = nil) or (sbDrumPanels = nil) then Exit;
+  DrumFitToPage;
+  pos := sbDrumPanels.VertScrollBar.Position;
+  posX := sbDrumPanels.HorzScrollBar.Position;
+  x := 5;
+  for i := 0 to FDrumPanels.Count - 1 do
+  begin
+    FDrumPanels[i].SetBounds(x - posX, 6 - pos, FDrumPanels[i].Width, FDrumPanels[i].Height);
+    Inc(x, FDrumPanels[i].Width + 5);
+  end;
+  lblDrumEmpty.Visible := FDrumPanels.Count = 0;
+  sbDrumPanels.SetScroll(pos);
+  sbDrumPanels.SetScrollX(posX);
+  sbDrumPanels.Invalidate;
+end;
+
+{ scrolls the instrument panel list so the selected pad's panel is in view }
+procedure TfrmMain.DrumPanelReveal(ANote: Integer);
+var
+  pnl: TDrumInstrumentPanel;
+  pos: Integer;
+begin
+  pnl := DrumPanelFor(ANote);
+  if pnl = nil then Exit;
+  pos := sbDrumPanels.VertScrollBar.Position;
+  if pnl.Top < 0 then
+    sbDrumPanels.SetScroll(pos + pnl.Top - 6)
+  else if pnl.Top + pnl.Height > sbDrumPanels.ClientHeight then
+    sbDrumPanels.SetScroll(pos + pnl.Top + pnl.Height - sbDrumPanels.ClientHeight + 6);
+  pos := sbDrumPanels.HorzScrollBar.Position;
+  if pnl.Left < 0 then
+    sbDrumPanels.SetScrollX(pos + pnl.Left - 5)
+  else if pnl.Left + pnl.Width > sbDrumPanels.ClientWidth then
+    sbDrumPanels.SetScrollX(pos + pnl.Left + pnl.Width - sbDrumPanels.ClientWidth + 5);
+end;
+
+procedure TfrmMain.DrumPanelChanged(Sender: TObject);
+var
+  pnl: TDrumInstrumentPanel;
+  p: TDrumPad;
+begin
+  if (FDrum = nil) or not (Sender is TDrumInstrumentPanel) then Exit;
+  pnl := TDrumInstrumentPanel(Sender);
+  p := FDrum.Pads[pnl.Note];
+  p.Name := pnl.PadName;
+  p.Level := pnl.Level;
+  p.Pan := pnl.Pan;
+  p.Muted := pnl.Muted;
+  p.Soloed := pnl.Soloed;
+  p.Choke := pnl.Choke;
+  if pnl.Mode = 1 then p.Mode := dmGate else p.Mode := dmOneShot;
+  pnl.Title := DrumPanelTitle(pnl.Note);
+  DrumSaveKit;
+  DrumProjectSync(pnl.Note);
+  pbDrumPads.Invalidate;
+end;
+
+procedure TfrmMain.DrumPanelLoad(Sender: TObject);
+begin
+  if Sender is TDrumInstrumentPanel then DrumLoadDialog(TDrumInstrumentPanel(Sender).Note);
+end;
+
+{ the instrument's own play / stop: audition the sound, or cut it off }
+procedure TfrmMain.DrumPanelPlay(Sender: TObject);
+begin
+  if (FDrum = nil) or not (Sender is TDrumInstrumentPanel) then Exit;
+  DrumAudioAttach;
+  FDrum.Hit(TDrumInstrumentPanel(Sender).Note, 100);
+end;
+
+procedure TfrmMain.DrumPanelStop(Sender: TObject);
+begin
+  if (FDrum = nil) or not (Sender is TDrumInstrumentPanel) then Exit;
+  FDrum.StopPad(TDrumInstrumentPanel(Sender).Note);
+end;
+
+procedure TfrmMain.DrumPanelClear(Sender: TObject);
+var
+  n: Integer;
+begin
+  if (FDrum = nil) or not (Sender is TDrumInstrumentPanel) then Exit;
+  n := TDrumInstrumentPanel(Sender).Note;
+  FDrum.ClearPad(n);
+  DrumSaveKit;
+  DrumProjectSync(n, True);
+  { the panel is still handling this click: remove it once the click has finished }
+  PostMessage(Handle, WM_DRUM_REFRESH, 0, 0);
+end;
+
+procedure TfrmMain.WMDrumRefresh(var Msg: TMessage);
+begin
+  if FDrumPanels = nil then Exit;
+  DrumPanelsSync;
+  DrumRefreshEditor;
+end;
+
+procedure TfrmMain.DrumPanelSelect(Sender: TObject);
+begin
+  if not (Sender is TDrumInstrumentPanel) then Exit;
+  if FDrumPad = TDrumInstrumentPanel(Sender).Note then Exit;
+  FDrumPad := TDrumInstrumentPanel(Sender).Note;
+  DrumRefreshEditor;
+end;
+
+procedure TfrmMain.DrumPanelToggle(Sender: TObject);
+begin
+  DrumPanelsLayout;
+end;
+
+{ a double-click on an instrument panel opens the instrument editor on its sound: the edited
+  sound is written beside the other rendered audio and the pad, the kit file and the project
+  are brought up to date; Cancel leaves the instrument exactly as it was }
+procedure TfrmMain.DrumPanelEdit(Sender: TObject);
+var
+  note: Integer;
+  newPath: string;
+begin
+  if (FDrum = nil) or not (Sender is TDrumInstrumentPanel) then Exit;
+  note := TDrumInstrumentPanel(Sender).Note;
+  if not FDrum.HasSample(note) then
+  begin
+    MessageDlg('This instrument has no sound yet. Load a WAV into it first.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  FDrumPad := note;
+  DrumAudioAttach;
+  if TfrmInstrumentEditor.Edit(Self, FDrum, note, DrumPadColor(note),
+       IncludeTrailingPathDelimiter(RecordingRootPath), newPath) then
+  begin
+    DrumSaveKit;
+    DrumProjectSync(note);
+    memTimeline.Lines.Insert(0, Format('Instrument %s edited - saved as %s.',
+      [DrumNoteName(note), ExtractFileName(newPath)]));
+  end;
+  DrumPanelsSync;
+  DrumRefreshEditor;
+end;
+
+{ ---- the kit in the project file ---- }
+
+{ copies one pad into the project's drum kit (or removes it); the waveform overview is only
+  recomputed when the pad's sound has changed }
+procedure TfrmMain.DrumProjectSync(ANote: Integer; ARemove: Boolean);
+var
+  p: TDrumPad;
+  d: TDrumKitPadData;
+  i, k: Integer;
+  mn, mx: TArray<Single>;
+begin
+  if (FProject = nil) or (FDrum = nil) then Exit;
+  p := FDrum.Pads[ANote];
+  i := FProject.DrumKit.IndexOfNote(ANote);
+  if ARemove or ((p.Sample = nil) and (i < 0)) then
+  begin
+    if i >= 0 then
+    begin
+      FProject.DrumKit.Remove(ANote);
+      FProject.Touch;
+    end;
+    Exit;
+  end;
+  if i >= 0 then d := FProject.DrumKit[i]
+  else d := Default(TDrumKitPadData);
+  d.Note := ANote;
+  d.Name := p.Name;
+  d.Level := p.Level;
+  d.Pan := p.Pan;
+  d.Muted := p.Muted;
+  d.Soloed := p.Soloed;
+  d.Choke := p.Choke;
+  d.Mode := Ord(p.Mode);
+  if p.Sample <> nil then
+  begin
+    if (i < 0) or not SameText(d.Path, p.Sample.Path) or (Length(d.Peaks) = 0) then
+    begin
+      p.Sample.Peaks(DRUMKIT_PEAK_COLUMNS, mn, mx);
+      SetLength(d.Peaks, Length(mn) * 2);
+      for k := 0 to High(mn) do
+      begin
+        d.Peaks[k * 2] := Round(mn[k] * DRUMKIT_PEAK_SCALE);
+        d.Peaks[k * 2 + 1] := Round(mx[k] * DRUMKIT_PEAK_SCALE);
+      end;
+    end;
+    d.Path := p.Sample.Path;
+    d.Rate := p.Sample.Rate;
+    d.Frames := p.Sample.Frames;
+    d.Channels := p.Sample.Channels;
+  end;
+  FProject.DrumKit.Put(d);
+  FProject.Touch;
+end;
+
+procedure TfrmMain.DrumProjectSyncAll;
+var
+  n: Integer;
+begin
+  for n := 0 to DRUM_PAD_COUNT - 1 do DrumProjectSync(n);
+  FProject.DrumKit.Defined := True;
+end;
+
+{ a project that carries a drum kit replaces the player's kit with it; one that does not (a
+  new project, an older file) takes on the kit the player has now }
+procedure TfrmMain.DrumApplyProject;
+var
+  n, i: Integer;
+  d: TDrumKitPadData;
+  p: TDrumPad;
+  err: string;
+  wasDirty: Boolean;
+begin
+  if (FDrum = nil) or (FProject = nil) or (FDrumPanels = nil) then Exit;
+  wasDirty := FProject.Dirty;
+  FDrum.StopAll;
+  { start from empty panels: they are rebuilt from the pads below }
+  for i := FDrumPanels.Count - 1 downto 0 do FDrumPanels[i].Free;
+  FDrumPanels.Clear;
+  if FProject.DrumKit.Defined then
+  begin
+    for n := 0 to DRUM_PAD_COUNT - 1 do
+    begin
+      FDrum.ClearPad(n);
+      p := FDrum.Pads[n];
+      p.Level := 1;
+      p.Pan := 0;
+      p.Muted := False;
+      p.Soloed := False;
+      p.Choke := 0;
+      p.Mode := dmOneShot;
+    end;
+    for i := 0 to FProject.DrumKit.Count - 1 do
+    begin
+      d := FProject.DrumKit[i];
+      p := FDrum.Pads[d.Note];
+      if FileExists(d.Path) then FDrum.LoadPad(d.Note, d.Path, err);
+      p.Name := d.Name;
+      p.Level := d.Level;
+      p.Pan := d.Pan;
+      p.Muted := d.Muted;
+      p.Soloed := d.Soloed;
+      p.Choke := d.Choke;
+      if d.Mode = 1 then p.Mode := dmGate else p.Mode := dmOneShot;
+    end;
+    DrumSaveKit;
+  end
+  else
+    DrumProjectSyncAll;
+  DrumPanelsSync;
+  DrumRefreshEditor;
+  if not wasDirty then FProject.ClearDirty;
+end;
+
+procedure TfrmMain.pbDrumPadsDblClick(Sender: TObject);
+var
+  pt: TPoint;
+  p: Integer;
+begin
+  pt := pbDrumPads.ScreenToClient(Mouse.CursorPos);
+  p := DrumPadAt(pt.X, pt.Y);
+  if (p >= 0) and (FDrum <> nil) and (not FDrum.HasSample(p)) then
+  begin
+    FDrumPad := p;
+    DrumLoadDialog(FDrumPad);
+  end;
+end;
+
+procedure TfrmMain.pbDrumPadsMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  p, vel: Integer;
+  r: TRect;
+begin
+  p := DrumPadAt(X, Y);
+  if (p < 0) or (FDrum = nil) then Exit;
+  FDrumPad := p;
+  DrumAudioAttach;
+  DrumRefreshEditor;
+  if Button <> mbLeft then Exit;
+  r := DrumPadRect(p - FDrumBase, pbDrumPads.Width, pbDrumPads.Height);
+  { the + in a pad's corner loads a sample into it instead of playing it }
+  if (X >= r.Right - 30) and (Y >= r.Bottom - 30) then
+  begin
+    DrumLoadDialog(FDrumPad);
+    Exit;
+  end;
+  { the harder (lower) you hit the pad, the louder }
+  vel := EnsureRange(Round(45 + 82 * (Y - r.Top) / Max(1, r.Bottom - r.Top)), 1, 127);
+  FDrum.Hit(p, vel);
+  FDrumHeld := p;
+end;
+
+procedure TfrmMain.pbDrumPadsMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  if (FDrum <> nil) and (FDrumHeld >= 0) then FDrum.Release(FDrumHeld);
+  FDrumHeld := -1;
+end;
+
+procedure TfrmMain.pbDrumPadsDropFiles(Sender: TObject; ADrop: HDROP; const APoint: TPoint);
+var
+  len: Integer;
+  fn: string;
+  p: Integer;
+begin
+  if DragQueryFile(ADrop, $FFFFFFFF, nil, 0) < 1 then Exit;
+  len := DragQueryFile(ADrop, 0, nil, 0);
+  SetLength(fn, len);
+  DragQueryFile(ADrop, 0, PChar(fn), len + 1);
+  p := DrumPadAt(APoint.X, APoint.Y);
+  if p < 0 then p := FDrumPad;
+  DrumLoadInto(p, fn);
+end;
+
+procedure TfrmMain.pbDrumPadsPaint(Sender: TObject);
+var
+  cv: TGLCanvas;
+  th: TUDAWTheme;
+  slot, note: Integer;
+  r: TRect;
+  base, face: TColor;
+  loaded: Boolean;
+  pad: TDrumPad;
+  s: string;
+begin
+  cv := pbDrumPads.GL;
+  th := CurrentTheme;
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := th.Background;
+  cv.FillRect(Rect(0, 0, pbDrumPads.Width, pbDrumPads.Height));
+  if FDrum = nil then Exit;
+  for slot := 0 to DRUM_BANK_SIZE - 1 do
+  begin
+    note := FDrumBase + slot;
+    pad := FDrum.Pads[note];
+    loaded := pad.Sample <> nil;
+    r := DrumPadRect(slot, pbDrumPads.Width, pbDrumPads.Height);
+    base := DrumPadColor(note);
+    if loaded then face := TlMix(th.PanelBackground, base, 0.38)
+    else face := TlMix(th.PanelBackground, base, 0.14);
+    if pad.Muted then face := TlMix(face, th.Background, 0.5);
+    if pad.Activity > 0 then face := TlMix(face, clWhite, pad.Activity * 0.55);
+    cv.Brush.Color := face;
+    cv.RoundRect(r.Left, r.Top, r.Right, r.Bottom, 8, 8);
+    { the colour stripe along the top edge }
+    cv.Brush.Color := base;
+    cv.FillRect(Rect(r.Left + 6, r.Top, r.Right - 6, r.Top + 3));
+    if note = FDrumPad then
+    begin
+      cv.Pen.Style := psSolid;
+      cv.Pen.Color := th.Text;
+      cv.Pen.Width := 2;
+      cv.Brush.Style := bsClear;
+      cv.RoundRect(r.Left, r.Top, r.Right, r.Bottom, 8, 8);
+      cv.Pen.Width := 1;
+      cv.Pen.Style := psClear;
+      cv.Brush.Style := bsSolid;
+    end;
+    cv.Brush.Style := bsClear;
+    cv.Font.Size := 9;
+    cv.Font.Style := [fsBold];
+    cv.Font.Color := th.Text;
+    cv.TextOut(r.Left + 10, r.Top + 10, DrumNoteName(note));
+    cv.Font.Style := [];
+    cv.Font.Size := 8;
+    if loaded then
+    begin
+      s := pad.Name;
+      if s = '' then s := ExtractFileName(pad.Sample.Path);
+      while (cv.TextWidth(s) > r.Right - r.Left - 18) and (Length(s) > 2) do Delete(s, Length(s), 1);
+      cv.Font.Color := th.Text;
+      cv.TextOut(r.Left + 10, r.Top + 28, s);
+      if pad.Soloed then
+      begin
+        cv.Font.Color := $0030C0F0;
+        cv.TextOut(r.Right - 18, r.Top + 10, 'S');
+      end
+      else if pad.Muted then
+      begin
+        cv.Font.Color := th.MeterClip;
+        cv.TextOut(r.Right - 18, r.Top + 10, 'M');
+      end;
+    end
+    else
+    begin
+      cv.Font.Color := th.SecondaryText;
+      cv.TextOut(r.Left + 10, r.Top + 28, 'Empty');
+    end;
+    { the + in the corner loads a sample into the pad }
+    cv.Font.Size := 12;
+    cv.Font.Style := [fsBold];
+    cv.Font.Color := th.SecondaryText;
+    cv.TextOut(r.Right - 22, r.Bottom - 24, '+');
+    cv.Font.Style := [];
+    cv.Font.Size := 8;
+    cv.Brush.Style := bsSolid;
+  end;
+end;
+
+{ the whole note range at a glance: 32 rows of 4 pads, the 4x4 view outlined }
+procedure TfrmMain.pbDrumMapPaint(Sender: TObject);
+var
+  cv: TGLCanvas;
+  th: TUDAWTheme;
+  w, h, row, col, y1, y2, x1, x2, cellW: Integer;
+  pad: TDrumPad;
+begin
+  cv := pbDrumMap.GL;
+  th := CurrentTheme;
+  w := pbDrumMap.Width;
+  h := pbDrumMap.Height;
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := TlMix(th.Background, th.PanelBackground, 0.35);
+  cv.FillRect(Rect(0, 0, w, h));
+  if FDrum = nil then Exit;
+  cellW := Max(2, (w - 6) div 4);
+  for row := 0 to 31 do
+  begin
+    y1 := h - Round((row + 1) * h / 32);
+    y2 := h - Round(row * h / 32);
+    for col := 0 to 3 do
+    begin
+      pad := FDrum.Pads[row * 4 + col];
+      x1 := 3 + col * cellW;
+      x2 := x1 + cellW;
+      if pad.Sample <> nil then cv.Brush.Color := TlMix(th.PanelBackground, th.Accent, 0.8)
+      else cv.Brush.Color := TlMix(th.Background, th.PanelBackground, 0.8);
+      if pad.Activity > 0 then cv.Brush.Color := TlMix(cv.Brush.Color, clWhite, pad.Activity * 0.6);
+      cv.FillRect(Rect(x1 + 1, y1 + 1, x2 - 1, Max(y1 + 2, y2 - 1)));
+    end;
+  end;
+  cv.Pen.Style := psSolid;
+  cv.Pen.Color := th.Text;
+  cv.Pen.Width := 2;
+  cv.Brush.Style := bsClear;
+  y1 := h - Round((FDrumBase div 4 + 4) * h / 32);
+  y2 := h - Round((FDrumBase div 4) * h / 32);
+  cv.Rectangle(1, y1, w - 1, y2);
+  cv.Pen.Width := 1;
+  cv.Pen.Style := psClear;
+  cv.Brush.Style := bsSolid;
+end;
+
+procedure TfrmMain.DrumSetBase(ABase: Integer);
+begin
+  ABase := EnsureRange(ABase div 4 * 4, 0, DRUM_PAD_COUNT - DRUM_BANK_SIZE);
+  if ABase = FDrumBase then Exit;
+  FDrumBase := ABase;
+  FDrumScrollBusy := True;
+  try
+    sbDrumRange.Position := 28 - FDrumBase div 4;
+  finally
+    FDrumScrollBusy := False;
+  end;
+  pbDrumPads.Invalidate;
+  pbDrumMap.Invalidate;
+end;
+
+procedure TfrmMain.sbDrumRangeChange(Sender: TObject);
+begin
+  if FDrumScrollBusy then Exit;
+  FDrumBase := EnsureRange((28 - sbDrumRange.Position) * 4, 0, DRUM_PAD_COUNT - DRUM_BANK_SIZE);
+  pbDrumPads.Invalidate;
+  pbDrumMap.Invalidate;
+end;
+
+procedure TfrmMain.pbDrumMapMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  if Button <> mbLeft then Exit;
+  FDrumMapDrag := True;
+  pbDrumMapMouseMove(Sender, Shift, X, Y);
+end;
+
+procedure TfrmMain.pbDrumMapMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+var
+  fromBottom: Integer;
+begin
+  if not FDrumMapDrag then Exit;
+  fromBottom := 31 - EnsureRange(Y * 32 div Max(1, pbDrumMap.Height), 0, 31);
+  DrumSetBase((fromBottom - 1) * 4);   { the clicked row sits inside the view }
+end;
+
+procedure TfrmMain.pbDrumMapMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  FDrumMapDrag := False;
+end;
+
+procedure TfrmMain.pbDrumPadsMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer;
+  MousePos: TPoint; var Handled: Boolean);
+begin
+  Handled := True;
+  DrumSetBase(FDrumBase + Sign(WheelDelta) * 4);
+end;
+
+const
+  MODE_ARRANGE = 0;
+  MODE_PIANO = 1;
+  MODE_SCORE = 2;
+  MODE_INST = 3;
+  MODE_PATTERN = 4;
+  MODE_MIX = 5;
+  MODE_TRACKER = 6;
+  MODE_REC = 7;
+  MODE_AI = 8;
+
+{ ======================= Timeline clip icons =======================
+  Every clip carries a small icon at the left end of its header strip that says what
+  the clip is (waveform, piano-roll dashes, tracker grid, step pattern, film). A click
+  on it opens that clip's editor: the piano roll for a MIDI clip, the tracker for a
+  module, the pattern editor for a pattern and the mixer strip of the track for an
+  audio clip. Video clips are edited on the Timeline itself, so theirs is a label only. }
+
+function TfrmMain.TlClipKind(AClip: TTimelineClip): TTlClipKind;
+var
+  src: TMediaSource;
+begin
+  Result := ckAudio;
+  if (FProject = nil) or (AClip = nil) then Exit;
+  if AClip.IsMidiClip then
+  begin
+    if FProject.Patterns.ByMidiClip(AClip.MidiClipId) <> nil then Exit(ckPattern);
+    Exit(ckMidi);
+  end;
+  src := nil;
+  if AClip.SourceId >= 0 then src := FProject.Timeline.SourceById(AClip.SourceId);
+  if src = nil then Exit;
+  if src.Kind = mkVideoFile then Exit(ckVideo);
+  { an empty rectangle: only asks whether the source is a tracker module (cached per source) }
+  if TlDrawTrackerNotation(nil, AClip, src, Rect(0, 0, 0, 0), 0, 0) then Exit(ckTracker);
+end;
+
+function TfrmMain.TlClipIconRect(AClip: TTimelineClip; ATrackIndex: Integer): TRect;
+const
+  CLIP_HEADER_H = 15;   { must match pbTimelinePaint's local constant }
+  ICON_W = 14;
+var
+  top, x, x2, w: Integer;
+begin
+  Result := Rect(0, 0, 0, 0);
+  if (FProject = nil) or (ATrackIndex < 0) then Exit;
+  w := pbTimeline.Width;
+  if (AClip.EndSeconds < FTlView.XToSeconds(FTlView.HeaderWidth)) or
+     (AClip.StartSeconds > FTlView.XToSeconds(w)) then Exit;
+  x := Round(FTlView.SecondsToX(Max(AClip.StartSeconds, FTlView.XToSeconds(FTlView.HeaderWidth) - 1)));
+  x2 := Round(FTlView.SecondsToX(Min(AClip.EndSeconds, FTlView.XToSeconds(w) + 1)));
+  if x < FTlView.HeaderWidth then x := FTlView.HeaderWidth;
+  if x2 > w then x2 := w;
+  if x2 - x < 36 then Exit;     { too narrow to carry an icon and still show a name }
+  top := TlTrackTop(ATrackIndex);
+  Result := Rect(x + 3, top + 4, x + 3 + ICON_W, top + 2 + CLIP_HEADER_H - 2);
+end;
+
+function TfrmMain.TlClipIconAt(AX, AY: Integer; out AClip: TTimelineClip): Boolean;
+var
+  ti, j: Integer;
+  trk: TTimelineTrack;
+  c: TTimelineClip;
+begin
+  Result := False;
+  AClip := nil;
+  if (FProject = nil) or not TlTrackAtY(AY, ti) then Exit;
+  trk := FProject.Timeline.GetTrack(ti);
+  for j := 0 to trk.ClipCount - 1 do
+  begin
+    c := trk.GetClip(j);
+    if PtInRect(TlClipIconRect(c, ti), Point(AX, AY)) and (TlClipKind(c) <> ckVideo) then
+    begin
+      AClip := c;
+      Exit(True);
+    end;
+  end;
+end;
+
+procedure TfrmMain.TlDrawClipIcon(ACv: TGLCanvas; const ARect: TRect; AKind: TTlClipKind; AInk: TColor);
+const
+  AUDIO_BARS: array[0..4] of Integer = (3, 7, 9, 6, 4);
+var
+  i, c, r, lum, mid: Integer;
+  plate, dim, penColor, brushColor: TColor;
+  rgb: LongInt;
+  penStyle: TPenStyle;
+  brushStyle: TBrushStyle;
+begin
+  penStyle := ACv.Pen.Style;
+  penColor := ACv.Pen.Color;
+  brushStyle := ACv.Brush.Style;
+  brushColor := ACv.Brush.Color;
+  rgb := ColorToRGB(AInk);
+  lum := (GetRValue(rgb) * 299 + GetGValue(rgb) * 587 + GetBValue(rgb) * 114) div 1000;
+  { a plate that stands off the header, the glyph in the header's own text colour }
+  if lum > 128 then plate := TlMix(clBlack, AInk, 0.22) else plate := TlMix(clWhite, AInk, 0.22);
+  dim := TlMix(plate, AInk, 0.35);
+  ACv.Pen.Style := psClear;
+  ACv.Brush.Style := bsSolid;
+  ACv.Brush.Color := plate;
+  ACv.RoundRect(ARect.Left, ARect.Top, ARect.Right, ARect.Bottom, 4, 4);
+  ACv.Brush.Color := AInk;
+  case AKind of
+    ckAudio:
+      begin
+        mid := (ARect.Top + ARect.Bottom) div 2;
+        for i := 0 to 4 do
+          ACv.FillRect(Rect(ARect.Left + 2 + i * 2, mid - AUDIO_BARS[i] div 2,
+            ARect.Left + 3 + i * 2, mid + (AUDIO_BARS[i] + 1) div 2));
+      end;
+    ckMidi:
+      begin
+        ACv.FillRect(Rect(ARect.Left + 2, ARect.Top + 2, ARect.Left + 7, ARect.Top + 4));
+        ACv.FillRect(Rect(ARect.Left + 5, ARect.Top + 5, ARect.Left + 11, ARect.Top + 7));
+        ACv.FillRect(Rect(ARect.Left + 3, ARect.Top + 8, ARect.Left + 9, ARect.Top + 10));
+      end;
+    ckTracker:
+      for r := 0 to 2 do
+        for c := 0 to 2 do
+          ACv.FillRect(Rect(ARect.Left + 2 + c * 4, ARect.Top + 1 + r * 3,
+            ARect.Left + 4 + c * 4, ARect.Top + 3 + r * 3));
+    ckPattern:
+      for r := 0 to 1 do
+        for c := 0 to 3 do
+        begin
+          if (c + r) mod 2 = 0 then ACv.Brush.Color := AInk else ACv.Brush.Color := dim;
+          ACv.FillRect(Rect(ARect.Left + 2 + c * 3, ARect.Top + 2 + r * 4,
+            ARect.Left + 4 + c * 3, ARect.Top + 5 + r * 4));
+        end;
+    ckVideo:
+      begin
+        ACv.FillRect(Rect(ARect.Left + 2, ARect.Top + 2, ARect.Left + 12, ARect.Top + 9));
+        ACv.Brush.Color := plate;
+        ACv.FillRect(Rect(ARect.Left + 3, ARect.Top + 3, ARect.Left + 5, ARect.Top + 4));
+        ACv.FillRect(Rect(ARect.Left + 9, ARect.Top + 3, ARect.Left + 11, ARect.Top + 4));
+        ACv.FillRect(Rect(ARect.Left + 3, ARect.Top + 7, ARect.Left + 5, ARect.Top + 8));
+        ACv.FillRect(Rect(ARect.Left + 9, ARect.Top + 7, ARect.Left + 11, ARect.Top + 8));
+      end;
+  end;
+  { the caller keeps drawing (the waveform) with the pen it had }
+  ACv.Pen.Style := penStyle;
+  ACv.Pen.Color := penColor;
+  ACv.Brush.Style := brushStyle;
+  ACv.Brush.Color := brushColor;
+end;
+
+{ opens an editor beside the arrangement (the dock), or as the whole page when the
+  arrangement is not what is showing }
+procedure TfrmMain.TlOpenEditorPage(AMode: Integer);
+var
+  page: TGLPage;
+begin
+  page := TlPageOfMode(AMode);
+  if page = nil then Exit;
+  if FTlMode = MODE_ARRANGE then
+  begin
+    FEditorOn := True;
+    pnlTlDock.Visible := True;
+    splTlDock.Visible := True;
+    TlStackDock;
+    pgcDock.ActivePage := page;
+    TlRefreshDockPage(page);
+  end
+  else
+    TlSetMode(AMode);
+end;
+
+{ Tools > Edit Lane: the whole selected lane is rendered to ONE WAV - whatever its clips are
+  (MP3, MP4, M4A, MKV, FLAC, WAV ...), in place, with their fades and gain - and saved in the
+  cache under the lane's id (cache\lane-edit\lane<id>-<stamp>.wav), then opened in the WAV
+  editor. OK: the edited WAV is saved (in the recordings folder) and the lane's clips are
+  replaced by one clip playing it, as one set of undoable steps. Cancel - or OK with nothing
+  edited, or Esc while rendering - discards everything: the cached render is deleted and the
+  lane keeps its old audio exactly as it was. }
+procedure TfrmMain.TlEditLaneClick(Sender: TObject);
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  player: TTimelinePlayer;
+  c: TTimelineClip;
+  planar: TAudioPlanar;
+  info: TWavInfo;
+  newSrc: TMediaSource;
+  addCmd: TAddTimelineClipCommand;
+  ids: TArray<Integer>;
+  i, laneRate: Integer;
+  startSec, endSec, newDur: Double;
+  cacheDir, cacheWav, newPath, laneName: string;
+  undoMark: Integer;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  trk := TlNavTargetTrack;
+  if (trk = nil) or (trk.Kind <> tkAudio) then
+  begin
+    memTimeline.Lines.Insert(0, 'Edit Lane: select an audio lane first.');
+    Exit;
+  end;
+  if trk.Muted then
+  begin
+    memTimeline.Lines.Insert(0, 'Edit Lane: the lane is muted - un-mute it first, so its audio can be rendered.');
+    Exit;
+  end;
+  laneName := trk.Name;
+  startSec := 0;
+  endSec := 0;
+  ids := nil;
+  for i := 0 to trk.ClipCount - 1 do
+  begin
+    c := trk.GetClip(i);
+    if c.IsMidiClip or c.Muted then Continue;
+    if ids = nil then startSec := c.StartSeconds else startSec := Min(startSec, c.StartSeconds);
+    endSec := Max(endSec, c.EndSeconds);
+    ids := ids + [c.Id];
+  end;
+  if (Length(ids) = 0) or (endSec - startSec < TIMELINE_MIN_CLIP_SECONDS) then
+  begin
+    memTimeline.Lines.Insert(0, 'Edit Lane: the lane has no audio.');
+    Exit;
+  end;
+
+  laneRate := 48000;
+  cacheDir := IncludeTrailingPathDelimiter(App.Paths.Cache) + 'lane-edit' + PathDelim;
+  cacheWav := '';
+  try
+    { 1. render the lane to a WAV in the cache; the file name carries the lane's id }
+    ShowStatusProgress('Edit Lane - rendering "' + laneName + '" to WAV...', 100);
+    try
+      player := TTimelinePlayer.Create(tl);
+      try
+        player.SetStretchTempo(FProject.TempoBPM);
+        player.EnsureSourcesLoaded;   // MP3 / MP4 / M4A / MKV / FLAC are decoded here
+        if not player.RenderLaneToPlanar(trk, startSec, endSec - startSec, laneRate, planar,
+             function(AFraction: Double): Boolean
+             begin
+               UpdateStatusProgress(Round(AFraction * 90), 'Edit Lane - rendering "' + laneName + '" to WAV...');
+               Result := True;   // Esc raises through UpdateStatusProgress
+             end) then
+          Exit;
+      finally
+        player.Free;
+      end;
+      UpdateStatusProgress(92, 'Edit Lane - writing the WAV to the cache...');
+      ForceDirectories(cacheDir);
+      cacheWav := cacheDir + Format('lane%d-%s.wav', [trk.Id, FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
+      SaveWavFile(cacheWav, planar, 2, laneRate, Length(planar[0]), wsfPCM24);
+      JobNoteFile(cacheWav);
+    finally
+      HideStatusProgress;
+    end;
+    planar := nil;
+
+    { 2. the WAV editor }
+    if not TfrmInstrumentEditor.EditFile(Self, laneName + '  (lane render)', cacheWav,
+         TlTrackAccent(trk, tl.IndexOfTrack(trk.Id)), IncludeTrailingPathDelimiter(RecordingRootPath), newPath) then
+    begin
+      { Cancel, or nothing edited: nothing changes and the render is thrown away }
+      DeleteFile(cacheWav);
+      memTimeline.Lines.Insert(0, 'Edit Lane: cancelled - the lane keeps its audio.');
+      Exit;
+    end;
+
+    { 3. OK: the lane plays the edited WAV instead of its old clips }
+    info := ReadWavInfo(newPath);
+    if info.SampleRate > 0 then newDur := info.FrameCount / info.SampleRate else newDur := 0;
+    if newDur <= 0 then
+    begin
+      DeleteFile(cacheWav);
+      Exit;
+    end;
+    undoMark := FCmds.UndoCount;
+    try
+      newSrc := tl.AddSource(newPath, info.SampleRate, info.Channels, info.FrameCount);
+      for i := 0 to High(ids) do
+        FCmds.Perform(TRemoveTimelineClipCommand.Create(FProject, ids[i]));
+      addCmd := TAddTimelineClipCommand.Create(FProject, trk.Id, newSrc.Id,
+        laneName + ' (edited)', startSec, 0, newDur);
+      FCmds.Perform(addCmd);
+      FTlSelClipId := addCmd.CreatedId;
+    except
+      { a failure part-way leaves the lane as it was }
+      while FCmds.UndoCount > undoMark do FCmds.Undo;
+      DeleteFile(newPath);
+      raise;
+    end;
+    DeleteFile(cacheWav);   // the edited WAV is the lane's data now
+    ShowStatusProgress('Edit Lane - preparing the waveform...', 100);
+    try
+      WarmClipWaveform(newSrc.Id, 0, 100, False);
+    finally
+      HideStatusProgress;
+    end;
+    FProject.Touch;
+    RefreshTimelineTab;
+    memTimeline.Lines.Insert(0, Format('Edit Lane: "%s" now plays %s (%d old clip(s) replaced).',
+      [laneName, ExtractFileName(newPath), Length(ids)]));
+  except
+    on EAbort do
+    begin
+      if cacheWav <> '' then DeleteFile(cacheWav);
+      memTimeline.Lines.Insert(0, 'Edit Lane: cancelled with Esc - the lane keeps its audio.');
+    end;
+    on E: Exception do
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Edit Lane FAILED: ' + E.Message);
+    end;
+  end;
+end;
+
+{ Double-click on an audio clip: the clip's audio file opens in the audio file editor. A file that
+  is not a WAV (MP3, MP4, MKV, M4A, FLAC ...) is first converted to a WAV beside the other
+  rendered audio, and that WAV is what is edited. On OK the edited audio is written as a new WAV
+  that becomes the file of this clip only (undoable) - other clips, including copies and pastes of
+  it, keep the original file untouched; Cancel, or OK with nothing edited, changes nothing. }
+procedure TfrmMain.TlEditClipAudio(AClip: TTimelineClip);
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  src, newSrc: TMediaSource;
+  player: TTimelinePlayer;
+  dec: TDecodedSource;
+  info: TWavInfo;
+  c: TTimelineClip;
+  oldSrcId: Integer;
+  srcPath, wavPath, newPath, outDir, title: string;
+  isWav: Boolean;
+  newDur: Double;
+  convertedFile: string;
+  loopFlag: Boolean;
+begin
+  if (FProject = nil) or (AClip = nil) or AClip.IsMidiClip then Exit;
+  tl := FProject.Timeline;
+  src := tl.SourceById(AClip.SourceId);
+  if src = nil then Exit;
+  srcPath := src.Path;
+  if (srcPath = '') or not FileExists(srcPath) then
+  begin
+    MessageDlg('The audio file of this clip cannot be found:' + sLineBreak + srcPath, mtWarning, [mbOK], 0);
+    Exit;
+  end;
+  trk := nil;
+  tl.ClipById(AClip.Id, trk);
+  if trk = nil then Exit;
+  oldSrcId := src.Id;
+  outDir := IncludeTrailingPathDelimiter(RecordingRootPath);
+  wavPath := srcPath;
+  convertedFile := '';
+  try
+    isWav := SameText(ExtractFileExt(srcPath), '.wav') and FileLooksLikeWav(srcPath);
+    if not isWav then
+    begin
+      { MP3 / MP4 / MKV / M4A / FLAC ...: decode it and write a WAV to edit }
+      ShowStatusProgress('Audio editor - converting ' + ExtractFileName(srcPath) + ' to WAV...', 100);
+      try
+        player := TTimelinePlayer.Create(tl);
+        try
+          player.EnsureSourcesLoaded;
+          dec := player.GetDecodedSource(oldSrcId);
+          if (dec = nil) or dec.Failed or (dec.FrameCount = 0) then
+          begin
+            HideStatusProgress;
+            MessageDlg('This audio could not be decoded for editing.', mtWarning, [mbOK], 0);
+            Exit;
+          end;
+          UpdateStatusProgress(60, 'Audio editor - writing the WAV...');
+          ForceDirectories(outDir);
+          convertedFile := outDir + Format('src-%s-%s.wav',
+            [SafeSunoFileName(ChangeFileExt(ExtractFileName(srcPath), '')),
+             FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
+          SaveWavFile(convertedFile, dec.Data, dec.Channels, dec.SampleRate, dec.FrameCount, wsfPCM24);
+          JobNoteFile(convertedFile);
+          wavPath := convertedFile;
+        finally
+          player.Free;
+        end;
+      finally
+        HideStatusProgress;
+      end;
+    end;
+
+    title := ExtractFileName(srcPath) + '  (' + trk.Name + ')';
+    loopFlag := AClip.Loop;
+    if not TfrmInstrumentEditor.EditFileLoop(Self, title, wavPath, TlTrackAccent(trk, tl.IndexOfTrack(trk.Id)),
+         outDir, loopFlag, newPath) then
+    begin
+      { not kept: the WAV made only for editing is not needed any more }
+      if convertedFile <> '' then DeleteFile(convertedFile);
+      Exit;
+    end;
+    { the Loop icon: the clip repeats until the last segment of the Timeline }
+    if loopFlag <> AClip.Loop then
+    begin
+      AClip.Loop := loopFlag;
+      FProject.Touch;
+      memTimeline.Lines.Insert(0, Format('Audio editor: "%s" %s.', [AClip.Name,
+        IfThen(loopFlag, 'now loops until the last segment of the Timeline', 'no longer loops')]));
+      RefreshTimelineTab;
+    end;
+    if newPath = '' then
+    begin
+      { only the loop flag changed: the audio file stays as it was }
+      if convertedFile <> '' then DeleteFile(convertedFile);
+      Exit;
+    end;
+
+    info := ReadWavInfo(newPath);
+    newSrc := tl.AddSource(newPath, info.SampleRate, info.Channels, info.FrameCount);
+    if info.SampleRate > 0 then newDur := info.FrameCount / info.SampleRate else newDur := 0;
+    { every clip is its own element: copies and pastes share the original file until one is
+      edited, so the edit goes to a new file used by this clip alone - the others keep theirs }
+    c := AClip;
+    FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, c.SourceOffsetSeconds));
+    { an edit that made the audio shorter must not leave the clip longer than its audio }
+    if (newDur > 0) and (c.SourceOffsetSeconds + c.LengthSeconds > newDur + 0.001) then
+      c.LengthSeconds := Max(TIMELINE_MIN_CLIP_SECONDS, newDur - c.SourceOffsetSeconds);
+    if convertedFile <> '' then DeleteFile(convertedFile);   // the edited WAV is the new base file
+    ShowStatusProgress('Audio editor - preparing the waveform...', 100);
+    try
+      WarmClipWaveform(newSrc.Id, 0, 100, False);
+    finally
+      HideStatusProgress;
+    end;
+    FProject.Touch;
+    memTimeline.Lines.Insert(0, Format('Audio editor: "%s" now uses its own file %s (other clips unchanged).',
+      [AClip.Name, ExtractFileName(newPath)]));
+  except
+    on EAbort do
+    begin
+      if convertedFile <> '' then DeleteFile(convertedFile);
+      memTimeline.Lines.Insert(0, 'Audio editor: cancelled with Esc - nothing was changed.');
+    end;
+    on E: Exception do
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Audio editor FAILED: ' + E.Message);
+    end;
+  end;
+end;
+
+procedure TfrmMain.TlOpenClipEditor(AClip: TTimelineClip);
+var
+  trk: TTimelineTrack;
+  strip: TMixStrip;
+  pat: TPattern;
+  idx, ti: Integer;
+begin
+  if (FProject = nil) or (AClip = nil) then Exit;
+  trk := nil;
+  FProject.Timeline.ClipById(AClip.Id, trk);
+  if trk <> nil then FTlSelectedTrackId := trk.Id;
+  case TlClipKind(AClip) of
+    ckMidi:
+      begin
+        idx := FProject.Midi.IndexOfId(AClip.MidiClipId);
+        if idx < 0 then Exit;
+        FMidiClipIndex := idx;
+        FMidiTrackIndex := 0;
+        with FProject.Midi.Clip(idx) do
+          for ti := 0 to TrackCount - 1 do
+            if GetTrack(ti).NoteCount > 0 then
+            begin
+              FMidiTrackIndex := ti;
+              Break;
+            end;
+        FMidiViewStart := 0;
+        FMidiZoomX := 1;
+        TlOpenEditorPage(MODE_PIANO);
+        RefreshMidiTab;
+      end;
+    ckPattern:
+      begin
+        pat := FProject.Patterns.ByMidiClip(AClip.MidiClipId);
+        if pat = nil then Exit;
+        FPatId := pat.Id;
+        FPatSel := -1;
+        FPatSig := '';
+        TlOpenEditorPage(MODE_PATTERN);
+      end;
+    ckTracker:
+      TlOpenEditorPage(MODE_TRACKER);
+    ckAudio:
+      begin
+        TlOpenEditorPage(MODE_MIX);
+        strip := TlSelectedTrackStrip;
+        if strip <> nil then MixSelectById(strip.Id);
+      end;
+  end;
+end;
+
+{ ======================= Pattern mode =======================
+  A step sequencer for rhythm patterns. Each row is an instrument (a drum pad / MIDI
+  note) and each column a step; a click writes a hit, a drag paints a run, a right
+  click erases, the wheel over a hit sets its velocity. A pattern keeps the
+  instruments it uses (note, name, sample), is saved in the project, can be exported
+  as a preset, plays in a loop through the drum machine, and Place puts it on the
+  Timeline as a clip - edit the pattern afterwards and every placed instance follows. }
+
+const
+  PAT_HDR_W = 210;       { instrument column }
+  PAT_RULER_H = 38;      { bar numbers and step pills }
+  PAT_CELL_W = 30;
+  PAT_CELL_H = 28;
+  PAT_PITCH = 34;        { cell + gap }
+  PAT_ROW = 34;
+  PAT_BEAT_GAP = 8;      { extra space between beats }
+
+function PatLaneColor(AIndex: Integer): TColor;
+begin
+  case AIndex mod 8 of
+    0: Result := RGB(250, 130, 80);
+    1: Result := RGB(250, 180, 80);
+    2: Result := RGB(245, 225, 90);
+    3: Result := RGB(190, 235, 80);
+    4: Result := RGB(110, 225, 90);
+    5: Result := RGB(80, 215, 170);
+    6: Result := RGB(90, 170, 245);
+  else
+    Result := RGB(150, 120, 245);
+  end;
+end;
+
+function TfrmMain.PatCurrent: TPattern;
+begin
+  Result := nil;
+  if FProject <> nil then Result := FProject.Patterns.ById(FPatId);
+end;
+
+function TfrmMain.PatPadName(ANote: Integer): string;
+begin
+  Result := '';
+  if (FDrum <> nil) and FDrum.HasSample(ANote) then
+  begin
+    Result := FDrum.Pads[ANote].Name;
+    if Result = '' then Result := ChangeFileExt(ExtractFileName(FDrum.Pads[ANote].Sample.Path), '');
+  end;
+  if Result = '' then Result := DrumNoteName(ANote);
+end;
+
+function TfrmMain.PatPresetDir: string;
+begin
+  if App <> nil then Result := IncludeTrailingPathDelimiter(App.Paths.Config) + 'Patterns'
+  else Result := '';
+end;
+
+procedure TfrmMain.PatSay(const AText: string);
+begin
+  lblPatInfo.Caption := AText;
+end;
+
+{ the project's patterns, the selected one's settings and its instrument lists }
+procedure TfrmMain.PatRefreshUI;
+var
+  i, n: Integer;
+  p: TPattern;
+  sig: string;
+  bpb: Double;
+begin
+  if (FProject = nil) or (cboPatSel = nil) then Exit;
+  if FProject.Patterns.ById(FPatId) = nil then
+    if FProject.Patterns.Count > 0 then FPatId := FProject.Patterns[0].Id else FPatId := 0;
+  p := PatCurrent;
+  sig := IntToStr(FPatId) + '#';
+  for i := 0 to FProject.Patterns.Count - 1 do
+    with FProject.Patterns[i] do
+      sig := sig + Format('%d|%s|%d|%d|%d;', [Id, Name, StepCount, StepsPerBeat, LaneCount]);
+  if p <> nil then
+    for i := 0 to p.LaneCount - 1 do
+      sig := sig + IntToStr(p.Lanes[i].Note) + ',';
+  if FDrum <> nil then
+    for n := 0 to DRUM_PAD_COUNT - 1 do
+      if FDrum.HasSample(n) then sig := sig + 'p' + IntToStr(n);
+  if sig = FPatSig then
+  begin
+    pbPattern.Invalidate;
+    Exit;
+  end;
+  FPatSig := sig;
+  FPatBusy := True;
+  try
+    cboPatSel.Items.Clear;
+    for i := 0 to FProject.Patterns.Count - 1 do cboPatSel.Items.Add(FProject.Patterns[i].Name);
+    cboPatSel.ItemIndex := FProject.Patterns.IndexOfId(FPatId);
+    edtPatName.Enabled := p <> nil;
+    PatSyncPlayButton;
+    ibPatPlace.SetButtonEnabled(0, p <> nil);
+    for i := 1 to 4 do ibPatFile.SetButtonEnabled(i, p <> nil);
+    for i := 0 to 1 do ibPatLen.SetButtonEnabled(i, p <> nil);
+    for i := 0 to 1 do ibPatRow.SetButtonEnabled(i, p <> nil);
+    for i := 0 to 5 do ibPatTools.SetButtonEnabled(i, p <> nil);
+    if p = nil then
+    begin
+      if not edtPatName.Focused then edtPatName.Text := '';
+      lblPatLenVal.Caption := '-';
+      lblPatBars.Caption := '';
+      cboPatAdd.Items.Clear;
+      SetLength(FPatAddNotes, 0);
+      PatSay('No pattern yet - press New to start one');
+    end
+    else
+    begin
+      if not edtPatName.Focused then edtPatName.Text := p.Name;
+      lblPatLenVal.Caption := IntToStr(p.StepCount);
+      bpb := FProject.TimeSigNum * 4 / Max(1, FProject.TimeSigDen);
+      lblPatBars.Caption := Format('rows / %.2f bars', [p.DurationBeats / Max(0.25, bpb)]);
+      case p.StepsPerBeat of
+        2: tsPatRes.TabIndex := 0;
+        8: tsPatRes.TabIndex := 2;
+      else
+        tsPatRes.TabIndex := 1;
+      end;
+      { the instruments that can still be added: every loaded pad not already a lane }
+      cboPatAdd.Items.Clear;
+      SetLength(FPatAddNotes, 0);
+      if FDrum <> nil then
+        for n := 0 to DRUM_PAD_COUNT - 1 do
+          if FDrum.HasSample(n) and (p.LaneForNote(n) < 0) then
+          begin
+            cboPatAdd.Items.Add(Format('%s  %s', [DrumNoteName(n), PatPadName(n)]));
+            FPatAddNotes := FPatAddNotes + [n];
+          end;
+      if cboPatAdd.Items.Count > 0 then cboPatAdd.ItemIndex := 0;
+      PatSay(Format('%s / %d rows / %d instrument(s) / %d hit(s)',
+        [p.Name, p.StepCount, p.LaneCount, p.TotalHits]));
+    end;
+  finally
+    FPatBusy := False;
+  end;
+  pbPattern.Invalidate;
+end;
+
+{ every edit lands here: the Timeline's copies, the audition loop and the screen follow }
+procedure TfrmMain.PatAfterChange;
+begin
+  if FTlPlayer <> nil then FTlPlayer.InvalidateAllMidi;
+  PatPublishSequence;
+  FPatSig := '';
+  PatRefreshUI;
+  pbTimeline.Invalidate;
+end;
+
+procedure TfrmMain.PatPerform(const ADesc: string; const AEdit: TPatternEditProc);
+begin
+  if FProject = nil then Exit;
+  try
+    FCmds.Perform(TPatternEditCommand.Create(FProject, ADesc, AEdit));
+  except
+    on E: Exception do
+      PatSay(ADesc + ' failed: ' + E.Message);
+  end;
+  PatAfterChange;
+end;
+
+{ the pattern's hits per step, for the drum machine's sequencer }
+procedure TfrmMain.PatPublishSequence;
+var
+  p: TPattern;
+  steps: TArray<TArray<TDrumHit>>;
+  s, l, k: Integer;
+begin
+  p := PatCurrent;
+  if (FDrum = nil) or (p = nil) or (FProject = nil) then Exit;
+  SetLength(steps, p.StepCount);
+  for s := 0 to p.StepCount - 1 do
+  begin
+    SetLength(steps[s], 0);
+    for l := 0 to p.LaneCount - 1 do
+      if (not p.Lanes[l].Muted) and (p.Lanes[l].Steps[s] > 0) then
+      begin
+        k := Length(steps[s]);
+        SetLength(steps[s], k + 1);
+        steps[s][k].Pad := p.Lanes[l].Note;
+        steps[s][k].Vel := p.Lanes[l].Steps[s];
+      end;
+  end;
+  FDrum.SetSequence(p.StepsPerBeat, FProject.TempoBPM, steps);
+end;
+
+{ a pattern opened on a machine whose pads are empty gets its instruments back from the
+  sample paths it carries }
+procedure TfrmMain.PatEnsureInstruments(APattern: TPattern);
+var
+  i, loaded: Integer;
+  lane: TPatternLane;
+  err: string;
+begin
+  if (FDrum = nil) or (APattern = nil) then Exit;
+  loaded := 0;
+  for i := 0 to APattern.LaneCount - 1 do
+  begin
+    lane := APattern.Lanes[i];
+    if FDrum.HasSample(lane.Note) or (lane.SamplePath = '') or not FileExists(lane.SamplePath) then Continue;
+    if FDrum.LoadPad(lane.Note, lane.SamplePath, err) then
+    begin
+      if (FDrum.Pads[lane.Note].Name = '') or SameText(FDrum.Pads[lane.Note].Name, ChangeFileExt(ExtractFileName(lane.SamplePath), '')) then
+        FDrum.Pads[lane.Note].Name := lane.Name;
+      DrumProjectSync(lane.Note);
+      Inc(loaded);
+    end;
+  end;
+  if loaded > 0 then
+  begin
+    DrumSaveKit;
+    DrumPanelsSync;
+    pbDrumPads.Invalidate;
+    pbDrumMap.Invalidate;
+    PatSay(Format('%d instrument(s) loaded back into the drum machine', [loaded]));
+  end;
+end;
+
+{ makes the lanes carry the sample each pad holds now (so the instruments travel with the pattern) }
+procedure TfrmMain.PatSnapshotInstruments(APattern: TPattern);
+var
+  i: Integer;
+  lane: TPatternLane;
+begin
+  if (FDrum = nil) or (APattern = nil) then Exit;
+  for i := 0 to APattern.LaneCount - 1 do
+  begin
+    lane := APattern.Lanes[i];
+    if FDrum.HasSample(lane.Note) and (lane.SamplePath <> FDrum.Pads[lane.Note].Sample.Path) then
+    begin
+      lane.SamplePath := FDrum.Pads[lane.Note].Sample.Path;
+      lane.Name := PatPadName(lane.Note);
+      FProject.Touch;
+    end;
+  end;
+end;
+
+procedure TfrmMain.PatStartPlay;
+begin
+  if (FDrum = nil) or (PatCurrent = nil) then Exit;
+  if FTlPlaying then
+  begin
+    PatSay('Stop the Timeline first - the pattern plays through the drum machine on its own');
+    Exit;
+  end;
+  DrumAudioAttach;
+  if not FDrumAudioOn then
+  begin
+    PatSay('The audio device could not be opened');
+    Exit;
+  end;
+  PatEnsureInstruments(PatCurrent);
+  PatPublishSequence;
+  FDrum.StartSequence;
+  FPatPlaying := True;
+  PatSyncPlayButton;
+end;
+
+procedure TfrmMain.PatStopPlay;
+begin
+  if not FPatPlaying then Exit;
+  FPatPlaying := False;
+  if FDrum <> nil then FDrum.StopSequence;
+  PatSyncPlayButton;
+  if pbPattern <> nil then pbPattern.Invalidate;
+end;
+
+{ ---- grid geometry: the instrument column, then steps; a little extra space after each beat ---- }
+
+function TfrmMain.PatStepX(AStep: Integer): Integer;
+var
+  p: TPattern;
+  spb, first: Integer;
+begin
+  p := PatCurrent;
+  if p = nil then Exit(PAT_HDR_W);
+  spb := Max(1, p.StepsPerBeat);
+  first := sbPatH.Position;
+  Result := PAT_HDR_W + (AStep - first) * PAT_PITCH + (AStep div spb - first div spb) * PAT_BEAT_GAP;
+end;
+
+function TfrmMain.PatStepAt(AX: Integer): Integer;
+var
+  p: TPattern;
+  s: Integer;
+begin
+  Result := -1;
+  p := PatCurrent;
+  if (p = nil) or (AX < PAT_HDR_W) then Exit;
+  for s := sbPatH.Position to p.StepCount - 1 do
+  begin
+    if PatStepX(s) > pbPattern.Width then Break;
+    if (AX >= PatStepX(s)) and ((s = p.StepCount - 1) or (AX < PatStepX(s + 1))) then Exit(s);
+  end;
+end;
+
+function TfrmMain.PatLaneAt(AY: Integer): Integer;
+var
+  p: TPattern;
+  r: Integer;
+begin
+  Result := -1;
+  p := PatCurrent;
+  if (p = nil) or (AY < PAT_RULER_H) then Exit;
+  r := sbPatV.Position + (AY - PAT_RULER_H) div PAT_ROW;
+  if r < p.LaneCount then Result := r;
+end;
+
+procedure TfrmMain.PatEditCell(ALane, AStep, AValue: Integer);
+var
+  p: TPattern;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  if p.Velocity(ALane, AStep) = AValue then Exit;
+  p.SetVelocity(ALane, AStep, AValue);
+  if (AValue > 0) and (FDrum <> nil) then FDrum.Hit(p.Lanes[ALane].Note, AValue);   { hear what was written }
+  PatPublishSequence;
+  pbPattern.Invalidate;
+end;
+
+procedure TfrmMain.sbPatChange(Sender: TObject);
+begin
+  if FPatBusy then Exit;
+  pbPattern.Invalidate;
+end;
+
+procedure TfrmMain.pbPatternPaint(Sender: TObject);
+var
+  cv: TGLCanvas;
+  th: TUDAWTheme;
+  p: TPattern;
+  w, h, lane, s, x, y, visSteps, visLanes, v, playStep, spb, stepsPerBar, firstL, firstS: Integer;
+  laneCol, face: TColor;
+  hasSample, anyHit: Boolean;
+  txt: string;
+  bpb: Double;
+begin
+  cv := pbPattern.GL;
+  th := CurrentTheme;
+  w := pbPattern.Width;
+  h := pbPattern.Height;
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := th.Background;
+  cv.FillRect(Rect(0, 0, w, h));
+  p := PatCurrent;
+  cv.Brush.Style := bsClear;
+  cv.Font.Size := 9;
+  cv.Font.Style := [];
+  if p = nil then
+  begin
+    cv.Font.Color := th.SecondaryText;
+    cv.TextOut(20, 24, 'No pattern - press New to start one.');
+    Exit;
+  end;
+  spb := Max(1, p.StepsPerBeat);
+  bpb := FProject.TimeSigNum * 4 / Max(1, FProject.TimeSigDen);
+  stepsPerBar := Max(1, Round(bpb * spb));
+
+  { how much fits, and so what the scroll bars cover }
+  visLanes := Max(1, (h - PAT_RULER_H) div PAT_ROW);
+  visSteps := 0;
+  firstS := sbPatH.Position;
+  for s := firstS to p.StepCount - 1 do
+  begin
+    if PatStepX(s) + PAT_CELL_W > w then Break;
+    Inc(visSteps);
+  end;
+  visSteps := Max(1, visSteps);
+  FPatBusy := True;
+  try
+    sbPatH.Min := 0;
+    sbPatH.Max := Max(1, p.StepCount);
+    sbPatH.PageSize := Min(visSteps, Max(1, p.StepCount));
+    sbPatV.Min := 0;
+    sbPatV.Max := Max(1, p.LaneCount);
+    sbPatV.PageSize := Min(visLanes, Max(1, p.LaneCount));
+  finally
+    FPatBusy := False;
+  end;
+  firstS := sbPatH.Position;
+  firstL := sbPatV.Position;
+
+  if FPatPlaying and (FDrum <> nil) then playStep := FDrum.SequenceStep else playStep := -1;
+
+  { ruler: bar numbers, and a pill per step that is blue where any instrument hits }
+  for s := firstS to p.StepCount - 1 do
+  begin
+    x := PatStepX(s);
+    if x + PAT_CELL_W > w then Break;
+    if s mod stepsPerBar = 0 then
+    begin
+      cv.Font.Color := th.Text;
+      cv.TextOut(x, 3, IntToStr(s div stepsPerBar + 1));
+    end
+    else if s mod spb = 0 then
+    begin
+      cv.Font.Color := th.SecondaryText;
+      cv.TextOut(x + 1, 3, '.');
+    end;
+    anyHit := False;
+    for lane := 0 to p.LaneCount - 1 do
+      if p.Lanes[lane].Steps[s] > 0 then anyHit := True;
+    if s = playStep then face := th.Accent
+    else if anyHit then face := TlMix(th.Background, RGB(70, 120, 220), 0.9)
+    else face := TlMix(th.Background, th.PanelBackground, 0.6);
+    cv.Brush.Style := bsSolid;
+    cv.Brush.Color := face;
+    cv.RoundRect(x, 20, x + PAT_CELL_W, 28, 6, 6);
+    cv.Brush.Style := bsClear;
+  end;
+
+  { instruments (rows) }
+  for lane := firstL to p.LaneCount - 1 do
+  begin
+    y := PAT_RULER_H + (lane - firstL) * PAT_ROW;
+    if y + PAT_CELL_H > h then Break;
+    laneCol := PatLaneColor(lane);
+    hasSample := (FDrum <> nil) and FDrum.HasSample(p.Lanes[lane].Note);
+    { header }
+    cv.Brush.Style := bsSolid;
+    if lane = FPatSel then cv.Brush.Color := TlMix(th.PanelBackground, th.Accent, 0.3)
+    else cv.Brush.Color := TlMix(th.Background, th.PanelBackground, 0.7);
+    cv.RoundRect(2, y, PAT_HDR_W - 8, y + PAT_CELL_H, 8, 8);
+    { the dot mutes the instrument }
+    if p.Lanes[lane].Muted then cv.Brush.Color := TlMix(th.Background, laneCol, 0.25)
+    else cv.Brush.Color := laneCol;
+    cv.RoundRect(10, y + PAT_CELL_H div 2 - 5, 20, y + PAT_CELL_H div 2 + 5, 10, 10);
+    cv.Brush.Style := bsClear;
+    if hasSample and not p.Lanes[lane].Muted then cv.Font.Color := th.Text else cv.Font.Color := th.SecondaryText;
+    txt := p.Lanes[lane].Name;
+    if txt = '' then txt := DrumNoteName(p.Lanes[lane].Note);
+    while (cv.TextWidth(txt) > PAT_HDR_W - 8 - 30 - 44) and (Length(txt) > 2) do Delete(txt, Length(txt), 1);
+    cv.TextOut(28, y + (PAT_CELL_H - cv.TextHeight('Ag')) div 2, txt);
+    { the note chip }
+    cv.Brush.Style := bsSolid;
+    cv.Brush.Color := TlMix(th.Background, laneCol, 0.25);
+    cv.RoundRect(PAT_HDR_W - 8 - 42, y + 4, PAT_HDR_W - 12, y + PAT_CELL_H - 4, 8, 8);
+    cv.Brush.Style := bsClear;
+    cv.Font.Color := laneCol;
+    cv.Font.Size := 8;
+    txt := DrumNoteName(p.Lanes[lane].Note);
+    cv.TextOut(PAT_HDR_W - 8 - 42 + (42 - 4 - cv.TextWidth(txt)) div 2, y + (PAT_CELL_H - cv.TextHeight('Ag')) div 2, txt);
+    cv.Font.Size := 9;
+    { steps }
+    for s := firstS to p.StepCount - 1 do
+    begin
+      x := PatStepX(s);
+      if x + PAT_CELL_W > w then Break;
+      v := p.Lanes[lane].Steps[s];
+      cv.Brush.Style := bsSolid;
+      if v > 0 then face := TlMix(th.Background, laneCol, 0.45 + 0.55 * v / 127)
+      else if (s div spb) mod 2 = 1 then face := TlMix(th.Background, th.PanelBackground, 0.9)
+      else face := TlMix(th.Background, th.PanelBackground, 0.65);
+      if p.Lanes[lane].Muted then face := TlMix(face, th.Background, 0.6);
+      cv.Brush.Color := face;
+      cv.RoundRect(x, y, x + PAT_CELL_W, y + PAT_CELL_H, 6, 6);
+      if s = playStep then
+      begin
+        cv.Pen.Style := psSolid;
+        cv.Pen.Color := th.Text;
+        cv.Brush.Style := bsClear;
+        cv.RoundRect(x, y, x + PAT_CELL_W, y + PAT_CELL_H, 6, 6);
+        cv.Pen.Style := psClear;
+      end;
+    end;
+  end;
+  cv.Brush.Style := bsSolid;
+end;
+
+procedure TfrmMain.pbPatternMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  p: TPattern;
+  lane, step, pid: Integer;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  if FPatDragging then pbPatternMouseUp(Sender, Button, Shift, X, Y);   { an earlier release was lost }
+  DrumAudioAttach;
+  pid := p.Id;
+  lane := PatLaneAt(Y);
+  if X < PAT_HDR_W then
+  begin
+    if lane < 0 then Exit;
+    FPatSel := lane;
+    if (X < 28) and (Button = mbLeft) then
+      PatPerform('Mute instrument',
+        procedure(ALib: TPatternLibrary)
+        begin
+          ALib.ById(pid).Lanes[lane].Muted := not ALib.ById(pid).Lanes[lane].Muted;
+        end)
+    else
+    begin
+      if (FDrum <> nil) and (Button = mbLeft) then FDrum.Hit(p.Lanes[lane].Note, 100);
+      pbPattern.Invalidate;
+    end;
+    Exit;
+  end;
+  step := PatStepAt(X);
+  if (lane < 0) or (step < 0) or not (Button in [mbLeft, mbRight]) then Exit;
+  FPatSel := lane;
+  FPatBefore := PatternLibraryToString(FProject.Patterns);
+  if (Button = mbRight) or (p.Velocity(lane, step) > 0) then FPatPaintVal := 0
+  else FPatPaintVal := PATTERN_DEFAULT_VELOCITY;
+  FPatDragging := True;
+  FPatLastCell := Point(step, lane);
+  PatEditCell(lane, step, FPatPaintVal);
+end;
+
+procedure TfrmMain.pbPatternMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+var
+  lane, step: Integer;
+begin
+  if not FPatDragging then Exit;
+  lane := PatLaneAt(Y);
+  step := PatStepAt(X);
+  if (lane < 0) or (step < 0) then Exit;
+  if (FPatLastCell.X = step) and (FPatLastCell.Y = lane) then Exit;
+  FPatLastCell := Point(step, lane);
+  PatEditCell(lane, step, FPatPaintVal);
+end;
+
+procedure TfrmMain.pbPatternMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  if not FPatDragging then Exit;
+  FPatDragging := False;
+  { the drag edited the pattern live; record it as one undo step }
+  try
+    FCmds.Perform(TPatternEditCommand.CreateApplied(FProject, 'Edit pattern steps', FPatBefore));
+  except
+    on E: Exception do
+      PatSay('Edit failed: ' + E.Message);
+  end;
+  PatAfterChange;
+end;
+
+procedure TfrmMain.pbPatternMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer;
+  MousePos: TPoint; var Handled: Boolean);
+var
+  p: TPattern;
+  pt: TPoint;
+  lane, step, nv, pid: Integer;
+begin
+  Handled := True;
+  p := PatCurrent;
+  if p = nil then Exit;
+  pt := pbPattern.ScreenToClient(Mouse.CursorPos);
+  lane := PatLaneAt(pt.Y);
+  step := PatStepAt(pt.X);
+  if ssShift in Shift then
+    sbPatH.Position := EnsureRange(sbPatH.Position - Sign(WheelDelta) * 4, 0, Max(0, p.StepCount - sbPatH.PageSize))
+  else if (lane >= 0) and (step >= 0) and (p.Velocity(lane, step) > 0) then
+  begin
+    { the wheel over a hit sets how hard it is struck }
+    nv := EnsureRange(p.Velocity(lane, step) + Sign(WheelDelta) * 8, 1, 127);
+    pid := p.Id;
+    PatPerform('Step velocity',
+      procedure(ALib: TPatternLibrary)
+      begin
+        ALib.ById(pid).SetVelocity(lane, step, nv);
+      end);
+    if FDrum <> nil then FDrum.Hit(p.Lanes[lane].Note, nv);
+  end
+  else
+    sbPatV.Position := EnsureRange(sbPatV.Position - Sign(WheelDelta), 0, Max(0, p.LaneCount - sbPatV.PageSize));
+end;
+
+{ ---- the controls ---- }
+
+procedure TfrmMain.cboPatSelChange(Sender: TObject);
+var
+  idx: Integer;
+begin
+  if FPatBusy or (FProject = nil) then Exit;
+  idx := cboPatSel.ItemIndex;
+  if (idx < 0) or (idx >= FProject.Patterns.Count) then Exit;
+  FPatId := FProject.Patterns[idx].Id;
+  FPatSel := -1;
+  sbPatH.Position := 0;
+  sbPatV.Position := 0;
+  PatEnsureInstruments(PatCurrent);
+  PatPublishSequence;
+  FPatSig := '';
+  PatRefreshUI;
+end;
+
+procedure TfrmMain.btnPatNewClick(Sender: TObject);
+var
+  newId: Integer;
+begin
+  if FProject = nil then Exit;
+  newId := 0;
+  PatPerform('New pattern',
+    procedure(ALib: TPatternLibrary)
+    var
+      p: TPattern;
+      n, added: Integer;
+    begin
+      p := ALib.NewPattern('Pattern');
+      newId := p.Id;
+      added := 0;
+      { start with a row for every pad that holds a sample }
+      if FDrum <> nil then
+        for n := 0 to DRUM_PAD_COUNT - 1 do
+          if FDrum.HasSample(n) and (added < 16) then
+          begin
+            p.AddLane(n, PatPadName(n), FDrum.Pads[n].Sample.Path);
+            Inc(added);
+          end;
+    end);
+  FPatId := newId;
+  FPatSel := -1;
+  sbPatH.Position := 0;
+  sbPatV.Position := 0;
+  PatAfterChange;
+end;
+
+procedure TfrmMain.btnPatCloneClick(Sender: TObject);
+var
+  p: TPattern;
+  pid, newId: Integer;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  PatSnapshotInstruments(p);
+  pid := p.Id;
+  newId := 0;
+  PatPerform('Clone pattern',
+    procedure(ALib: TPatternLibrary)
+    var
+      c: TPattern;
+    begin
+      c := ALib.ById(pid).Clone;
+      c.Name := ALib.UniqueName(c.Name);
+      c.MidiClipId := 0;          { a clone is its own pattern: it gets its own Timeline clip when placed }
+      ALib.Add(c);
+      newId := c.Id;
+    end);
+  FPatId := newId;
+  PatAfterChange;
+end;
+
+procedure TfrmMain.btnPatDeleteClick(Sender: TObject);
+var
+  p: TPattern;
+  pid: Integer;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  if MessageDlg(Format('Delete the pattern "%s"?' + sLineBreak + sLineBreak +
+    'Copies already placed on the Timeline stay there as ordinary MIDI clips.', [p.Name]),
+    mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
+  pid := p.Id;
+  PatPerform('Delete pattern',
+    procedure(ALib: TPatternLibrary)
+    begin
+      ALib.Remove(ALib.IndexOfId(pid));
+    end);
+  FPatId := 0;
+  FPatSel := -1;
+  PatAfterChange;
+end;
+
+procedure TfrmMain.PatSavePreset(const AFileName: string);
+var
+  p: TPattern;
+begin
+  p := PatCurrent;
+  if (p = nil) or (AFileName = '') then Exit;
+  PatSnapshotInstruments(p);
+  try
+    ForceDirectories(ExtractFilePath(AFileName));
+    TFile.WriteAllText(AFileName, PatternToPreset(p), TEncoding.UTF8);
+    PatSay('Saved ' + ExtractFileName(AFileName));
+  except
+    on E: Exception do
+      MessageDlg('The pattern could not be saved:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+  end;
+end;
+
+procedure TfrmMain.btnPatSaveClick(Sender: TObject);
+var
+  p: TPattern;
+  nm: string;
+  ch: Char;
+begin
+  p := PatCurrent;
+  if (p = nil) or (PatPresetDir = '') then Exit;
+  nm := p.Name;
+  for ch in TPath.GetInvalidFileNameChars do nm := StringReplace(nm, ch, '_', [rfReplaceAll]);
+  PatSavePreset(IncludeTrailingPathDelimiter(PatPresetDir) + nm + '.udawpattern');
+end;
+
+procedure TfrmMain.btnPatSaveAsClick(Sender: TObject);
+var
+  p: TPattern;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  dlgSavePattern.InitialDir := PatPresetDir;
+  dlgSavePattern.FileName := p.Name + '.udawpattern';
+  if dlgSavePattern.Execute then PatSavePreset(dlgSavePattern.FileName);
+end;
+
+procedure TfrmMain.btnPatLoadClick(Sender: TObject);
+var
+  q: TPattern;
+  newId: Integer;
+begin
+  if FProject = nil then Exit;
+  dlgOpenPattern.InitialDir := PatPresetDir;
+  dlgOpenPattern.FileName := '';
+  if not dlgOpenPattern.Execute then Exit;
+  try
+    q := PatternFromPreset(TFile.ReadAllText(dlgOpenPattern.FileName, TEncoding.UTF8));
+  except
+    on E: Exception do
+    begin
+      MessageDlg('That is not a pattern file:' + sLineBreak + E.Message, mtWarning, [mbOK], 0);
+      Exit;
+    end;
+  end;
+  newId := 0;
+  PatPerform('Load pattern',
+    procedure(ALib: TPatternLibrary)
+    begin
+      q.Name := ALib.UniqueName(q.Name);
+      ALib.Add(q);
+      newId := q.Id;
+    end);
+  FPatId := newId;
+  FPatSel := -1;
+  PatEnsureInstruments(PatCurrent);
+  PatAfterChange;
+end;
+
+procedure TfrmMain.btnPatPlayClick(Sender: TObject);
+begin
+  if FPatPlaying then PatStopPlay else PatStartPlay;
+end;
+
+procedure TfrmMain.btnPatPlaceClick(Sender: TObject);
+var
+  p: TPattern;
+  trk: TTimelineTrack;
+  trackId: Integer;
+  cmd: TPlacePatternCommand;
+begin
+  p := PatCurrent;
+  if (p = nil) or (FProject = nil) then Exit;
+  if p.TotalHits = 0 then
+  begin
+    PatSay('The pattern has no hits yet - click some steps first');
+    Exit;
+  end;
+  PatSnapshotInstruments(p);
+  { onto the selected MIDI track, else a new one }
+  trk := FProject.Timeline.TrackById(FTlSelectedTrackId);
+  if (trk <> nil) and (trk.Kind = tkMidi) then trackId := trk.Id else trackId := 0;
+  cmd := TPlacePatternCommand.Create(FProject, p.Id, trackId, FProject.Timeline.PlayheadSeconds);
+  try
+    FCmds.Perform(cmd);
+  except
+    on E: Exception do
+    begin
+      PatSay('Place failed: ' + E.Message);
+      Exit;
+    end;
+  end;
+  if FTlPlayer <> nil then FTlPlayer.InvalidateAllMidi;
+  RefreshTimelineTab;
+  PatSay(Format('"%s" placed on the Timeline at %.2f s', [p.Name, FProject.Timeline.PlayheadSeconds]));
+end;
+
+procedure TfrmMain.edtPatNameChange(Sender: TObject);
+var
+  p: TPattern;
+  idx: Integer;
+begin
+  if FPatBusy then Exit;
+  p := PatCurrent;
+  if (p = nil) or (Trim(edtPatName.Text) = '') or (edtPatName.Text = p.Name) then Exit;
+  { a rename is a label, not a musical edit: kept out of the undo history }
+  p.Name := edtPatName.Text;
+  FProject.Touch;
+  idx := FProject.Patterns.IndexOfId(p.Id);
+  FPatBusy := True;
+  try
+    if (idx >= 0) and (idx < cboPatSel.Items.Count) then cboPatSel.Items[idx] := p.Name;
+  finally
+    FPatBusy := False;
+  end;
+  FPatSig := '';
+end;
+
+procedure TfrmMain.PatLenStep(ADir: Integer);
+var
+  p: TPattern;
+  pid, n: Integer;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  pid := p.Id;
+  { one beat of steps at a time }
+  n := EnsureRange(p.StepCount + ADir * Max(1, p.StepsPerBeat), 1, PATTERN_MAX_STEPS);
+  PatPerform('Pattern length',
+    procedure(ALib: TPatternLibrary)
+    begin
+      ALib.ById(pid).StepCount := n;
+    end);
+end;
+
+procedure TfrmMain.tsPatResChange(Sender: TObject);
+const
+  RES_SPB: array[0..2] of Integer = (2, 4, 8);
+var
+  p: TPattern;
+  pid, spb: Integer;
+begin
+  if FPatBusy then Exit;
+  p := PatCurrent;
+  if (p = nil) or (tsPatRes.TabIndex < 0) or (tsPatRes.TabIndex > 2) then Exit;
+  spb := RES_SPB[tsPatRes.TabIndex];
+  if spb = p.StepsPerBeat then Exit;
+  pid := p.Id;
+  PatPerform('Pattern resolution',
+    procedure(ALib: TPatternLibrary)
+    begin
+      ALib.ById(pid).ChangeResolution(spb);
+    end);
+end;
+
+procedure TfrmMain.btnPatAddLaneClick(Sender: TObject);
+var
+  p: TPattern;
+  note, pid: Integer;
+  path: string;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  { the chosen loaded pad, else the pad selected on the Instrument page }
+  if (cboPatAdd.ItemIndex >= 0) and (cboPatAdd.ItemIndex < Length(FPatAddNotes)) then
+    note := FPatAddNotes[cboPatAdd.ItemIndex]
+  else
+    note := FDrumPad;
+  if p.LaneForNote(note) >= 0 then
+  begin
+    FPatSel := p.LaneForNote(note);
+    pbPattern.Invalidate;
+    Exit;
+  end;
+  if (FDrum <> nil) and FDrum.HasSample(note) then path := FDrum.Pads[note].Sample.Path else path := '';
+  pid := p.Id;
+  PatPerform('Add instrument',
+    procedure(ALib: TPatternLibrary)
+    begin
+      ALib.ById(pid).AddLane(note, PatPadName(note), path);
+    end);
+  FPatSel := PatCurrent.LaneForNote(note);
+  pbPattern.Invalidate;
+end;
+
+procedure TfrmMain.btnPatDelLaneClick(Sender: TObject);
+var
+  p: TPattern;
+  pid, ln: Integer;
+begin
+  p := PatCurrent;
+  if (p = nil) or (FPatSel < 0) or (FPatSel >= p.LaneCount) then
+  begin
+    PatSay('Click an instrument name first');
+    Exit;
+  end;
+  pid := p.Id;
+  ln := FPatSel;
+  PatPerform('Remove instrument',
+    procedure(ALib: TPatternLibrary)
+    begin
+      ALib.ById(pid).RemoveLane(ln);
+    end);
+  FPatSel := -1;
+  pbPattern.Invalidate;
+end;
+
+{ the icon bars of the Pattern page route to the same actions the captioned buttons had }
+procedure TfrmMain.ibPatFileClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  case AIndex of
+    0: btnPatNewClick(Sender);
+    1: btnPatCloneClick(Sender);
+    2: btnPatDeleteClick(Sender);
+    3: btnPatSaveClick(Sender);
+    4: btnPatSaveAsClick(Sender);
+    5: btnPatLoadClick(Sender);
+  end;
+end;
+
+procedure TfrmMain.ibPatPlayClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  btnPatPlayClick(Sender);
+end;
+
+procedure TfrmMain.ibPatPlaceClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  btnPatPlaceClick(Sender);
+end;
+
+procedure TfrmMain.ibPatLenClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  PatLenStep(AIndex * 2 - 1);   { 0 -> -1, 1 -> +1 }
+end;
+
+procedure TfrmMain.ibPatRowClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if AIndex = 0 then btnPatAddLaneClick(Sender) else btnPatDelLaneClick(Sender);
+end;
+
+procedure TfrmMain.ibPatToolsClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  PatTool(AIndex);   { bar order matches the tool numbers: fill, euclid, left, right, random, clear }
+end;
+
+{ Play shows a stop square while the pattern loops }
+procedure TfrmMain.PatSyncPlayButton;
+begin
+  if ibPatPlay = nil then Exit;
+  if FPatPlaying then
+  begin
+    ibPatPlay.Buttons := 'stop';
+    ibPatPlay.Hints := 'Stop the pattern';
+  end
+  else
+  begin
+    ibPatPlay.Buttons := 'play';
+    ibPatPlay.Hints := 'Play the pattern in a loop through the drum machine';
+  end;
+  ibPatPlay.SetButtonEnabled(0, PatCurrent <> nil);
+end;
+{ Fill / Euclid / Rotate / Random / Clear act on the selected instrument, or on every
+  instrument when none is selected }
+procedure TfrmMain.PatTool(ATool: Integer);
+var
+  p: TPattern;
+  pid, ln, tool, n: Integer;
+  txt: string;
+  seed: Cardinal;
+begin
+  p := PatCurrent;
+  if p = nil then Exit;
+  tool := ATool;
+  pid := p.Id;
+  ln := FPatSel;
+  if ln >= p.LaneCount then ln := -1;
+  case tool of
+    0:   { Fill }
+      begin
+        txt := IntToStr(Max(1, p.StepsPerBeat));
+        if not InputQuery('Fill', 'Hit every n-th step:', txt) then Exit;
+        n := EnsureRange(StrToIntDef(Trim(txt), p.StepsPerBeat), 1, p.StepCount);
+        PatPerform('Fill steps',
+          procedure(ALib: TPatternLibrary)
+          begin
+            ALib.ById(pid).Fill(ln, n, 0, PATTERN_DEFAULT_VELOCITY);
+          end);
+      end;
+    1:   { Euclid }
+      begin
+        if ln < 0 then
+        begin
+          PatSay('Click an instrument name first - Euclid writes one instrument');
+          Exit;
+        end;
+        txt := IntToStr(Max(1, p.StepCount div 4));
+        if not InputQuery('Euclidean rhythm', 'Hits spread evenly over the pattern:', txt) then Exit;
+        n := EnsureRange(StrToIntDef(Trim(txt), 4), 0, p.StepCount);
+        PatPerform('Euclidean rhythm',
+          procedure(ALib: TPatternLibrary)
+          begin
+            ALib.ById(pid).Euclidean(ln, n, 0, PATTERN_DEFAULT_VELOCITY);
+          end);
+      end;
+    2, 3:  { Rotate left / right }
+      begin
+        n := tool * 2 - 5;   { 2 -> -1, 3 -> +1 }
+        PatPerform('Rotate steps',
+          procedure(ALib: TPatternLibrary)
+          begin
+            ALib.ById(pid).Rotate(ln, n);
+          end);
+      end;
+    4:   { Random }
+      begin
+        seed := Cardinal(Random($7FFFFFFF)) + 1;
+        PatPerform('Random steps',
+          procedure(ALib: TPatternLibrary)
+          begin
+            ALib.ById(pid).Randomize(ln, 0.3, seed);
+          end);
+      end;
+    5:   { Clear }
+      PatPerform('Clear steps',
+        procedure(ALib: TPatternLibrary)
+        begin
+          ALib.ById(pid).ClearSteps(ln);
+        end);
+  end;
+end;
+
+{ ======================= Score mode =======================
+  The MIDI parts of the Timeline as music notation (see UDAW.UI.Score). The parts
+  list on the left picks which tracks are shown; a click on the staves moves the
+  playhead there. }
+
+{ keeps the parts list in step with the Timeline's MIDI tracks }
+const
+  SCORE_PART_TRACKER = -$40000000;   // FScoreTracks entry for the project's tracker module
+
+procedure TfrmMain.RefreshScoreParts;
+var
+  tl: TTimeline;
+  i, j: Integer;
+  trk: TTimelineTrack;
+  sig: string;
+  ids, keep: TArray<Integer>;
+  first, was: Boolean;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  sig := '';
+  SetLength(ids, 0);
+  for i := 0 to tl.TrackCount - 1 do
+  begin
+    trk := tl.GetTrack(i);
+    for j := 0 to trk.ClipCount - 1 do
+      if trk.GetClip(j).IsMidiClip then
+      begin
+        ids := ids + [trk.Id];
+        sig := sig + IntToStr(trk.Id) + ':' + trk.Name + '|';
+        Break;
+      end;
+  end;
+  { no MIDI on the Timeline yet: offer the clips of the MIDI library (negative ids) }
+  if Length(ids) = 0 then
+    for i := 0 to FProject.Midi.ClipCount - 1 do
+    begin
+      ids := ids + [-(i + 1)];
+      sig := sig + 'L' + IntToStr(i) + ':' + FProject.Midi.ClipName(i) + '|';
+    end;
+  { a loaded tracker module is a part of its own, filtered by channel / instrument }
+  if (FProject.Tracker.InstrumentCount > 0) and (FProject.Tracker.OrderLength > 0) then
+  begin
+    ids := ids + [SCORE_PART_TRACKER];
+    sig := sig + 'T:' + FProject.Tracker.Name + '|';
+  end;
+  if sig = FScoreSig then Exit;
+  first := FScoreSig = '';
+  SetLength(keep, 0);
+  for i := 0 to High(FScoreTracks) do
+    if (i < lstScoreParts.Count) and lstScoreParts.Selected[i] then keep := keep + [FScoreTracks[i]];
+  FScoreBusy := True;
+  try
+    lstScoreParts.Items.Clear;
+    FScoreTracks := ids;
+    for i := 0 to High(ids) do
+      if ids[i] = SCORE_PART_TRACKER then
+        lstScoreParts.Items.Add('Tracker: ' + IfThen(FProject.Tracker.Name <> '', FProject.Tracker.Name, 'module'))
+      else if ids[i] < 0 then lstScoreParts.Items.Add('Clip: ' + FProject.Midi.ClipName(-ids[i] - 1))
+      else lstScoreParts.Items.Add(tl.TrackById(ids[i]).Name);
+    for i := 0 to High(ids) do
+    begin
+      was := False;
+      for j := 0 to High(keep) do
+        if keep[j] = ids[i] then was := True;
+      lstScoreParts.Selected[i] := first or was or (Length(keep) = 0);
+    end;
+  finally
+    FScoreBusy := False;
+  end;
+  FScoreSig := sig;
+end;
+
+{ While the Timeline plays: repaint the score so the playhead line moves with it (the
+  playhead follows the Timeline's tempo, tempo changes included) and scroll to the system
+  it is on so it never leaves the screen. }
+procedure TfrmMain.ScoreFollowPlayhead;
+var
+  g: TGridContext;
+  q, qPerBeat: Double;
+  bar, sys, sysTop, maxPos, barX, maxX: Integer;
+begin
+  if (FProject = nil) or (pbScore = nil) or (FScoreLay.SystemH <= 0) or (FScoreLay.BarsPerSystem <= 0) then Exit;
+  g := TimelineGrid;
+  if g.IsValid then qPerBeat := 4 / g.TSigDen else qPerBeat := 1;
+  q := SecondsToBeats(g, FProject.Timeline.PlayheadSeconds) * qPerBeat;
+  bar := Trunc(q / Max(0.001, FScoreLay.BarQ));
+  if (bar >= 0) and (bar < FScoreLay.TotalBars) then
+  begin
+    sys := bar div FScoreLay.BarsPerSystem;
+    sysTop := FScoreLay.TopPad + sys * FScoreLay.SystemH;
+    if (sysTop < sbScore.Position) or (sysTop + FScoreLay.SystemH > sbScore.Position + pbScore.Height) then
+    begin
+      maxPos := Max(0, FScoreLay.ContentH - pbScore.Height);
+      sbScore.Position := EnsureRange(sysTop - 8, 0, maxPos);
+    end;
+    { and keep the bar it is in inside the view when the page is wider than the window }
+    barX := FScoreLay.LeftX0 + (bar mod FScoreLay.BarsPerSystem) * FScoreLay.BarW;
+    maxX := Max(0, FScoreLay.ContentW - pbScore.Width);
+    if (maxX > 0) and ((barX < sbScoreH.Position) or (barX + FScoreLay.BarW > sbScoreH.Position + pbScore.Width)) then
+      sbScoreH.Position := EnsureRange(barX - 100, 0, maxX);
+  end;
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.ScoreOptionChange(Sender: TObject);
+begin
+  if FScoreBusy then Exit;
+  FScoreBusy := True;
+  try
+    { Selection / Full score are one choice }
+    if (Sender = btnScoreSel) and btnScoreSel.Down then btnScoreFull.Down := False
+    else if (Sender = btnScoreFull) and btnScoreFull.Down then btnScoreSel.Down := False
+    else if (not btnScoreSel.Down) and (not btnScoreFull.Down) then btnScoreSel.Down := True;
+  finally
+    FScoreBusy := False;
+  end;
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.btnScoreAllClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  for i := 0 to lstScoreParts.Count - 1 do lstScoreParts.Selected[i] := True;
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.btnScoreNoneClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  for i := 0 to lstScoreParts.Count - 1 do lstScoreParts.Selected[i] := False;
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.ibScoreClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if FScoreZoom <= 0 then FScoreZoom := 1.0;
+  if AId = 'zoomin' then FScoreZoom := Min(3.0, FScoreZoom + 0.1)
+  else FScoreZoom := Max(0.5, FScoreZoom - 0.1);
+  lblScoreZoom.Caption := Format('%d%%', [Round(FScoreZoom * 100)]);
+  pbScore.Invalidate;
+end;
+
+{ the one row of icon buttons over the score: load, delete, zoom, play / stop }
+{ Saves the score as it is laid out - the parts and filters now chosen, in staff notation or guitar
+  tablature - to a PDF: black on white, A4 landscape, whole systems per page. }
+procedure TfrmMain.ScoreSavePdf;
+const
+  PAGE_WIDTH = 1100;   // the width the lines of music are laid out at before they are fitted to the page
+var
+  notes: TArray<TScoreNote>;
+  chords: TArray<TScoreChord>;
+  shown, pages: Integer;
+  opt: TScoreOptions;
+  g: TGridContext;
+  qPerBeat: Double;
+  cv: TGLCanvas;
+  rec: TScorePdfRecorder;
+  lay: TScoreLayout;
+  title: string;
+begin
+  if FProject = nil then Exit;
+  RefreshScoreParts;
+  ScoreGather(notes, chords, shown);
+  if Length(notes) = 0 then
+  begin
+    MessageDlg('There are no notes to save - choose the parts to show in the PARTS list first.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  dlgSaveScorePdf.FileName := IfThen(Trim(FProject.Name) <> '', Trim(FProject.Name), 'Score') + ' - score.pdf';
+  if not dlgSaveScorePdf.Execute then Exit;
+  g := TimelineGrid;
+  if g.IsValid then qPerBeat := 4 / g.TSigDen else qPerBeat := 1;
+  opt := Default(TScoreOptions);
+  opt.Clef := TScoreClef(Max(0, tsScoreClef.TabIndex));
+  case cboScoreQuant.ItemIndex of
+    0: opt.QuantQ := 1.0;
+    1: opt.QuantQ := 0.5;
+    3: opt.QuantQ := 0.125;
+  else
+    opt.QuantQ := 0.25;
+  end;
+  opt.Zoom := 1.0;
+  opt.Spread := FProject.ScoreSpread;   // the same line spacing as on screen
+  opt.SigNum := 4;
+  opt.SigDen := 4;
+  opt.BarQ := 4;
+  if g.IsValid then
+  begin
+    opt.SigNum := g.TSigNum;
+    opt.SigDen := g.TSigDen;
+    opt.BarQ := g.TSigNum * qPerBeat;
+  end;
+  opt.ShowChords := btnScoreChords.Down;
+  opt.Tab := btnScoreTab.Down;
+  opt.Print := True;
+  opt.PlayVisible := False;
+  title := IfThen(Trim(FProject.Name) <> '', Trim(FProject.Name), 'Score') + IfThen(opt.Tab, ' - guitar tablature', ' - score');
+  ShowStatusProgress('Saving the score as PDF...', 100);
+  cv := TGLCanvas.Create;
+  rec := TScorePdfRecorder.Create;
+  try
+    UpdateStatusProgress(20, 'Laying out the score...');
+    cv.Recorder := rec;
+    ScoreRender(cv, PAGE_WIDTH, MaxInt div 2, notes, chords, opt, lay);
+    UpdateStatusProgress(70, 'Writing the PDF...');
+    pages := rec.SaveToFile(dlgSaveScorePdf.FileName, title, lay, PAGE_WIDTH);
+    UpdateStatusProgress(100, 'Score saved');
+    Logger.Info('ui', Format('Score saved as PDF (%d page(s)): %s', [pages, dlgSaveScorePdf.FileName]));
+  except
+    on E: Exception do
+      MessageDlg('Saving the score as PDF failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+  end;
+  rec.Free;
+  cv.Free;
+  HideStatusProgress;
+end;
+
+procedure TfrmMain.ibScoreToolsClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if AId = 'open' then ScoreLoadTracker
+  else if AId = 'save' then ScoreSavePdf
+  else if AId = 'trash' then ScoreDeleteSelected
+  else if (AId = 'zoomin') or (AId = 'zoomout') then ibScoreClick(Sender, AIndex, AId)
+  else ibTlTransportClick(Sender, AIndex, AId);
+end;
+
+{ loads a tracker module into the project (replacing the current one, Undo restores it)
+  and shows its notes on the score }
+procedure TfrmMain.ScoreLoadTracker;
+begin
+  if FProject = nil then Exit;
+  if not dlgOpenTrkAny.Execute then Exit;
+  if ImportTrackerFileToTimeline(dlgOpenTrkAny.FileName, False) then
+  begin
+    SetLength(FScoreTrkChanOn, 0);
+    SetLength(FScoreTrkInstrOn, 0);
+    FScoreTrkSig := '';
+    FScoreSig := '';
+  end;
+  pbScore.Invalidate;
+end;
+
+{ the channels or instruments of the tracker module offered as a filter list }
+procedure TfrmMain.RefreshScoreTrkList;
+var
+  m: TTrackerModule;
+  i: Integer;
+  sig: string;
+  ins: TTrackerInstrument;
+begin
+  if FProject = nil then Exit;
+  m := FProject.Tracker;
+  sig := Format('%d|%d|%d|', [tsScoreTrkBy.TabIndex, m.Channels, m.InstrumentCount]);
+  for i := 1 to m.InstrumentCount do
+  begin
+    ins := m.GetInstrument(i);
+    if ins <> nil then sig := sig + ins.Name + ';';
+  end;
+  if sig = FScoreTrkSig then Exit;
+  if Length(FScoreTrkChanOn) <> m.Channels then
+  begin
+    SetLength(FScoreTrkChanOn, m.Channels);
+    for i := 0 to High(FScoreTrkChanOn) do FScoreTrkChanOn[i] := True;
+  end;
+  if Length(FScoreTrkInstrOn) <> m.InstrumentCount + 1 then
+  begin
+    SetLength(FScoreTrkInstrOn, m.InstrumentCount + 1);
+    for i := 0 to High(FScoreTrkInstrOn) do FScoreTrkInstrOn[i] := True;
+  end;
+  FScoreBusy := True;
+  try
+    lstScoreTrk.Items.Clear;
+    if tsScoreTrkBy.TabIndex = 0 then
+    begin
+      for i := 0 to m.Channels - 1 do lstScoreTrk.Items.Add(Format('Channel %.2d', [i + 1]));
+      for i := 0 to m.Channels - 1 do lstScoreTrk.Selected[i] := FScoreTrkChanOn[i];
+    end
+    else
+    begin
+      for i := 1 to m.InstrumentCount do
+      begin
+        ins := m.GetInstrument(i);
+        if (ins <> nil) and (ins.Name <> '') then lstScoreTrk.Items.Add(Format('%.2d  %s', [i, ins.Name]))
+        else lstScoreTrk.Items.Add(Format('%.2d', [i]));
+      end;
+      for i := 1 to m.InstrumentCount do lstScoreTrk.Selected[i - 1] := FScoreTrkInstrOn[i];
+    end;
+  finally
+    FScoreBusy := False;
+  end;
+  FScoreTrkSig := sig;
+end;
+
+procedure TfrmMain.ScoreTrkByChange(Sender: TObject);
+begin
+  FScoreTrkSig := '';
+  RefreshScoreTrkList;
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.ScoreTrkListClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  if FScoreBusy or (FProject = nil) then Exit;
+  if tsScoreTrkBy.TabIndex = 0 then
+  begin
+    for i := 0 to Min(lstScoreTrk.Count, Length(FScoreTrkChanOn)) - 1 do
+      FScoreTrkChanOn[i] := lstScoreTrk.Selected[i];
+  end
+  else
+    for i := 0 to Min(lstScoreTrk.Count, Length(FScoreTrkInstrOn) - 1) - 1 do
+      FScoreTrkInstrOn[i + 1] := lstScoreTrk.Selected[i];
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.btnScoreTrkAllClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  for i := 0 to High(FScoreTrkChanOn) do FScoreTrkChanOn[i] := True;
+  for i := 0 to High(FScoreTrkInstrOn) do FScoreTrkInstrOn[i] := True;
+  FScoreTrkSig := '';
+  RefreshScoreTrkList;
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.btnScoreTrkNoneClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  for i := 0 to High(FScoreTrkChanOn) do FScoreTrkChanOn[i] := False;
+  for i := 1 to High(FScoreTrkInstrOn) do FScoreTrkInstrOn[i] := False;   // [0] = "no instrument" stays on
+  FScoreTrkSig := '';
+  RefreshScoreTrkList;
+  pbScore.Invalidate;
+end;
+
+{ Deletes the selected score parts from the project: a Timeline part loses its MIDI
+  clips (and their library clips once nothing else uses them), a library clip is removed
+  together with the Timeline clips that play it, the tracker part clears the project's
+  tracker module. Every step is a command, so Undo brings them back. }
+procedure TfrmMain.ScoreDeleteSelected;
+var
+  tl: TTimeline;
+  i, j, k, libIdx, nSel: Integer;
+  id: Integer;
+  trk: TTimelineTrack;
+  clip: TTimelineClip;
+  seq: TMidiSequence;
+  clipIds, midiIds, libDel: TArray<Integer>;
+  trackerSel, used: Boolean;
+
+  procedure AddUnique(var A: TArray<Integer>; AValue: Integer);
+  var
+    q: Integer;
+  begin
+    for q := 0 to High(A) do if A[q] = AValue then Exit;
+    A := A + [AValue];
+  end;
+
+  { index in the MIDI library of the clip with this id, -1 when gone }
+  function LibIndexOf(AMidiId: Integer): Integer;
+  var
+    q: Integer;
+    s: TMidiSequence;
+  begin
+    Result := -1;
+    s := FProject.Midi.ClipById(AMidiId);
+    if s = nil then Exit;
+    for q := 0 to FProject.Midi.ClipCount - 1 do
+      if FProject.Midi.Clip(q) = s then Exit(q);
+  end;
+
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  nSel := 0;
+  trackerSel := False;
+  for i := 0 to High(FScoreTracks) do
+    if (i < lstScoreParts.Count) and lstScoreParts.Selected[i] then
+    begin
+      Inc(nSel);
+      if FScoreTracks[i] = SCORE_PART_TRACKER then trackerSel := True;
+    end;
+  if nSel = 0 then
+  begin
+    MessageDlg('Select the score part(s) to delete in the PARTS list first.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  if MessageDlg(Format('Delete %d score part(s) from the project?' + sLineBreak + sLineBreak +
+      'Their MIDI clips (or the tracker module) are removed from the project. Undo brings them back.',
+      [nSel]), mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
+
+  if trackerSel then
+  begin
+    if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
+    FCmds.Perform(TNewTrackerModuleCommand.Create(FProject));
+    FScoreTrkSig := '';
+    SetLength(FScoreTrkChanOn, 0);
+    SetLength(FScoreTrkInstrOn, 0);
+  end;
+
+  { which Timeline clips and library clips go }
+  SetLength(clipIds, 0);
+  SetLength(midiIds, 0);
+  SetLength(libDel, 0);
+  for i := 0 to High(FScoreTracks) do
+  begin
+    if not ((i < lstScoreParts.Count) and lstScoreParts.Selected[i]) then Continue;
+    id := FScoreTracks[i];
+    if id = SCORE_PART_TRACKER then Continue;
+    if id < 0 then
+    begin
+      seq := FProject.Midi.Clip(-id - 1);
+      if seq = nil then Continue;
+      for j := 0 to tl.TrackCount - 1 do
+      begin
+        trk := tl.GetTrack(j);
+        for k := 0 to trk.ClipCount - 1 do
+          if trk.GetClip(k).IsMidiClip and (FProject.Midi.ClipById(trk.GetClip(k).MidiClipId) = seq) then
+          begin
+            AddUnique(clipIds, trk.GetClip(k).Id);
+            AddUnique(midiIds, trk.GetClip(k).MidiClipId);
+          end;
+      end;
+      AddUnique(libDel, -id - 1);
+    end
+    else
+    begin
+      trk := tl.TrackById(id);
+      if trk = nil then Continue;
+      for k := 0 to trk.ClipCount - 1 do
+        if trk.GetClip(k).IsMidiClip then
+        begin
+          AddUnique(clipIds, trk.GetClip(k).Id);
+          AddUnique(midiIds, trk.GetClip(k).MidiClipId);
+        end;
+    end;
+  end;
+
+  for i := 0 to High(clipIds) do
+    FCmds.Perform(TRemoveTimelineClipCommand.Create(FProject, clipIds[i]));
+
+  { library clips nothing on the Timeline plays any more }
+  for i := 0 to High(midiIds) do
+  begin
+    used := False;
+    for j := 0 to tl.TrackCount - 1 do
+    begin
+      trk := tl.GetTrack(j);
+      for k := 0 to trk.ClipCount - 1 do
+      begin
+        clip := trk.GetClip(k);
+        if clip.IsMidiClip and (clip.MidiClipId = midiIds[i]) then used := True;
+      end;
+    end;
+    if used then Continue;
+    libIdx := LibIndexOf(midiIds[i]);
+    if libIdx >= 0 then AddUnique(libDel, libIdx);
+  end;
+  { highest index first so the others keep their place }
+  for i := 0 to High(libDel) - 1 do
+    for j := i + 1 to High(libDel) do
+      if libDel[j] > libDel[i] then
+      begin
+        k := libDel[i]; libDel[i] := libDel[j]; libDel[j] := k;
+      end;
+  for i := 0 to High(libDel) do
+    FCmds.Perform(TRemoveMidiClipCommand.Create(FProject, libDel[i]));
+
+  FScoreSig := '';
+  RefreshTimelineTab;
+  pbScore.Invalidate;
+end;
+
+procedure TfrmMain.pbScoreMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  q: Double;
+  g: TGridContext;
+begin
+  if (FProject = nil) or (Button <> mbLeft) then Exit;
+  g := TimelineGrid;
+  if not g.IsValid then Exit;
+  if ScoreHitQ(FScoreLay, X, Y, sbScore.Position, q) then
+  begin
+    FProject.Timeline.PlayheadSeconds := Max(0.0, BeatsToSeconds(g, q * g.TSigDen / 4));
+    FRecInsertSeconds := FProject.Timeline.PlayheadSeconds;
+    pbScore.Invalidate;
+  end;
+end;
+
+procedure TfrmMain.pbScoreMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer;
+  MousePos: TPoint; var Handled: Boolean);
+begin
+  Handled := True;
+  { Shift + wheel scrolls sideways }
+  if (ssShift in Shift) and not (ssCtrl in Shift) then
+  begin
+    sbScoreH.Position := EnsureRange(sbScoreH.Position - WheelDelta div 2, 0,
+      Max(0, FScoreLay.ContentW - pbScore.Width));
+    pbScore.Invalidate;
+    Exit;
+  end;
+  { Alt + wheel spreads the lines of the score apart vertically (up) or draws them closer (down):
+    the space between the two staves of a grand staff and the space between lines of music.
+    It is saved with the project and used for the PDF too. }
+  if (ssAlt in Shift) and not (ssCtrl in Shift) and (FProject <> nil) then
+  begin
+    if WheelDelta > 0 then FProject.ScoreSpread := FProject.ScoreSpread + 0.1
+    else if WheelDelta < 0 then FProject.ScoreSpread := FProject.ScoreSpread - 0.1;
+    stbMain.SimpleText := Format('Score line spacing %d%%', [Round(FProject.ScoreSpread * 100)]);
+    pbScore.Invalidate;
+    Exit;
+  end;
+  { Ctrl + Alt + wheel zooms the notation, as the zoom icons do }
+  if (ssCtrl in Shift) and (ssAlt in Shift) then
+  begin
+    if FScoreZoom <= 0 then FScoreZoom := 1.0;
+    if WheelDelta > 0 then FScoreZoom := Min(3.0, FScoreZoom + 0.1)
+    else if WheelDelta < 0 then FScoreZoom := Max(0.5, FScoreZoom - 0.1);
+    lblScoreZoom.Caption := Format('%d%%', [Round(FScoreZoom * 100)]);
+    pbScore.Invalidate;
+    Exit;
+  end;
+  sbScore.Position := EnsureRange(sbScore.Position - WheelDelta div 2, 0,
+    Max(0, FScoreLay.ContentH - pbScore.Height));
+  pbScore.Invalidate;
+end;
+
+{ every note of the parts being shown, and the chord symbols, as the notation lays them out }
+procedure TfrmMain.ScoreGather(out notes: TArray<TScoreNote>; out chords: TArray<TScoreChord>; out shown: Integer);
+var
+  tl: TTimeline;
+  g: TGridContext;
+  i, j, k, tr: Integer;
+  trk: TTimelineTrack;
+  clip: TTimelineClip;
+  seq: TMidiSequence;
+  mt: TMidiTrackSeq;
+  nt: TMidiNote;
+  ts, te, qPerBeat: Double;
+  want: Boolean;
+  n: TScoreNote;
+  trkKey: string;
+begin
+  tl := FProject.Timeline;
+  g := TimelineGrid;
+  if g.IsValid then qPerBeat := 4 / g.TSigDen else qPerBeat := 1;
+  SetLength(notes, 0);
+  shown := 0;
+  for i := 0 to High(FScoreTracks) do
+  begin
+    want := btnScoreFull.Down or ((i < lstScoreParts.Count) and lstScoreParts.Selected[i]);
+    if not want then Continue;
+    if FScoreTracks[i] = SCORE_PART_TRACKER then
+    begin
+      { the tracker module, from time zero, narrowed to the chosen channels / instruments }
+      Inc(shown);
+      trkKey := '';
+      for k := 0 to High(FScoreTrkChanOn) do trkKey := trkKey + IfThen(FScoreTrkChanOn[k], '1', '0');
+      trkKey := trkKey + '/';
+      for k := 0 to High(FScoreTrkInstrOn) do trkKey := trkKey + IfThen(FScoreTrkInstrOn[k], '1', '0');
+      { while the Timeline plays the score repaints constantly: reuse the notes then }
+      if not (FTlPlaying and (trkKey = FScoreTrkCacheKey)) then
+      begin
+        FScoreTrkCache := TrackerScoreNotes(FProject.Tracker, FScoreTrkChanOn, FScoreTrkInstrOn);
+        FScoreTrkCacheKey := trkKey;
+      end;
+      for k := 0 to High(FScoreTrkCache) do
+      begin
+        ts := FScoreTrkCache[k].StartSec;
+        te := ts + FScoreTrkCache[k].LenSec;
+        n.StartQ := SecondsToBeats(g, ts) * qPerBeat;
+        n.LenQ := Max(0.0625, (SecondsToBeats(g, te) - SecondsToBeats(g, ts)) * qPerBeat);
+        n.Pitch := FScoreTrkCache[k].Pitch;
+        n.Color := clNone;
+        SetLength(notes, Length(notes) + 1);
+        notes[High(notes)] := n;
+      end;
+      Continue;
+    end;
+    if FScoreTracks[i] < 0 then
+    begin
+      { a library clip, played from time zero }
+      seq := FProject.Midi.Clip(-FScoreTracks[i] - 1);
+      if seq = nil then Continue;
+      Inc(shown);
+      for tr := 0 to seq.TrackCount - 1 do
+      begin
+        mt := seq.GetTrack(tr);
+        for k := 0 to mt.NoteCount - 1 do
+        begin
+          nt := mt.Notes[k];
+          ts := seq.TickToSeconds(nt.StartTick);
+          te := seq.TickToSeconds(nt.StartTick + nt.LengthTick);
+          n.StartQ := SecondsToBeats(g, ts) * qPerBeat;
+          n.LenQ := Max(0.0625, (SecondsToBeats(g, te) - SecondsToBeats(g, ts)) * qPerBeat);
+          n.Pitch := nt.Note;
+          n.Color := clNone;
+          SetLength(notes, Length(notes) + 1);
+          notes[High(notes)] := n;
+        end;
+      end;
+      Continue;
+    end;
+    trk := tl.TrackById(FScoreTracks[i]);
+    if trk = nil then Continue;
+    Inc(shown);
+    for j := 0 to trk.ClipCount - 1 do
+    begin
+      clip := trk.GetClip(j);
+      if not clip.IsMidiClip then Continue;
+      seq := FProject.Midi.ClipById(clip.MidiClipId);
+      if seq = nil then Continue;
+      for tr := 0 to seq.TrackCount - 1 do
+      begin
+        mt := seq.GetTrack(tr);
+        for k := 0 to mt.NoteCount - 1 do
+        begin
+          nt := mt.Notes[k];
+          ts := clip.StartSeconds + seq.TickToSeconds(nt.StartTick) - clip.SourceOffsetSeconds;
+          te := clip.StartSeconds + seq.TickToSeconds(nt.StartTick + nt.LengthTick) - clip.SourceOffsetSeconds;
+          if (ts >= clip.EndSeconds) or (te <= clip.StartSeconds) then Continue;
+          te := Min(te, clip.EndSeconds);
+          ts := Max(ts, clip.StartSeconds);
+          n.StartQ := SecondsToBeats(g, ts) * qPerBeat;
+          n.LenQ := Max(0.0625, (SecondsToBeats(g, te) - SecondsToBeats(g, ts)) * qPerBeat);
+          n.Pitch := nt.Note;
+          n.Color := clNone;   // notation stays ink on paper
+          SetLength(notes, Length(notes) + 1);
+          notes[High(notes)] := n;
+        end;
+      end;
+    end;
+  end;
+
+  SetLength(chords, tl.ChordCount);
+  for i := 0 to tl.ChordCount - 1 do
+  begin
+    chords[i].StartQ := SecondsToBeats(g, tl.GetChord(i).StartSeconds) * qPerBeat;
+    chords[i].Name := tl.GetChord(i).Name;
+  end;
+
+end;
+
+procedure TfrmMain.pbScorePaint(Sender: TObject);
+var
+  cv: TGLCanvas;
+  tl: TTimeline;
+  g: TGridContext;
+  opt: TScoreOptions;
+  notes: TArray<TScoreNote>;
+  chords: TArray<TScoreChord>;
+  shown: Integer;
+  qPerBeat: Double;
+  maxPos, maxX: Integer;
+begin
+  if (pbScore.Width <= 0) or (pbScore.Height <= 0) then Exit;
+  cv := pbScore.GL;
+  if FProject = nil then
+  begin
+    cv.Brush.Color := CurrentTheme.Background;
+    cv.Brush.Style := bsSolid;
+    cv.FillRect(Rect(0, 0, pbScore.Width, pbScore.Height));
+    Exit;
+  end;
+  if FScoreZoom <= 0 then FScoreZoom := 1.0;
+  RefreshScoreParts;
+  RefreshScoreTrkList;
+  tl := FProject.Timeline;
+  g := TimelineGrid;
+  if g.IsValid then qPerBeat := 4 / g.TSigDen else qPerBeat := 1;
+
+  ScoreGather(notes, chords, shown);
+
+  opt := Default(TScoreOptions);
+  opt.Clef := TScoreClef(Max(0, tsScoreClef.TabIndex));
+  case cboScoreQuant.ItemIndex of
+    0: opt.QuantQ := 1.0;
+    1: opt.QuantQ := 0.5;
+    3: opt.QuantQ := 0.125;
+  else
+    opt.QuantQ := 0.25;
+  end;
+  opt.Zoom := FScoreZoom;
+  if FProject <> nil then opt.Spread := FProject.ScoreSpread else opt.Spread := 1.0;
+  if g.IsValid then
+  begin
+    opt.SigNum := g.TSigNum;
+    opt.SigDen := g.TSigDen;
+    opt.BarQ := g.TSigNum * qPerBeat;
+  end
+  else
+  begin
+    opt.SigNum := 4;
+    opt.SigDen := 4;
+    opt.BarQ := 4;
+  end;
+  opt.ShowChords := btnScoreChords.Down;
+  opt.Tab := btnScoreTab.Down;
+  opt.PlayQ := SecondsToBeats(g, tl.PlayheadSeconds) * qPerBeat;
+  opt.PlayVisible := True;
+  opt.ScrollY := sbScore.Position;
+  opt.ScrollX := sbScoreH.Position;
+  ScoreRender(cv, pbScore.Width, pbScore.Height, notes, chords, opt, FScoreLay);
+
+  maxPos := Max(0, FScoreLay.ContentH - pbScore.Height);
+  FScoreBusy := True;
+  try
+    sbScore.Min := 0;
+    sbScore.Max := Max(1, FScoreLay.ContentH);
+    sbScore.PageSize := Min(pbScore.Height, Max(1, FScoreLay.ContentH));
+    if sbScore.Position > maxPos then sbScore.Position := maxPos;
+    { the page is wider than the view (a big zoom or wide bars): the bottom bar scrolls it }
+    maxX := Max(0, FScoreLay.ContentW - pbScore.Width);
+    sbScoreH.Min := 0;
+    sbScoreH.Max := Max(1, FScoreLay.ContentW);
+    sbScoreH.PageSize := Min(pbScore.Width, Max(1, FScoreLay.ContentW));
+    if sbScoreH.Position > maxX then sbScoreH.Position := maxX;
+    sbScoreH.Enabled := maxX > 0;
+    lblScoreCount.Caption := Format('%d of %d', [shown, Length(FScoreTracks)]);
+  finally
+    FScoreBusy := False;
+  end;
+end;
+
+{ ======================= Modes: ARRANGE / PIANO / SCORE / MIX / TRACKER / REC / AI =======================
+  The mode bar under the transport picks what fills the Timeline page. ARRANGE is
+  the Timeline (lanes, tracks, clips) with the optional Editor dock beneath it
+  (the "Editor" switch); every other mode gives the whole page to one editor -
+  the same dock pages as before (piano roll, mixer, tracker, recording, AI) plus
+  the Score. }
+
+function TfrmMain.TlModeOfPage(ATab: TGLPage): Integer;
+begin
+  if ATab = tabScore then Result := MODE_SCORE
+  else if ATab = tabInst then Result := MODE_INST
+  else if ATab = tabPattern then Result := MODE_PATTERN
+  else if ATab = tabMixer then Result := MODE_MIX
+  else if ATab = tabTracker then Result := MODE_TRACKER
+  else if ATab = tabRecording then Result := MODE_REC
+  else if ATab = tabDockAi then Result := MODE_AI
+  else Result := MODE_PIANO;
+end;
+
+function TfrmMain.TlPageOfMode(AMode: Integer): TGLPage;
+begin
+  case AMode of
+    MODE_PIANO: Result := tabMIDI;
+    MODE_SCORE: Result := tabScore;
+    MODE_INST: Result := tabInst;
+    MODE_PATTERN: Result := tabPattern;
+    MODE_MIX: Result := tabMixer;
+    MODE_TRACKER: Result := tabTracker;
+    MODE_REC: Result := tabRecording;
+    MODE_AI: Result := tabDockAi;
+  else
+    Result := nil;
+  end;
+end;
+
+{ the whole page to the editor (AFull) or back to the arrangement }
+procedure TfrmMain.TlLayoutFull(AFull: Boolean);
+begin
+  { leaving the arrangement for a full-page editor: remember where the splitter was }
+  if AFull and (pnlTlDock.Align = alBottom) and (pnlTlDock.Height > 0) then FTlDockHeight := pnlTlDock.Height;
+  pbTimeline.Visible := not AFull;
+  sbTlHorz.Visible := not AFull;
+  sbTlVert.Visible := not AFull;
+  pnlTlHeaders.Visible := not AFull;
+  pnlTlViews.Visible := not AFull;
+  if AFull then pnlTlVideo.Visible := False;
+  splTlDock.Visible := (not AFull) and pnlTlDock.Visible;
+  pgcDock.TabsVisible := not AFull;
+  if AFull then pnlTlDock.Align := alClient
+  else
+  begin
+    { alBottom controls stack by their Top: keep the order scrollbar / splitter / dock from the
+      lanes downwards, or the splitter ends up beside the scrollbar and resizes THAT }
+    pnlTlDock.Align := alBottom;
+    TlApplyDockHeight;   { back to the height the splitter was set to, not the full-page height }
+  end;
+end;
+
+{ puts the dock at the remembered splitter height, keeping both the lanes and the dock usable }
+procedure TfrmMain.TlApplyDockHeight;
+begin
+  if (FTlDockHeight > 0) and (pnlTlDock.Align = alBottom) then
+  begin
+    { the lanes keep at least 200 px - but only measured once the tab has its real size (a tab that is not showing yet reports a stand-in size, and clamping against that threw the saved height away) }
+    if tabTimeline.ClientHeight >= 420 then
+      pnlTlDock.Height := Max(splTlDock.MinSize, Min(FTlDockHeight, tabTimeline.ClientHeight - 200))
+    else
+      pnlTlDock.Height := Max(splTlDock.MinSize, FTlDockHeight);
+  end;
+  if pnlTlDock.Align = alBottom then TlStackDock;
+end;
+
+{ the splitter was dragged: its position is recorded in the project at once }
+procedure TfrmMain.splTlDockMoved(Sender: TObject);
+begin
+  if pnlTlDock.Align <> alBottom then Exit;
+  FTlDockHeight := pnlTlDock.Height;
+  if FProject = nil then Exit;
+  CaptureOpenWindowLayout;
+  FProject.Touch;
+  { written to the project file straight away, not only at the next Save }
+  if FProject.FileName <> '' then
+    try
+      SaveProjectToFile(FProject, FProject.FileName);
+    except
+      on E: Exception do Logger.Warn('ui', 'Could not save the splitter position: ' + E.Message);
+    end;
+end;
+
+procedure TfrmMain.TlStackDock;
+begin
+  pnlTlDock.Top := tabTimeline.ClientHeight;
+  splTlDock.Top := pnlTlDock.Top - splTlDock.Height;
+  sbTlHorz.Top := splTlDock.Top - sbTlHorz.Height;
+end;
+
+procedure TfrmMain.TlRefreshDockPage(ATab: TGLPage);
+begin
+  if ATab <> tabPattern then PatStopPlay;
+  pgcChange(pgc);
+  if ATab = tabMixer then RefreshMixerTab
+  else if ATab = tabRecording then RefreshRecordingTab
+  else if ATab = tabTracker then RefreshTrackerTab(True)
+  else if ATab = tabMIDI then RefreshMidiTab
+  else if ATab = tabScore then pbScore.Invalidate
+  else if ATab = tabInst then begin DrumFitToPage; DrumRefreshEditor; end
+  else if ATab = tabPattern then
+  begin
+    PatEnsureInstruments(PatCurrent);
+    PatRefreshUI;
+  end;
+end;
+
+procedure TfrmMain.TlSetMode(AMode: Integer);
+var
+  page: TGLPage;
+begin
+  FTlMode := AMode;
+  FTlModeSync := True;
+  try
+    tsTlMode.TabIndex := AMode;
+    ibTlTransport.SetButtonEnabled(7, AMode = MODE_ARRANGE);   // 'editor'
+  finally
+    FTlModeSync := False;
+  end;
+  pgc.ActivePage := tabTimeline;
+  if AMode = MODE_ARRANGE then
+  begin
+    PatStopPlay;
+    DrumAudioDetach;
+    TlLayoutFull(False);
+    pnlTlDock.Visible := FEditorOn;
+    splTlDock.Visible := FEditorOn;
+    if FEditorOn then
+    begin
+      TlStackDock;
+      TlRefreshDockPage(pgcDock.ActivePage);
+    end
+    else pgcChange(pgc);
+    RefreshTimelineTab;
+    Exit;
+  end;
+  if (AMode = MODE_INST) or (AMode = MODE_PATTERN) then DrumAudioAttach
+  else
+  begin
+    PatStopPlay;
+    DrumAudioDetach;
+  end;
+  page := TlPageOfMode(AMode);
+  pnlTlDock.Visible := True;
+  TlLayoutFull(True);
+  pgcDock.ActivePage := page;
+  TlRefreshDockPage(page);
+end;
+
+procedure TfrmMain.tsTlModeChange(Sender: TObject);
+begin
+  if FTlModeSync then Exit;
+  TlSetMode(tsTlMode.TabIndex);
+end;
+
+{ shows or hides the editor dock under the Timeline lanes }
+procedure TfrmMain.TlSetEditor(AOn: Boolean);
+begin
+  FEditorOn := AOn;
+  if FTlMode <> MODE_ARRANGE then Exit;
+  pnlTlDock.Visible := FEditorOn;
+  splTlDock.Visible := FEditorOn;
+  if FEditorOn then
+  begin
+    TlStackDock;
+    TlRefreshDockPage(pgcDock.ActivePage);
+  end
+  else pgcChange(pgc);
+end;
+
+{ which transport buttons are lit: loop, video panel, editor, clip stage }
+function TfrmMain.TlTransportLit: Integer;
+begin
+  Result := 0;
+  if (FProject <> nil) and FProject.Timeline.LoopEnabled then Result := Result or 32;   // loop
+  if not FVideoPanelOff then Result := Result or 64;                                    // video
+  if FEditorOn then Result := Result or 128;                                            // editor
+  if FStageVisible then Result := Result or 256;                                        // clip stage
+  if not FBrowserOff then Result := Result or 512;                                      // browser
+  if FMetronomeOn then Result := Result or 1024;                                        // metronome
+  if FLanesVisible then Result := Result or 2048;                                       // marker / tempo / signature lanes
+  if FChordsVisible then Result := Result or 4096;                                      // chords lane
+end;
+
+{ ARRANGE tools: what a plain left-press in the lanes does }
+procedure TfrmMain.ibTlToolsClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  FTlTool := AIndex;
+  ibTlTools.ActiveIndex := AIndex;
+end;
+
+procedure TfrmMain.ShowDockPage(ATab: TGLPage);
+begin
+  TlSetMode(TlModeOfPage(ATab));
+end;
+
+procedure TfrmMain.HideDock;
+begin
+  FEditorOn := False;
+  TlSetMode(MODE_ARRANGE);
+end;
+
+{ the dock's own tab header (visible beside the arrangement) switches the editor
+  without leaving the arrangement }
+procedure TfrmMain.pgcDockChange(Sender: TObject);
+begin
+  if FTlMode = MODE_ARRANGE then TlRefreshDockPage(pgcDock.ActivePage)
+  else TlSetMode(TlModeOfPage(pgcDock.ActivePage));
+end;
+
+procedure TfrmMain.DockShowClick(Sender: TObject);
+var
+  tag: Integer;
+begin
+  if Sender is TComponent then tag := TComponent(Sender).Tag else tag := 0;
+  case tag of
+    0: ShowDockPage(tabMixer);
+    1: ShowDockPage(tabMIDI);
+    2: ShowDockPage(tabTracker);
+    3: ShowDockPage(tabRecording);
+  else
+    HideDock;
+  end;
+end;
+
 { Draws the effect / transition regions of one video channel along the bottom
   of its lane: orange = transition, purple = effect. }
-procedure TfrmMain.TlPaintVideoFx(ACv: TCanvas; ATrk: TTimelineTrack; ATop, ALaneH, AW: Integer);
+procedure TfrmMain.TlPaintVideoFx(ACv: TGLCanvas; ATrk: TTimelineTrack; ATop, ALaneH, AW: Integer);
 var
   j, x, x2, yTop, yBot, px: Integer;
   r: TVideoEffectRegion;
@@ -10036,8 +18472,10 @@ begin
     if r.TrackId <> ATrk.Id then Continue;
     if (r.EndSeconds < leftSec) or (r.StartSeconds > rightSec) then Continue;
     tr := VideoFxIsTransition(r.Kind);
-    if tr then col := $0030A0F0 else col := $00C070A0;
-    if tr then edgeCol := $00104878 else edgeCol := $00703060;
+    col := ThemeExtraFxGet(ThemeColorsCurrent, 'video:' + r.Kind);
+    { outline = the same colour, darkened }
+    edgeCol := RGB(GetRValue(ColorToRGB(col)) * 5 div 10, GetGValue(ColorToRGB(col)) * 5 div 10,
+      GetBValue(ColorToRGB(col)) * 5 div 10);
     x := Round(FTlView.SecondsToX(Max(r.StartSeconds, leftSec - 1)));
     x2 := Round(FTlView.SecondsToX(Min(r.EndSeconds, rightSec + 1)));
     if x < FTlView.HeaderWidth then x := FTlView.HeaderWidth;
@@ -10122,7 +18560,7 @@ begin
   t := tl.PlayheadSeconds;
   reg := nil;
   { while the pre-rendered picture plays it already carries the effects }
-  if pnlTlVideo.Visible and not ((FTlVideo <> nil) and FTlVideo.RenderedActive) then
+  if TlVideoActive and not ((FTlVideo <> nil) and FTlVideo.RenderedActive) then
     reg := VideoFxRegionAt(tl, t);
   if reg = nil then
   begin
@@ -10208,7 +18646,7 @@ var
   s: Double;
   tw, th: Integer;
 begin
-  with pbTlVideoFx.Canvas do
+  with pbTlVideoFx.GL do
   begin
     Brush.Color := clBlack;
     FillRect(Rect(0, 0, pbTlVideoFx.Width, pbTlVideoFx.Height));
@@ -10216,8 +18654,9 @@ begin
     s := Min(pbTlVideoFx.Width / FTlFxBmp.Width, pbTlVideoFx.Height / FTlFxBmp.Height);
     tw := Max(1, Round(FTlFxBmp.Width * s));
     th := Max(1, Round(FTlFxBmp.Height * s));
-    StretchDraw(Rect((pbTlVideoFx.Width - tw) div 2, (pbTlVideoFx.Height - th) div 2,
-      (pbTlVideoFx.Width - tw) div 2 + tw, (pbTlVideoFx.Height - th) div 2 + th), FTlFxBmp);
+    { pinned to the top of the pane (centred sideways), like the player's own picture }
+    StretchDraw(Rect((pbTlVideoFx.Width - tw) div 2, 0,
+      (pbTlVideoFx.Width - tw) div 2 + tw, th), FTlFxBmp);
   end;
 end;
 
@@ -10609,7 +19048,7 @@ end;
   Positions are kept relative to the range start and channels relative to
   the active channel, so Paste Selection can re-create it anywhere. Returns
   False (clipboard emptied) when the range holds nothing. }
-function TfrmMain.TlCopyRangeToClipboard: Boolean;
+function TfrmMain.TlCopyRangeToClipboard(const AScope: TArray<Integer>): Boolean;
 var
   tl: TTimeline;
   scope: TArray<Integer>;
@@ -10623,7 +19062,7 @@ begin
   Result := False;
   if (FProject = nil) or not FTlRangeActive then Exit;
   tl := FProject.Timeline;
-  scope := TlRangeScopeTrackIds;
+  if Length(AScope) > 0 then scope := AScope else scope := TlRangeScopeTrackIds;
   activeIdx := tl.IndexOfTrack(FTlSelectedTrackId);
   if (activeIdx < 0) and (Length(scope) > 0) then
     activeIdx := tl.IndexOfTrack(scope[0]);
@@ -10823,6 +19262,13 @@ end;
   Clips whose relative channel falls outside the current channel list are
   dropped onto the nearest in-range channel rather than silently lost. }
 procedure TfrmMain.pmTlPasteSelectionClick(Sender: TObject);
+begin
+  if (FProject = nil) or not FTlHaveSelectionClipboard then Exit;
+  TlPasteRangeClipboardAt(FTlView.Snap(FProject.Timeline.PlayheadSeconds));
+end;
+
+{ the paste itself, anchored at AAnchorSec on the active channel }
+procedure TfrmMain.TlPasteRangeClipboardAt(AAnchorSec: Double);
 var
   tl: TTimeline;
   i, activeIdx, destIdx: Integer;
@@ -10834,7 +19280,7 @@ begin
   if tl.TrackCount = 0 then Exit;
   activeIdx := tl.IndexOfTrack(FTlSelectedTrackId);
   if activeIdx < 0 then activeIdx := 0;
-  anchorSec := FTlView.Snap(tl.PlayheadSeconds);
+  anchorSec := AAnchorSec;
   try
     for i := 0 to High(FTlRangeClips) do
     begin
@@ -10934,16 +19380,29 @@ end;
   region list existed only carry the single EffectName/Offset/Length, so that
   one is presented as a one-entry list. }
 function TfrmMain.TlClipRegions(AClip: TTimelineClip): TArray<TClipEffectRegion>;
+var
+  i: Integer;
+  live: TColor;
 begin
   if Length(AClip.EffectRegions) > 0 then
-    Exit(AClip.EffectRegions);
-  SetLength(Result, 0);
-  if AClip.EffectName = '' then Exit;
-  SetLength(Result, 1);
-  Result[0].Name := AClip.EffectName;
-  Result[0].OffsetSeconds := AClip.EffectOffsetSeconds;
-  Result[0].LengthSeconds := AClip.EffectLengthSeconds;
-  Result[0].Color := AClip.Color;
+    Result := Copy(AClip.EffectRegions)
+  else
+  begin
+    SetLength(Result, 0);
+    if AClip.EffectName = '' then Exit;
+    SetLength(Result, 1);
+    Result[0].Name := AClip.EffectName;
+    Result[0].OffsetSeconds := AClip.EffectOffsetSeconds;
+    Result[0].LengthSeconds := AClip.EffectLengthSeconds;
+    Result[0].Color := AClip.Color;
+  end;
+  { the colour stored when the effect was applied is a snapshot: take the effect's
+    current Settings > Colors swatch so an edit shows on every clip, selected or not }
+  for i := 0 to High(Result) do
+  begin
+    live := TlEffectColor(Result[i].Name);
+    if live <> ThemeColorsCurrent.ClipEffectsBackground then Result[i].Color := live;
+  end;
 end;
 
 function TfrmMain.TlEffectColor(const AEffectName: string): TColor;
@@ -10961,8 +19420,6 @@ begin
   else if SameText(AEffectName, 'Tremolo') then Result := theme.FxTremolo
   else if SameText(AEffectName, 'Auto-Pan') then Result := theme.FxAutoPan
   else if SameText(AEffectName, 'Saturation') then Result := theme.FxSaturation
-  else if SameText(AEffectName, 'Tube Saturation') then Result := theme.FxSaturation
-  else if SameText(AEffectName, 'Soft Clip') then Result := theme.FxHardClip
   else if SameText(AEffectName, 'Bit Crusher') then Result := theme.FxBitCrusher
   else if SameText(AEffectName, 'Brighten EQ') then Result := theme.FxBrightenEQ
   else if SameText(AEffectName, 'Silence') then Result := theme.FxSilence
@@ -10989,7 +19446,23 @@ begin
   else if SameText(AEffectName, 'Stereo Widener') then Result := theme.FxStereoWidener
   else if SameText(AEffectName, 'Transient Shaper') then Result := theme.FxTransientShaper
   else if SameText(AEffectName, 'Treble Boost') then Result := theme.FxTrebleBoost
+  else if IndexText(AEffectName, TlExtraAudioFxNames) >= 0 then
+    Result := ThemeExtraFxGet(theme, AEffectName)
   else Result := theme.ClipEffectsBackground;
+end;
+
+{ The audio effects that have no dedicated theme swatch (everything on the
+  Effects menu beyond the original set) - each gets its own colour in
+  Settings > Colors. }
+function TfrmMain.TlExtraAudioFxNames: TArray<string>;
+var
+  tag: Integer;
+  k, p, n: string;
+begin
+  Result := nil;
+  for tag := 40 to 130 do
+    if TlFxPreset(tag, k, p, n) then Result := Result + [n];
+  Result := Result + ['Noise Reduction', 'Auto-Tune', 'Convolution Reverb', 'Warp'];
 end;
 
 { Mute Track (Timeline menu / pmTimeline / mnuTlTrack): unlike the old
@@ -11013,27 +19486,47 @@ end;
 { Rename Track (Timeline Edit menu / pmTimeline): undoable, mirrors
   TMoveTimelineTrackCommand's shape. }
 procedure TfrmMain.pmTlRenameTrackClick(Sender: TObject);
+begin
+  TlRenameTrack(FTlCtxTrackId);
+end;
+
+{ double-click on a lane's title }
+procedure TfrmMain.TlHdrRename(Sender: TGLTrackHeader);
+begin
+  FTlSelectedTrackId := Sender.TrackId;
+  TlRenameTrack(Sender.TrackId);
+end;
+
+{ Asks for a new lane title (at most TL_LANE_NAME_MAX characters) and applies it through the
+  undoable rename command; the track's name is part of the project, so it is saved with it
+  and restored on the next load. }
+procedure TfrmMain.TlRenameTrack(ATrackId: Integer);
+const
+  TL_LANE_NAME_MAX = 16;
 var
   trk: TTimelineTrack;
   newName: string;
 begin
-  if (FProject = nil) or (FTlCtxTrackId < 0) then Exit;
-  trk := FProject.Timeline.TrackById(FTlCtxTrackId);
+  if (FProject = nil) or (ATrackId < 0) then Exit;
+  trk := FProject.Timeline.TrackById(ATrackId);
   if trk = nil then Exit;
-  newName := trk.Name;
-  if not InputQuery('Rename Track', 'Track name:', newName) then Exit;
+  newName := Copy(trk.Name, 1, TL_LANE_NAME_MAX);
+  if not InputQuery('Rename lane', Format('Lane title (up to %d characters):', [TL_LANE_NAME_MAX]), newName) then Exit;
   newName := Trim(newName);
+  if Length(newName) > TL_LANE_NAME_MAX then
+  begin
+    newName := Copy(newName, 1, TL_LANE_NAME_MAX);
+    stbMain.SimpleText := Format('Lane title shortened to %d characters: %s', [TL_LANE_NAME_MAX, newName]);
+  end;
   if (newName = '') or (newName = trk.Name) then Exit;
   try
-    FCmds.Perform(TRenameTimelineTrackCommand.Create(FProject, FTlCtxTrackId, newName));
+    FCmds.Perform(TRenameTimelineTrackCommand.Create(FProject, ATrackId, newName));
     RefreshTimelineTab;
   except
     on E: Exception do
-      memTimeline.Lines.Insert(0, 'Rename Track FAILED: ' + E.Message);
+      memTimeline.Lines.Insert(0, 'Rename lane FAILED: ' + E.Message);
   end;
-end;
-
-{ ---- Position navigation (Timeline menu / pmTimeline "Position" group) ---- }
+end;{ ---- Position navigation (Timeline menu / pmTimeline "Position" group) ---- }
 
 { Grid step for Next/Previous Grid Position: the active Snap mode's spacing,
   except smSample ("Realtime" in the snap dropdown) which is too fine to be a
@@ -11169,7 +19662,7 @@ begin
   if FTlPlayer <> nil then
     FTlPlayer.EnsureSourcesLoaded;
   { The audio engine owns the clock; the picture just follows the playhead. }
-  if (FTlVideo <> nil) and pnlTlVideo.Visible and (FTlPlayer <> nil) then
+  if (FTlVideo <> nil) and TlVideoActive and (FTlPlayer <> nil) then
   begin
     FTlVideo.StretchBPM := FProject.TempoBPM;
     FTlVideo.Sync(FProject.Timeline, FProject.Timeline.PlayheadSeconds, True, FTlPlayer.Direction);
@@ -11975,7 +20468,7 @@ begin
               for i := 0 to ch - 1 do
                 Move(outBuf.ChannelPtr(i)^, fxOut[i][done], n * SizeOf(Single));
               Inc(done, n);
-              if (done div BLOCK) mod 64 = 0 then
+              if (done div BLOCK) mod 8 = 0 then
                 Stage(2, 'applying ' + AEffectName, Round(done / fxLen * 100));
             end;
           finally
@@ -11997,6 +20490,7 @@ begin
         fileName := dir + Format('fx-%s-clip%d-%s.wav',
           [SafeSunoFileName(AEffectName), c.Id, FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
         SaveWavFile(fileName, outPlanar, ch, sr, frameCount, wsfPCM24);
+        JobNoteFile(fileName);
         StageDone(3, 'write ' + ExtractFileName(fileName));
         Stage(4, 'updating timeline', 0);
 
@@ -12007,6 +20501,7 @@ begin
           strip and the effect's name right at the clip's start (region start
           point) - not a per-track annotation, a per-clip one, so it moves
           with the clip and scrolls with playback exactly like the clip does }
+        JobNoteClip(c);
         c.EffectName := AEffectName;
         c.EffectOffsetSeconds := Max(0, overlapStartSec - c.StartSeconds);
         c.EffectLengthSeconds := overlapEndSec - overlapStartSec;
@@ -12139,11 +20634,13 @@ begin
         fileName := dir + Format('fx-Silence-clip%d-%s.wav',
           [c.Id, FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
         SaveWavFile(fileName, outPlanar, ch, sr, frameCount, wsfPCM24);
+        JobNoteFile(fileName);
         FxStageDone(3, 'write ' + ExtractFileName(fileName));
         FxStage(4, 'updating timeline', 0);
 
         newSrc := tl.AddSource(fileName, sr, ch, frameCount);
         FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, 0));
+        JobNoteClip(c);
         c.EffectName := 'Silence';
         c.EffectOffsetSeconds := Max(0, overlapStartSec - c.StartSeconds);
         c.EffectLengthSeconds := overlapEndSec - overlapStartSec;
@@ -12363,7 +20860,7 @@ begin
       problems := nil;
       for id in ids do
       begin
-        UpdateStatusProgress(done * 100, Format('Undo Effect - checking clip %d/%d', [done + 1, Length(ids)]));
+        UpdateStatusProgress(done * 100, 'Undo Effect - checking the clips');
         Inc(done);
         c := tl.ClipById(id);
         if c = nil then Continue;
@@ -12457,6 +20954,7 @@ begin
               fileName := dir + Format('fx-restore-clip%d-%s.wav',
                 [c.Id, FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
               SaveWavFile(fileName, outPlanar, ch, sr, frameCount, wsfPCM24);
+              JobNoteFile(fileName);
               newSrc := tl.AddSource(fileName, sr, ch, frameCount);
               FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, 0));
               touched := True;
@@ -12644,6 +21142,8 @@ end;
 procedure TfrmMain.pmTlEffEditClick(Sender: TObject);
 var
   nm, kind, params, txt: string;
+  region: TAudioPlanar;
+  regionRate: Integer;
 
   { value of AKey in a "k=v;k=v" settings string, ADefault when absent }
   function ParamValue(const AText, AKey: string; const ADefault: string = ''): string;
@@ -12686,9 +21186,13 @@ begin
     if not dlgOpenWav.Execute then Exit;
     params := 'ir=' + dlgOpenWav.FileName + ';mix=' + ParamValue(params, 'mix', '0.3');
   end;
+  { the effect window shows the region as it was before the effect, and as it will be with the
+    knobs as set; without a kept original it shows the knobs and the calculated response only }
+  region := nil;
+  regionRate := 0;
+  if not TlRegionAudioBefore(region, regionRate) then region := nil;
   txt := params;
-  if not PromptValueBelow('Edit Effect - ' + nm,
-    'Settings for this effect, as name=value pairs separated by ";":', txt) then Exit;
+  if not TfrmEffectEditor.Edit(Self, nm, kind, params, txt, nil, region, regionRate) then Exit;
   txt := Trim(txt);
   if txt = params then
     if FTlEffCtx.Kind <> '' then Exit;   // unchanged settings - nothing to re-render
@@ -12716,6 +21220,7 @@ var
   planar: TAudioPlanar;
   sr, ch, i, startFrame, frameCount: Integer;
   base, fDrums, fBass, fVocals, fOther: string;
+  splitOk: Boolean;
   files: array[0..3] of string;
   labels: array[0..3] of string;
   trackCmd: TAddTimelineTrackCommand;
@@ -12753,7 +21258,17 @@ begin
     ForceDirectories(IncludeTrailingPathDelimiter(RecordingRootPath));
     base := IncludeTrailingPathDelimiter(RecordingRootPath) +
       Format('stems-clip%d-%s', [c.Id, FormatDateTime('yyyymmdd-hhnnss', Now)]);
-    if not SplitStemsToFiles(planar, ch, frameCount, sr, base, fDrums, fBass, fVocals, fOther) then
+    splitOk := False;
+    JobAwait(
+      procedure
+      begin
+        splitOk := SplitStemsToFiles(planar, ch, frameCount, sr, base, fDrums, fBass, fVocals, fOther);
+        if splitOk then
+        begin
+          JobNoteFile(fDrums); JobNoteFile(fBass); JobNoteFile(fVocals); JobNoteFile(fOther);
+        end;
+      end, False);
+    if not splitOk then
     begin
       HideStatusProgress;
       memTimeline.Lines.Insert(0, 'Split Stems: clip too short.');
@@ -12779,6 +21294,98 @@ begin
     begin
       HideStatusProgress;
       memTimeline.Lines.Insert(0, 'Split Stems FAILED: ' + E.Message);
+    end;
+  end;
+end;
+
+{ Split Speech / Music: separates the selected clip into a speech track and a
+  music/background track (classical masking, see SeparateSpeechMusic) through
+  undoable commands, like Split Stems. }
+procedure TfrmMain.TlSplitSpeechMusicSelected;
+var
+  tl: TTimeline;
+  c: TTimelineClip;
+  src: TMediaSource;
+  newSrc: TMediaSource;
+  player: TTimelinePlayer;
+  dec: TDecodedSource;
+  planar: TAudioPlanar;
+  sr, ch, i, startFrame, frameCount: Integer;
+  base, fVoice, fMusic: string;
+  splitOk: Boolean;
+  files: array[0..1] of string;
+  labels: array[0..1] of string;
+  trackCmd: TAddTimelineTrackCommand;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  c := tl.ClipById(FTlSelClipId);
+  if c = nil then
+  begin
+    memTimeline.Lines.Insert(0, 'Split Speech / Music: select a clip first.');
+    Exit;
+  end;
+  try
+    ShowStatusProgress('Split Speech / Music - reading source...', 300);
+    player := TTimelinePlayer.Create(tl);
+    try
+      player.EnsureSourcesLoaded;
+      src := tl.SourceById(c.SourceId);
+      if src = nil then Exit;
+      dec := player.GetDecodedSource(src.Id);
+      if (dec = nil) or dec.Failed or (dec.FrameCount = 0) then Exit;
+      sr := dec.SampleRate;
+      ch := dec.Channels;
+      startFrame := Max(Round(c.SourceOffsetSeconds * sr), 0);
+      frameCount := Min(Round(c.LengthSeconds * sr), dec.FrameCount - startFrame);
+      if frameCount <= 0 then Exit;
+      EnsurePlanar(planar, ch, frameCount);
+      for i := 0 to ch - 1 do
+        Move(dec.Data[i][startFrame], planar[i][0], frameCount * SizeOf(Single));
+    finally
+      player.Free;
+    end;
+    UpdateStatusProgress(100, 'Split Speech / Music - separating (this can take a while)...');
+    Application.ProcessMessages;
+    ForceDirectories(IncludeTrailingPathDelimiter(RecordingRootPath));
+    base := IncludeTrailingPathDelimiter(RecordingRootPath) +
+      Format('speechmusic-clip%d-%s', [c.Id, FormatDateTime('yyyymmdd-hhnnss', Now)]);
+    splitOk := False;
+    JobAwait(
+      procedure
+      begin
+        splitOk := SplitSpeechMusicToFiles(planar, ch, frameCount, sr, base, fVoice, fMusic);
+        if splitOk then
+        begin
+          JobNoteFile(fVoice); JobNoteFile(fMusic);
+        end;
+      end, False);
+    if not splitOk then
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Split Speech / Music: clip too short.');
+      Exit;
+    end;
+    files[0] := fVoice; files[1] := fMusic;
+    labels[0] := 'Speech'; labels[1] := 'Music';
+    for i := 0 to 1 do
+    begin
+      UpdateStatusProgress(200 + i * 50, 'Split Speech / Music - adding track ' + labels[i]);
+      newSrc := tl.AddSource(files[i], sr, 2, frameCount);
+      trackCmd := TAddTimelineTrackCommand.Create(FProject, tkAudio, c.Name + ' - ' + labels[i]);
+      FCmds.Perform(trackCmd);
+      FCmds.Perform(TAddTimelineClipCommand.Create(FProject, trackCmd.CreatedId, newSrc.Id,
+        c.Name + ' ' + labels[i], c.StartSeconds, 0, c.LengthSeconds));
+    end;
+    EnsureMixerStripsForTimelineTracks;
+    memTimeline.Lines.Insert(0, 'Split Speech / Music: 2 tracks added (speech, music).');
+    RefreshTimelineTab;
+    HideStatusProgress;
+  except
+    on E: Exception do
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Split Speech / Music FAILED: ' + E.Message);
     end;
   end;
 end;
@@ -12869,12 +21476,482 @@ begin
   end;
 end;
 
-{ Metronome checkbox: takes effect immediately on a running Timeline player,
-  and is picked up at the start of every later Play. }
-procedure TfrmMain.chkTlMetronomeClick(Sender: TObject);
+{ transcriber progress: 0..100 maps onto the 300..380 stretch of the Create to Score bar }
+function TfrmMain.TlScoreProgress(APercent: Integer): Boolean;
 begin
+  UpdateStatusProgress(300 + APercent * 80 div 100, 'Create to Score - listening to the lane...');
+  Result := not TlJobCancelled;
+end;
+
+{ Pumps the message queue so the UI never jams during a long job, and reports whether
+  Escape was pressed since the job began (sticky: once cancelled it stays cancelled
+  until the next job clears FTlJobCancelled). }
+function TfrmMain.TlJobCancelled: Boolean;
+begin
+  Application.ProcessMessages;
+  JobPollEscape;
+  Result := FTlJobCancelled;
+end;
+
+{ Esc while a status-bar job runs (and this window is the active one) marks it cancelled }
+procedure TfrmMain.JobPollEscape;
+begin
+  {$IFNDEF FPC}
+  if FSyncProgressActive and (not FTlJobCancelled) and Application.Active and
+     (GetAsyncKeyState(VK_ESCAPE) and $8001 <> 0) then
+    FTlJobCancelled := True;
+  {$ENDIF}
+end;
+
+{ Long-running steps in the engine units call this (TimelinePumpHook): only while a
+  status-bar job is running does it pump the message queue - so the periodic source
+  poll during playback never re-enters the UI - and Esc cancels the job from here. }
+procedure TfrmMain.JobPump;
+begin
+  if (TThread.CurrentThread.ThreadID <> MainThreadID) or not FSyncProgressActive then Exit;
+  Application.ProcessMessages;
+  JobPollEscape;
+  if FTlJobCancelled and (prgStatus.Style = pbstNormal) then JobCancelNow;
+  JobRefreshStatus;
+end;
+
+{ Esc while a long job runs in the background - the timeline export, the video-effects render,
+  the audio stretching / decoding before Play, the AI (Suno) generation or the Luma job - cancels it. Each tick looks only at jobs that are really
+  running, and only when this window is the active one. }
+procedure TfrmMain.RenderJobsPollEscape;
+var
+  hit: Boolean;
+begin
+  { FPC}
+  if not Application.Active then Exit;
+  if (FCacheThread <> nil) and (GetAsyncKeyState(VK_ESCAPE) and $8001 <> 0) then
+    FCacheCancel := True;   // Delete Cache stops after the file it is on
+  if ((FTimelineExportJob = nil) or FTimelineExportJob.IsTerminal) and
+     ((FTlFxJob = nil) or FTlFxJob.IsTerminal) and
+     ((FTlPrepJob = nil) or FTlPrepJob.IsTerminal) and
+     ((FSunoJob = nil) or FSunoJob.IsTerminal) and
+     ((FLumaJob = nil) or FLumaJob.IsTerminal) then
+  begin
+    GetAsyncKeyState(VK_ESCAPE);   // no render running: forget any Esc pressed meanwhile
+    Exit;
+  end;
+  if GetAsyncKeyState(VK_ESCAPE) and $8001 = 0 then Exit;
+  hit := False;
+  if (FTimelineExportJob <> nil) and not FTimelineExportJob.IsTerminal then
+  begin
+    FTimelineExportJob.Cancel;
+    hit := True;
+  end;
+  if (FTlFxJob <> nil) and not FTlFxJob.IsTerminal then
+  begin
+    FTlFxJob.Cancel;
+    hit := True;
+  end;
+  if (FTlPrepJob <> nil) and not FTlPrepJob.IsTerminal then
+  begin
+    FTlPrepJob.Cancel;
+    hit := True;
+  end;
+  if (FSunoJob <> nil) and not FSunoJob.IsTerminal then
+  begin
+    FSunoJob.Cancel;
+    memAiLog.Lines.Add('AI generation cancelled with Esc.');
+    hit := True;
+  end;
+  if (FLumaJob <> nil) and not FLumaJob.IsTerminal then
+  begin
+    FLumaJob.Cancel;
+    memAiLog.Lines.Add('Luma job cancelled with Esc (Luma may still charge for work already started).');
+    hit := True;
+  end;
+  if hit then
+  begin
+    stbMain.SimpleText := 'Job CANCELLED (Esc) - it is being stopped.';
+    memTimeline.Lines.Insert(0, 'Background job cancelled with Esc.');
+  end;
+  {}
+end;
+
+{ the status bar always says what the job is doing, how long it has been going, and that Esc stops it }
+function TfrmMain.JobStatusText(const AText: string): string;
+begin
+  FJobBaseText := AText;
+  if AText = '' then
+  begin
+    prgStatus.Text := '';
+    Exit('');
+  end;
+  FJobLastSec := Integer((GetTickCount64 - FJobTick) div 1000);
+  { the capsule progress bar shows the percentage alone (no Text); the status line on the left names
+    the action being done - the two never repeat each other }
+  prgStatus.Text := '';
+  Result := AText;
+end;
+
+{ keeps the elapsed time ticking while a step is busy and has nothing new to report }
+procedure TfrmMain.JobRefreshStatus;
+begin
+  if (FJobBaseText = '') or (Integer((GetTickCount64 - FJobTick) div 1000) = FJobLastSec) then Exit;
+  stbMain.SimpleText := JobStatusText(FJobBaseText);
+  stbMain.Update;
+end;
+
+{ Runs a blocking call (a network request) on a worker thread while this thread keeps
+  pumping messages, ticking the elapsed time and watching for Esc, so the program never
+  looks frozen. On Esc: AAbandonOnEsc = True walks away from the call at once (everything
+  the call uses must be kept alive by the closure - interfaces are); False waits for it to
+  return, still responsive, for calls that use an object the caller frees afterwards.
+  An exception raised by AWork is re-raised here. }
+procedure TfrmMain.JobAwait(const AWork: TProc; AAbandonOnEsc: Boolean);
+var
+  task: ITask;
+  failure: TObject;
+  cancelled: Boolean;
+begin
+  failure := nil;
+  cancelled := False;
+  task := TTask.Run(
+    procedure
+    begin
+      try
+        AWork();
+      except
+        failure := AcquireExceptionObject;
+      end;
+    end);
+  while task.Status in [TTaskStatus.Created, TTaskStatus.WaitingToRun, TTaskStatus.Running] do
+  begin
+    Sleep(15);
+    Application.ProcessMessages;
+    JobPollEscape;
+    if FTlJobCancelled and not cancelled then
+    begin
+      cancelled := True;
+      if AAbandonOnEsc then Break;
+      stbMain.SimpleText := 'Cancelling - waiting for the server to answer (the program stays usable)...';
+    end;
+    if not cancelled then JobRefreshStatus;
+  end;
+  if cancelled then
+  begin
+    failure.Free;
+    JobCancelNow;
+  end;
+  if failure <> nil then raise failure;
+end;
+
+{ polled by the Python bridge while a script runs: Esc stops the script }
+procedure TfrmMain.PyPoll;
+begin
+  JobPollEscape;
+  JobRefreshStatus;
+  if FTlJobCancelled and (FPyBridge <> nil) then FPyBridge.Cancel;
+end;
+
+{ first status-bar call of a job: remember the undo depth, forget any earlier Esc }
+procedure TfrmMain.JobBegin;
+begin
+  if FSyncProgressActive then Exit;   // nested step of a job already running
+  FTlJobCancelled := False;
+  FJobTick := GetTickCount64;
+  FJobBaseText := '';
+  FJobFiles := nil;
+  FJobUndo := nil;
+  if FCmds <> nil then FJobUndoMark := FCmds.UndoCount else FJobUndoMark := 0;
+  {$IFNDEF FPC}
+  GetAsyncKeyState(VK_ESCAPE);   // clear the "pressed since last call" bit
+  {$ENDIF}
+end;
+
+{ discards everything the job did through commands, tells the status bar, and unwinds the job }
+{ a rendered / cached file the running job just wrote: deleted if the job is cancelled }
+procedure TfrmMain.JobNoteFile(const AFile: string);
+begin
+  if AFile = '' then Exit;
+  FJobFiles := FJobFiles + [AFile];
+end;
+
+{ call BEFORE the job edits a clip directly (effect labels and regions are not commands):
+  remembers how it was so a cancel can put it back }
+procedure TfrmMain.JobNoteClip(AClip: TTimelineClip);
+var
+  id: Integer;
+  nm: string;
+  off, len: Double;
+  col: TColor;
+  regs: TArray<TClipEffectRegion>;
+begin
+  if AClip = nil then Exit;
+  id := AClip.Id;
+  nm := AClip.EffectName;
+  off := AClip.EffectOffsetSeconds;
+  len := AClip.EffectLengthSeconds;
+  col := AClip.Color;
+  regs := Copy(AClip.EffectRegions);
+  SetLength(FJobUndo, Length(FJobUndo) + 1);
+  FJobUndo[High(FJobUndo)] :=
+    procedure
+    var
+      c: TTimelineClip;
+    begin
+      if FProject = nil then Exit;
+      c := FProject.Timeline.ClipById(id);
+      if c = nil then Exit;
+      c.EffectName := nm;
+      c.EffectOffsetSeconds := off;
+      c.EffectLengthSeconds := len;
+      c.Color := col;
+      c.EffectRegions := regs;
+    end;
+end;
+
+{ Esc: undoes what the job did through commands, puts back its direct edits, drops sources
+  nothing uses any more, deletes the files it rendered and the decoded copies of them, and
+  forgets what was undone (it must not be redoable). Returns how many files were deleted. }
+function TfrmMain.JobRollback: Integer;
+var
+  guard, i, undone: Integer;
+begin
+  Result := 0;
+  guard := 0;
+  undone := 0;
+  while (FCmds <> nil) and (FCmds.UndoCount > FJobUndoMark) and FCmds.CanUndo and (guard < 100000) do
+  begin
+    FCmds.Undo;
+    Inc(guard);
+    Inc(undone);
+  end;
+  for i := High(FJobUndo) downto 0 do
+    try
+      FJobUndo[i]();
+    except
+      // a clip that no longer exists has nothing to restore
+    end;
+  FJobUndo := nil;
+  if (undone > 0) and (FCmds <> nil) then FCmds.DiscardRedo;
+  if (Length(FJobFiles) > 0) and (FProject <> nil) then FProject.Timeline.RemoveUnusedSources;
+  for i := 0 to High(FJobFiles) do
+    if FileExists(FJobFiles[i]) then
+      try
+        if DeleteFile(FJobFiles[i]) then Inc(Result);
+      except
+        // still in use: the next cleanup of the recordings folder will catch it
+      end;
+  if Length(FJobFiles) > 0 then
+  begin
+    if FTlCacheHolder <> nil then FTlCacheHolder.InvalidateAll;   // decoded copies of the deleted files
+    FJobFiles := nil;
+  end;
+  TlPruneSelection;
+  if (undone > 0) or (Result > 0) then RefreshTimelineTab;
+end;
+
+{ forgets selected / pressed / dragged clips that no longer exist (an undo, a cancelled job or a
+  failed import can remove the clip the selection still names) }
+procedure TfrmMain.TlPruneSelection;
+var
+  tl: TTimeline;
+  i: Integer;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  for i := High(FTlSelClipIds) downto 0 do
+    if tl.ClipById(FTlSelClipIds[i]) = nil then Delete(FTlSelClipIds, i, 1);
+  if (FTlSelClipId >= 0) and (tl.ClipById(FTlSelClipId) = nil) then
+  begin
+    if Length(FTlSelClipIds) > 0 then
+    begin
+      FTlSelClipId := FTlSelClipIds[0];
+      Delete(FTlSelClipIds, 0, 1);
+    end
+    else
+      FTlSelClipId := -1;
+  end;
+  if (FTlPressClipId >= 0) and (tl.ClipById(FTlPressClipId) = nil) then FTlPressClipId := -1;
+  for i := High(FTlDragIds) downto 0 do
+    if tl.ClipById(FTlDragIds[i]) = nil then Delete(FTlDragIds, i, 1);
+end;
+
+procedure TfrmMain.JobCancelNow;
+var
+  deleted: Integer;
+begin
+  { FTlJobCancelled stays set until the next JobBegin, so a job that swallows the
+    exception per item still stops at its very next progress call }
+  HideStatusProgress;
+  deleted := JobRollback;
+  if deleted > 0 then
+    stbMain.SimpleText := Format('Job CANCELLED (Esc) - all changes were discarded and %d rendered file(s) were deleted.', [deleted])
+  else
+    stbMain.SimpleText := 'Job CANCELLED (Esc) - all changes were discarded.';
+  raise EJobCancelled.Create('cancelled with Esc - changes discarded');
+end;
+
+{ Create to Score (lane right-click): mixes every unmuted audio clip of the lane into
+  one mono signal on the project's timeline, transcribes it, and commits the result
+  as a MIDI clip on a new MIDI track. That clip is a normal project clip, so it is
+  saved with the project and the Score tab shows it as that lane's score line. }
+procedure TfrmMain.pmTlCreateScoreClick(Sender: TObject);
+const
+  SCORE_SR = 22050;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  c: TTimelineClip;
+  src: TMediaSource;
+  player: TTimelinePlayer;
+  dec: TDecodedSource;
+  mono: TAudioSampleArray;
+  notes: TSeqNotes;
+  opts: TA2MOptions;
+  seq: TMidiSequence;
+  mtr: TMidiTrackSeq;
+  mn: TMidiNote;
+  modeText, laneName: string;
+  ci, i, k, f, f0, f1, o0, o1, o, ch, total, used, ppq: Integer;
+  ratio, endSec, acc: Double;
+begin
+  if (FProject = nil) or (FTlCtxTrackId < 0) then Exit;
+  tl := FProject.Timeline;
+  trk := tl.TrackById(FTlCtxTrackId);
+  if (trk = nil) or (trk.Kind = tkMidi) then Exit;
+  laneName := trk.Name;
+  endSec := 0;
+  for ci := 0 to trk.ClipCount - 1 do
+  begin
+    c := trk.GetClip(ci);
+    if (not c.IsMidiClip) and (not c.Muted) then endSec := Max(endSec, c.EndSeconds);
+  end;
+  if endSec <= 0 then
+  begin
+    memTimeline.Lines.Insert(0, 'Create to Score: the lane has no audio.');
+    Exit;
+  end;
+  modeText := 'mono';
+  if not PromptValueBelow('Create to Score',
+    'Transcription mode: "mono" (single melody / bass line) or "poly" (chords):', modeText) then Exit;
+  try
+    FTlJobCancelled := False;
+    {$IFNDEF FPC}
+    GetAsyncKeyState(VK_ESCAPE);   // clear the "pressed since last call" bit (e.g. from closing the prompt)
+    {$ENDIF}
+    ShowStatusProgress('Create to Score - reading lane audio...', 400);
+    total := Ceil(endSec * SCORE_SR);
+    SetLength(mono, total);
+    for i := 0 to total - 1 do mono[i] := 0;
+    used := 0;
+    player := TTimelinePlayer.Create(tl);
+    try
+      player.EnsureSourcesLoaded;
+      for ci := 0 to trk.ClipCount - 1 do
+      begin
+        c := trk.GetClip(ci);
+        if c.IsMidiClip or c.Muted then Continue;
+        src := tl.SourceById(c.SourceId);
+        if src = nil then Continue;
+        dec := player.GetDecodedSource(src.Id);
+        if (dec = nil) or dec.Failed or (dec.FrameCount = 0) or (dec.SampleRate <= 0) then Continue;
+        ch := Max(1, dec.Channels);
+        ratio := dec.SampleRate / SCORE_SR;
+        o0 := Max(0, Round(c.StartSeconds * SCORE_SR));
+        o1 := Min(total, Round(c.EndSeconds * SCORE_SR));
+        for o := o0 to o1 - 1 do
+        begin
+          if (o and $3FFF = 0) and TlJobCancelled then Abort;
+          { box-average the source frames this output sample spans (no aliasing) }
+          f0 := Round((c.SourceOffsetSeconds + (o - o0) / SCORE_SR) * dec.SampleRate);
+          f1 := Max(f0 + 1, Round(f0 + ratio));
+          if (f0 < 0) or (f0 >= dec.FrameCount) then Continue;
+          f1 := Min(f1, dec.FrameCount);
+          acc := 0;
+          for f := f0 to f1 - 1 do
+            for k := 0 to ch - 1 do acc := acc + dec.Data[k][f];
+          mono[o] := mono[o] + acc / ((f1 - f0) * ch);
+        end;
+        Inc(used);
+        UpdateStatusProgress(Round(300 * (ci + 1) / trk.ClipCount), 'Create to Score - reading lane audio...');
+        if TlJobCancelled then Abort;
+      end;
+    finally
+      player.Free;
+    end;
+    if used = 0 then
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Create to Score: no audio in the lane could be decoded.');
+      Exit;
+    end;
+    UpdateStatusProgress(300, 'Create to Score - listening to the lane...');
+    if TlJobCancelled then Abort;
+    opts := TA2MOptions.Default;
+    opts.Bpm := FProject.TempoBPM;
+    if SameText(Trim(modeText), 'poly') then opts.Mode := a2mPoly else opts.Mode := a2mMono;
+    notes := AudioToMidi(mono, SCORE_SR, opts, TlScoreProgress);
+    if FTlJobCancelled then Abort;
+    if Length(notes) = 0 then
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Create to Score: no notes detected (try poly mode or a louder lane).');
+      Exit;
+    end;
+    UpdateStatusProgress(380, Format('Create to Score - writing %d notes...', [Length(notes)]));
+    if TlJobCancelled then Abort;
+    ppq := MIDI_DEFAULT_PPQ;
+    seq := TMidiSequence.Create(ppq);
+    try
+      seq.SetInitialBPM(FProject.TempoBPM);
+      mtr := seq.AddTrack('Score');
+      for i := 0 to High(notes) do
+      begin
+        mn := Default(TMidiNote);
+        mn.StartTick := Round(notes[i].Beat * ppq);
+        mn.LengthTick := Max(Round(notes[i].Length * ppq), 1);
+        mn.Note := EnsureRange(notes[i].Key, 0, 127);
+        mn.Velocity := EnsureRange(notes[i].Velocity, 1, 127);
+        mtr.AddNote(mn);
+      end;
+      mtr.SortNotes;
+    except
+      seq.Free;
+      raise;
+    end;
+    FCmds.Perform(TCommitMidiTakeCommand.Create(FProject, 0, seq, 'Score: ' + laneName, 0,
+      'Score: ' + laneName, endSec));
+    EnsureMixerStripsForTimelineTracks;   // the score lane gets its mixer strip too
+    { the lane's own audio would play over its score line: mute it (un-mute from the lane menu) }
+    trk.Muted := True;
+    FProject.Touch;
+    RefreshTimelineTab;
+    HideStatusProgress;
+    memTimeline.Lines.Insert(0, Format(
+      'Create to Score: %d notes from "%s" saved as MIDI track "Score: %s" (see the Score tab); the original lane is muted.',
+      [Length(notes), laneName, laneName]));
+  except
+    on EAbort do
+    begin
+      { Escape: nothing was committed (the clip is only added at the very end), the lane is untouched }
+      HideStatusProgress;
+      stbMain.SimpleText := 'Create to Score CANCELLED (Esc) - no changes were made.';
+      memTimeline.Lines.Insert(0, 'Create to Score: cancelled with Esc - no changes were made.');
+    end;
+    on E: Exception do
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Create to Score FAILED: ' + E.Message);
+    end;
+  end;
+end;
+
+{ Metronome button: takes effect immediately on a running Timeline player,
+  and is picked up at the start of every later Play. }
+procedure TfrmMain.TlSetMetronome(AOn: Boolean);
+begin
+  FMetronomeOn := AOn;
   if (FTlPlayer <> nil) and (FProject <> nil) then
-    FTlPlayer.SetMetronome(chkTlMetronome.Checked, FProject.TempoBPM, 4, -12);
+  begin
+    FTlPlayer.SetMetronome(FMetronomeOn, FProject.TempoBPM, 4, -12);
+    FTlPlayer.SetTempoMap(FProject.TempoBPM, FProject.TempoMap);
+  end;
 end;
 
 { Warp markers (see UDAW.Timeline.Warp). Markers live per selected clip for the
@@ -13011,14 +22088,20 @@ begin
            end;
            UpdateStatusProgress(150, Format('Warp - stretching %d segment(s)...', [Length(usable) + 1]));
            Application.ProcessMessages;
-           RenderWarp(planar, ch, frameCount, sr, usable, warped, outFrames);
+           JobAwait(
+             procedure
+             begin
+               RenderWarp(planar, ch, frameCount, sr, usable, warped, outFrames);
+             end, False);
            UpdateStatusProgress(250, 'Warp - writing audio file...');
            ForceDirectories(IncludeTrailingPathDelimiter(RecordingRootPath));
            fileName := IncludeTrailingPathDelimiter(RecordingRootPath) +
              Format('warp-clip%d-%s.wav', [c.Id, FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
            SaveWavFile(fileName, warped, ch, sr, Min(outFrames, frameCount), wsfPCM24);
+           JobNoteFile(fileName);
            newSrc := tl.AddSource(fileName, sr, ch, Min(outFrames, frameCount));
            FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, 0));
+           JobNoteClip(c);
            c.EffectName := 'Warp';
            c.Color := TlEffectColor('Warp');
            SetLength(FWarpMarkers, 0);
@@ -13055,44 +22138,7 @@ end;
   (Amplify, Balance, Pitch Shift, ...) are handled in TlFxMenuClick. }
 function TfrmMain.TlFxPreset(ATag: Integer; out AKind, AParams, AName: string): Boolean;
 begin
-  Result := True;
-  case ATag of
-    1: begin AKind := 'compressor'; AParams := 'type=compressor;thresh=-18;ratio=3;knee=6;attack=10;release=120;makeup=0'; AName := 'Compressor'; end;
-    2: begin AKind := 'reverb'; AParams := 'size=0.7;damp=0.4;width=1;mix=0.3;predelay=15'; AName := 'Reverb'; end;
-    3: begin AKind := 'modulation'; AParams := 'type=chorus;rate=0.6;depth=0.6;mix=0.4;stereo=90'; AName := 'Chorus'; end;
-    4: begin AKind := 'modulation'; AParams := 'type=flanger;rate=0.25;depth=0.7;mix=0.5;fb=0.4;stereo=90'; AName := 'Flanger'; end;
-    5: begin AKind := 'modulation'; AParams := 'type=phaser;rate=0.4;depth=0.8;mix=0.5;fb=0.3;stages=6;stereo=90'; AName := 'Phaser'; end;
-    6: begin AKind := 'modulation'; AParams := 'type=tremolo;rate=4;depth=0.6;mix=1'; AName := 'Tremolo'; end;
-    7: begin AKind := 'modulation'; AParams := 'type=autopan;rate=0.5;depth=1;mix=1'; AName := 'Auto-Pan'; end;
-    8: begin AKind := 'distortion'; AParams := 'type=saturation;drive=3;trim=0;mix=1'; AName := 'Saturation'; end;
-    9: begin AKind := 'distortion'; AParams := 'type=bitcrush;bits=8;down=4;mix=1'; AName := 'Bit Crusher'; end;
-    10: begin AKind := 'graphiceq'; AParams := 'bands=10;gains=0,0,1,2,3,3,2,1,0,0'; AName := 'Brighten EQ'; end;
-    13: begin AKind := 'compressor'; AParams := 'type=deesser;thresh=-24;ratio=4;knee=3;attack=1;release=80;makeup=0'; AName := 'De-Esser'; end;
-    14: begin AKind := 'delay'; AParams := 'ms=250;fb=0.3;mix=0.3;pingpong=0'; AName := 'Delay'; end;
-    15: begin AKind := 'compressor'; AParams := 'type=expander;thresh=-30;ratio=2;knee=6;attack=5;release=100;makeup=0'; AName := 'Expander'; end;
-    16: begin AKind := 'distortion'; AParams := 'type=foldback;drive=3;trim=0;mix=1'; AName := 'Foldback'; end;
-    17: begin AKind := 'compressor'; AParams := 'type=gate;thresh=-40;ratio=6;knee=2;attack=1;release=60;makeup=0;hold=15;range=-60'; AName := 'Gate'; end;
-    18: begin AKind := 'distortion'; AParams := 'type=hardclip;drive=3;trim=0;mix=1'; AName := 'Hard Clip'; end;
-    19: begin AKind := 'lookaheadlimiter'; AParams := 'ceiling=-0.3;release=100;lookahead=5'; AName := 'Limiter'; end;
-    20: begin AKind := 'delay'; AParams := 'ms=250;fb=0.35;mix=0.35;pingpong=1'; AName := 'Ping-Pong Delay'; end;
-    22: begin AKind := 'biquad'; AParams := 'type=lowshelf;freq=100;q=0.707;gaindb=6'; AName := 'Bass Enhance'; end;
-    23: begin AKind := 'dcblock'; AParams := 'hz=20'; AName := 'DC Offset Remover'; end;
-    24: begin AKind := 'exciter'; AParams := 'freq=3000;drive=4;mix=0.25'; AName := 'Exciter'; end;
-    25: begin AKind := 'biquad'; AParams := 'type=highpass;freq=80;q=0.707;gaindb=0'; AName := 'High-Pass Filter'; end;
-    26: begin AKind := 'biquad'; AParams := 'type=lowpass;freq=8000;q=0.707;gaindb=0'; AName := 'Low-Pass Filter'; end;
-    27: begin AKind := 'stereowidth'; AParams := 'width=0'; AName := 'Make Mono'; end;
-    28: begin AKind := 'multibandcomp'; AParams := ''; AName := 'Multiband Compressor'; end;
-    29: begin AKind := 'biquad'; AParams := 'type=notch;freq=60;q=8;gaindb=0'; AName := 'Notch Filter'; end;
-    31: begin AKind := 'biquad'; AParams := 'type=peaking;freq=3000;q=1;gaindb=4'; AName := 'Presence Boost'; end;
-    32: begin AKind := 'stereowidth'; AParams := 'width=1.5'; AName := 'Stereo Widener'; end;
-    33: begin AKind := 'transientshaper'; AParams := 'attack=6;sustain=0'; AName := 'Transient Shaper'; end;
-    34: begin AKind := 'biquad'; AParams := 'type=highshelf;freq=8000;q=0.707;gaindb=6'; AName := 'Treble Boost'; end;
-    40: begin AKind := 'distortion'; AParams := 'type=tube;drive=3;trim=0;mix=1'; AName := 'Tube Saturation'; end;
-    41: begin AKind := 'distortion'; AParams := 'type=softclip;drive=2;trim=0;mix=1'; AName := 'Soft Clip'; end;
-  else
-    AKind := ''; AParams := ''; AName := '';
-    Result := False;
-  end;
+  Result := FxPresetByTag(ATag, AKind, AParams, AName);
 end;
 
 { Kind + starting settings for a Timeline effect by its display name - used
@@ -13104,7 +22150,7 @@ var
   n: string;
 begin
   Result := True;
-  for tag := 1 to 50 do
+  for tag := 1 to 130 do
     if TlFxPreset(tag, AKind, AParams, n) and SameText(n, AName) then Exit;
   AKind := '';
   AParams := '';
@@ -13118,6 +22164,151 @@ begin
   else if SameText(AName, 'Fade Out') then begin AKind := '@fadeout'; AParams := ''; end
   else
     Result := False;
+end;
+
+{ Loudness & Phase Report: measures every clip slice inside the marked range and writes the
+  numbers to the Timeline log (nothing is changed or rendered). }
+procedure TfrmMain.TlMeasureRangeReport;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  tids: TArray<Integer>;
+  tid, j, i, sr, ch, startFrame, frameCount, n: Integer;
+  c: TTimelineClip;
+  src: TMediaSource;
+  player: TTimelinePlayer;
+  dec: TDecodedSource;
+  slice: TAudioPlanar;
+  rep: TAudioMeterReport;
+  ambi: TAmbisonicReport;
+  s0, s1: Double;
+begin
+  if (FProject = nil) or not FTlRangeActive then
+  begin
+    memTimeline.Lines.Insert(0, 'Loudness & Phase Report: mark a range on the ruler first.');
+    Exit;
+  end;
+  tl := FProject.Timeline;
+  tids := TlRangeTrackIds;
+  n := 0;
+  player := TTimelinePlayer.Create(tl);
+  try
+    player.EnsureSourcesLoaded;
+    for tid in tids do
+    begin
+      trk := tl.TrackById(tid);
+      if trk = nil then Continue;
+      for j := 0 to trk.ClipCount - 1 do
+      begin
+        c := trk.GetClip(j);
+        s0 := Max(c.StartSeconds, FTlRangeStartSec);
+        s1 := Min(c.EndSeconds, FTlRangeEndSec);
+        if s1 - s0 <= TIMELINE_MIN_CLIP_SECONDS then Continue;
+        src := tl.SourceById(c.SourceId);
+        if src = nil then Continue;
+        dec := player.GetDecodedSource(src.Id);
+        if (dec = nil) or dec.Failed or (dec.FrameCount = 0) then Continue;
+        sr := dec.SampleRate;
+        ch := dec.Channels;
+        if (sr <= 0) or (ch <= 0) then Continue;
+        startFrame := Max(0, Round(c.SourceOffsetSeconds * sr) + Round((s0 - c.StartSeconds) * sr));
+        frameCount := Round((s1 - s0) * sr);
+        if startFrame + frameCount > dec.FrameCount then frameCount := dec.FrameCount - startFrame;
+        if frameCount <= 0 then Continue;
+        SetLength(slice, ch);
+        for i := 0 to ch - 1 do
+        begin
+          SetLength(slice[i], frameCount);
+          Move(dec.Data[i][startFrame], slice[i][0], frameCount * SizeOf(Single));
+        end;
+        MeasureAudio(slice, ch, frameCount, sr, rep);
+        if MeasureAmbisonics(slice, ch, frameCount, ambi) then
+          memTimeline.Lines.Insert(0, Format('    Ambisonics (W Y Z X): %.1f / %.1f / %.1f / %.1f dB   source direction: azimuth %.0f deg, elevation %.0f deg, directivity %.2f (1 = single source, 0 = diffuse)',
+            [ambi.ChannelRmsDb[0], ambi.ChannelRmsDb[1], ambi.ChannelRmsDb[2], ambi.ChannelRmsDb[3],
+             ambi.AzimuthDeg, ambi.ElevationDeg, ambi.Directivity], TFormatSettings.Invariant));
+        { newest line sits on top of the log, so the three lines go in reverse }
+        memTimeline.Lines.Insert(0, Format('    stereo correlation %.2f (1 = mono, 0 = wide, below 0 = phase problems)   side vs mid %.1f dB   DC offset %.5f',
+          [rep.Correlation, rep.SideToMidDb, rep.DcOffset], TFormatSettings.Invariant));
+        memTimeline.Lines.Insert(0, Format('    sample peak %.1f dBFS   true peak %.1f dBTP   RMS %.1f dBFS',
+          [rep.SamplePeakDb, rep.TruePeakDb, rep.RmsDb], TFormatSettings.Invariant));
+        memTimeline.Lines.Insert(0, Format('Loudness & Phase Report - clip %d (%.1f s): integrated %.1f LUFS   momentary max %.1f LUFS   short-term max %.1f LUFS',
+          [c.Id, s1 - s0, rep.IntegratedLufs, rep.MomentaryMaxLufs, rep.ShortTermMaxLufs], TFormatSettings.Invariant));
+        Inc(n);
+      end;
+    end;
+  finally
+    player.Free;
+  end;
+  if n = 0 then
+    memTimeline.Lines.Insert(0, 'Loudness & Phase Report: no clips with audio in the selected range.');
+end;
+
+{ Effects > Plug-in...: loads a VST3 (or VST2 / CLAP) plug-in from a file and applies it to the
+  marked range of the selected lane(s), like any built-in effect (offline render, undoable,
+  Esc cancels). The plug-in runs with its own saved settings. }
+procedure TfrmMain.TlFxPluginClick(Sender: TObject);
+var
+  fn, ext, pathB64, plugName, loadError, kind, params: string;
+  paramCount: Integer;
+  vst3Probe: TVST3Host;
+  clapProbe: TCLAPHost;
+begin
+  if FProject = nil then Exit;
+  if not FTlRangeActive then
+  begin
+    memTimeline.Lines.Insert(0, 'Plug-in: mark a time range on the lane first (drag in the ruler or lanes), then choose Effects > Plug-in.');
+    Exit;
+  end;
+  if not dlgOpenVst.Execute then Exit;
+  fn := dlgOpenVst.FileName;
+  ext := LowerCase(ExtractFileExt(fn));
+  plugName := '';
+  params := '';
+  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(fn));
+  try
+    if ext = '.vst3' then
+    begin
+      vst3Probe := TVST3Host.Create;
+      try
+        vst3Probe.LoadOnly(fn);
+        plugName := vst3Probe.EffectName;
+      finally
+        vst3Probe.Free;
+      end;
+      kind := 'vst3';
+      params := Format('path=%s;state=', [pathB64]);
+    end
+    else if ext = '.clap' then
+    begin
+      clapProbe := TCLAPHost.Create;
+      try
+        clapProbe.LoadOnly(fn);
+        plugName := clapProbe.EffectName;
+      finally
+        clapProbe.Free;
+      end;
+      kind := 'clap';
+      params := Format('path=%s;state=', [pathB64]);
+    end
+    else
+    begin
+      if not ProbeVst2File(fn, paramCount, loadError) then
+      begin
+        MessageDlg('Not a usable VST2 plugin:'#13#10 + fn + #13#10#13#10 + loadError, mtError, [mbOK], 0);
+        Exit;
+      end;
+      kind := 'vst2';
+      params := Format('path=%s;state=;paramcount=%d', [pathB64, paramCount]);
+    end;
+  except
+    on E: Exception do
+    begin
+      MessageDlg('Not a usable plugin:'#13#10 + fn + #13#10#13#10 + E.Message, mtError, [mbOK], 0);
+      Exit;
+    end;
+  end;
+  if plugName = '' then plugName := ChangeFileExt(ExtractFileName(fn), '');
+  TlApplyEffectToRange(kind, params, plugName);
 end;
 
 procedure TfrmMain.TlFxMenuClick(Sender: TObject);
@@ -13194,6 +22385,8 @@ begin
         end;
     38: begin TlSplitStemsSelected; Exit; end;
     39: begin TlAudioToMidiSelected; Exit; end;
+    114: begin TlSplitSpeechMusicSelected; Exit; end;
+    113: begin TlMeasureRangeReport; Exit; end;
   else
     if not TlFxPreset(TMenuItem(Sender).Tag, kind, params, name) then Exit;
   end;
@@ -13260,7 +22453,7 @@ const
     for i := 0 to n - 1 do
     begin
       { simple AD envelope so each hit looks like a real transient }
-      env := Exp(-3.0 * (i / SR) / ASeconds);
+      env := FastExp(-3.0 * (i / SR) / ASeconds);
       if ANoise then
       begin
         rnd := Cardinal((UInt64(rnd) * 1664525 + 1013904223) and $FFFFFFFF);
@@ -13271,8 +22464,8 @@ const
       else
       begin
         ph := 2 * Pi * AFreq * i / SR;
-        planar[0][i] := AAmp * env * Sin(ph);
-        planar[1][i] := AAmp * env * Sin(ph * 1.001);
+        planar[0][i] := AAmp * env * FastSin(ph);
+        planar[1][i] := AAmp * env * FastSin(ph * 1.001);
       end;
     end;
     SaveWavFile(AFileName, planar, 2, SR, n, wsfFloat32);
@@ -13342,6 +22535,590 @@ begin
   end;
 end;
 
+{ ---- Timeline keyboard layer (Timeline tab only, never while typing) ----
+    S split at playhead      M marker at playhead     L loop on / off
+    [ ] loop start / end     F zoom to fit            Z zoom to selection
+    + -  zoom in / out       , .  previous / next marker
+    Left / Right  nudge selected clips (or the playhead) by the snap step;
+    Shift = four steps. }
+function TfrmMain.TlHotKey(var Key: Word; Shift: TShiftState): Boolean;
+begin
+  Result := True;
+  if FProject = nil then Exit(False);
+  if Shift = [] then
+    case Key of
+      Ord('S'): btnTlSplitClick(Self);
+      Ord('M'): btnTlAddMarkerHereClick(Self);
+      Ord('L'): btnTlLoopToggleClick(Self);
+      VK_OEM_4: btnTlLoopStartClick(Self);
+      VK_OEM_6: btnTlLoopEndClick(Self);
+      Ord('F'): btnTlZoomFitClick(Self);
+      Ord('Z'): TlZoomToSelection;
+      VK_OEM_PLUS, VK_ADD: btnTlZoomInClick(Self);
+      VK_OEM_MINUS, VK_SUBTRACT: btnTlZoomOutClick(Self);
+      VK_OEM_COMMA: TlGotoMarker(-1);
+      VK_OEM_PERIOD: TlGotoMarker(1);
+      VK_LEFT: TlNudge(-1, False);
+      VK_RIGHT: TlNudge(1, False);
+    else
+      Result := False;
+    end
+  else if Shift = [ssShift] then
+    case Key of
+      VK_LEFT: TlNudge(-1, True);
+      VK_RIGHT: TlNudge(1, True);
+    else
+      Result := False;
+    end
+  else
+    Result := False;
+end;
+
+{ one step along the snap grid (or a few pixels when snapping is off) }
+{ Lock / Unlock the selected clip(s): a locked clip cannot be moved, trimmed, split, cut or otherwise
+  edited until it is unlocked. All the selected clips take the opposite of the first one's state. }
+procedure TfrmMain.btnTlLockClipClick(Sender: TObject);
+var
+  tl: TTimeline;
+  ids: TArray<Integer>;
+  i: Integer;
+  c: TTimelineClip;
+  newState: Boolean;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  SetLength(ids, 0);
+  if FTlSelClipId >= 0 then ids := [FTlSelClipId];
+  for i := 0 to High(FTlSelClipIds) do ids := ids + [FTlSelClipIds[i]];
+  if Length(ids) = 0 then Exit;
+  c := tl.ClipById(ids[0]);
+  if c = nil then Exit;
+  newState := not c.Locked;
+  for i := 0 to High(ids) do
+    if tl.ClipById(ids[i]) <> nil then tl.SetClipLocked(ids[i], newState);
+  FProject.Touch;
+  memTimeline.Lines.Insert(0, Format('%d clip(s) %s.', [Length(ids), IfThen(newState, 'locked', 'unlocked')]));
+  RefreshTimelineTab;
+end;
+
+{ Clamp to Last / Next Segment (Tag 1 / 2): slides each selected clip along its own lane so it sits
+  snug against the end of the previous clip (Last) or so its end meets the start of the next clip
+  (Next) - gapless playback. Locked clips and clips with no neighbour on that side are skipped. }
+procedure TfrmMain.TlClampToClick(Sender: TObject);
+var
+  ids: TArray<Integer>;
+  i, moved, skipped: Integer;
+begin
+  if FProject = nil then Exit;
+  SetLength(ids, 0);
+  if FTlSelClipId >= 0 then ids := [FTlSelClipId];
+  for i := 0 to High(FTlSelClipIds) do ids := ids + [FTlSelClipIds[i]];
+  if Length(ids) = 0 then Exit;
+  TlClampClips(ids, (Sender as TComponent).Tag = 1, moved, skipped);
+end;
+
+{ the work of Clamp to Last / Next Segment, for the menu (the selected clips) and for AI tools
+  (clips named by id) alike }
+procedure TfrmMain.TlClampClips(const ids: TArray<Integer>; toLast: Boolean; out moved, skipped: Integer);
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  c, o, nb: TTimelineClip;
+  i, j: Integer;
+  newStart: Double;
+begin
+  moved := 0;
+  skipped := 0;
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  for i := 0 to High(ids) do
+  begin
+    c := tl.ClipById(ids[i], trk);
+    if (c = nil) or c.Locked then begin Inc(skipped); Continue; end;
+    nb := nil;
+    for j := 0 to trk.ClipCount - 1 do
+    begin
+      o := trk.GetClip(j);
+      if o = c then Continue;
+      if toLast then
+      begin
+        if (o.StartSeconds < c.StartSeconds) and ((nb = nil) or (o.StartSeconds > nb.StartSeconds)) then nb := o;
+      end
+      else if (o.StartSeconds > c.StartSeconds) and ((nb = nil) or (o.StartSeconds < nb.StartSeconds)) then
+        nb := o;
+    end;
+    if nb = nil then begin Inc(skipped); Continue; end;
+    if toLast then newStart := nb.EndSeconds
+    else newStart := nb.StartSeconds - c.LengthSeconds;
+    if newStart < 0 then begin Inc(skipped); Continue; end;
+    try
+      if FCmds.Perform(TMoveTimelineClipCommand.Create(FProject, ids[i], newStart, 0)) then Inc(moved);
+    except
+      on E: Exception do
+      begin
+        Inc(skipped);
+        memTimeline.Lines.Insert(0, 'Clamp FAILED: ' + E.Message);
+      end;
+    end;
+  end;
+  memTimeline.Lines.Insert(0, Format('Clamp to %s Segment: %d clip(s) moved, %d skipped.',
+    [IfThen(toLast, 'Last', 'Next'), moved, skipped]));
+  RefreshTimelineTab;
+end;
+
+{ Delete Cache (the Timeline's transport bar): removes the files in the local cache folder that
+  nothing uses - not this project (as it is right now, saved or not) and not any of the recent
+  projects, which keep their own rendered files in the same folder. Files written in the last few
+  minutes are left alone (a render may still be using them). Asks first, shows progress on the
+  status bar, and Esc stops it. }
+procedure TfrmMain.TlDeleteCache;
+const
+  RECENT_SKIP_SECONDS = 600;
+var
+  cacheDir, haystack, low, p, txt: string;
+  files, doomed: TArray<string>;
+  recent: TArray<string>;
+  i, total: Integer;
+  bytes: Int64;
+  stamp: TDateTime;
+
+  procedure AddProjectText(const AFile: string);
+  begin
+    if (AFile = '') or not FileExists(AFile) then Exit;
+    try
+      haystack := haystack + #10 + LowerCase(TFile.ReadAllText(AFile, TEncoding.UTF8));
+    except
+      // an unreadable project cannot protect anything; the others still do
+    end;
+  end;
+
+begin
+  if FProject = nil then Exit;
+  if FCacheThread <> nil then
+  begin
+    MessageDlg('A cache clearing is already in progress. Wait for it to finish (Esc stops it).',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  if FTlPlaying then
+  begin
+    MessageDlg('Stop the Timeline first - rendered files may be playing.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  cacheDir := IncludeTrailingPathDelimiter(App.Paths.Cache);
+  if (Length(cacheDir) < 6) or not DirectoryExists(cacheDir) then
+  begin
+    MessageDlg('There is no cache folder to clean.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+
+  { everything the open project names, plus what the recent projects name }
+  haystack := LowerCase(ProjectToString(FProject));
+  for i := 0 to 9 do
+  begin
+    p := App.Config.GetString('project', 'recent_' + IntToStr(i), '');
+    if (p <> '') and not SameText(p, FProject.FileName) then recent := recent + [p];
+  end;
+  for p in recent do AddProjectText(p);
+  if (FProject.FileName <> '') then AddProjectText(FProject.FileName);
+
+  ShowStatusProgress('Delete Cache - looking for unused files...', 100);
+  try
+  try
+    UpdateStatusProgress(10, 'Delete Cache - listing the cache folder...');
+    files := TDirectory.GetFiles(cacheDir, '*', TSearchOption.soAllDirectories);
+    doomed := nil;
+    bytes := 0;
+    for i := 0 to High(files) do
+    begin
+      if (i and 63) = 0 then
+        UpdateStatusProgress(10 + (i * 80) div Max(1, Length(files)), 'Delete Cache - checking what is used...');
+      low := LowerCase(files[i]);
+      if Pos(low, haystack) > 0 then Continue;
+      if FileAge(files[i], stamp) and (Abs(Now - stamp) * 86400 < RECENT_SKIP_SECONDS) then Continue;
+      doomed := doomed + [files[i]];
+      bytes := bytes + TFile.GetSize(files[i]);
+    end;
+  except
+    on EJobCancelled do Exit;   // nothing has been deleted yet
+  end;
+  finally
+    HideStatusProgress;
+  end;
+
+  if Length(doomed) = 0 then
+  begin
+    MessageDlg('The cache folder holds nothing this project, or your recent projects, no longer use.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  txt := Format('%d file(s), %.1f MB, in the cache folder are not used by this project or your recent projects:' +
+    sLineBreak + sLineBreak + '%s' + sLineBreak + sLineBreak + 'Delete them?',
+    [Length(doomed), bytes / (1024 * 1024), cacheDir]);
+  if MessageDlg(txt, mtConfirmation, [mbYes, mbNo], 0, mbNo) <> mrYes then Exit;
+
+  { the deleting runs on a thread of its own, so the window stays free to use; the thread never
+    touches the window - it queues its progress, and CacheClearDone finishes the job on the main
+    thread when it is over }
+  FCacheCancel := False;
+  FCacheDeleted := 0;
+  FCacheFailed := 0;
+  FCacheFreed := 0;
+  FCacheStopped := False;
+  total := Length(doomed);
+  prgStatus.Style := pbstNormal;
+  prgStatus.Min := 0;
+  prgStatus.Max := Max(1, total);
+  prgStatus.Position := 0;
+  prgStatus.Visible := True;
+  stbMain.SimpleText := 'Delete Cache - deleting unused files';
+  FCacheThread := TThread.CreateAnonymousThread(
+    procedure
+    var
+      j: Integer;
+      last: UInt64;
+      size: Int64;
+      dirs: TArray<string>;
+    begin
+      last := GetTickCount64;
+      for j := 0 to High(doomed) do
+      begin
+        if FCacheCancel then
+        begin
+          FCacheStopped := True;
+          Break;
+        end;
+        try
+          size := TFile.GetSize(doomed[j]);
+          if DeleteFile(doomed[j]) then
+          begin
+            Inc(FCacheDeleted);
+            Inc(FCacheFreed, size);
+          end
+          else
+            Inc(FCacheFailed);
+        except
+          Inc(FCacheFailed);
+        end;
+        if (GetTickCount64 - last >= 80) or (j = High(doomed)) then
+        begin
+          last := GetTickCount64;
+          CacheClearReport(j + 1, total);
+        end;
+      end;
+      { folders the clean-up emptied (the top-level cache folders themselves stay) }
+      try
+        dirs := TDirectory.GetDirectories(cacheDir, '*', TSearchOption.soAllDirectories);
+        for j := High(dirs) downto 0 do   // parents come before children, so this is deepest first
+          if Length(TDirectory.GetFileSystemEntries(dirs[j])) = 0 then RemoveDir(dirs[j]);
+      except
+        // a folder that cannot be listed or removed is simply left
+      end;
+    end);
+  FCacheThread.OnTerminate := CacheClearDone;   // runs on the main thread; the thread frees itself after it
+  FCacheThread.Start;
+end;
+
+{ main thread: a progress step queued by the Delete Cache thread }
+procedure TfrmMain.CacheClearProgress(ADone, ATotal: Integer);
+begin
+  if FCacheThread = nil then Exit;   // already finished
+  prgStatus.Position := ADone;
+end;
+
+{ the thread's side of the above: hands the step to the main thread }
+procedure TfrmMain.CacheClearReport(ADone, ATotal: Integer);
+begin
+  TThread.Queue(nil,
+    procedure
+    begin
+      CacheClearProgress(ADone, ATotal);
+    end);
+end;
+
+{ main thread, when the Delete Cache thread has finished (or stopped): closes the progress bar,
+  forgets the thread so the next request can start, and reports the outcome }
+procedure TfrmMain.CacheClearDone(Sender: TObject);
+var
+  txt: string;
+begin
+  FCacheThread := nil;
+  if not FSyncProgressActive then   // another job may be using the bar by now
+  begin
+    prgStatus.Visible := False;
+    prgStatus.Position := 0;
+  end;
+  txt := Format('Delete Cache: %d unused file(s) deleted, %.1f MB freed%s%s.', [FCacheDeleted, FCacheFreed / (1024 * 1024),
+    IfThen(FCacheFailed > 0, Format(', %d could not be deleted (in use)', [FCacheFailed]), ''),
+    IfThen(FCacheStopped, ' - stopped with Esc', '')]);
+  memTimeline.Lines.Insert(0, txt);
+  stbMain.SimpleText := txt;
+  Logger.Info('ui', txt);
+end;
+
+{ the Markers / Chords lane item (marker, scene region or chord) under the last right-click }
+procedure TfrmMain.pmMkLockClick(Sender: TObject);
+var
+  tl: TTimeline;
+  i: Integer;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  case FLaneCtxKind of
+    1: for i := 0 to tl.MarkerCount - 1 do
+         if tl.GetMarker(i).Id = FLaneCtxId then tl.GetMarker(i).Locked := not tl.GetMarker(i).Locked;
+    2: for i := 0 to tl.RegionCount - 1 do
+         if tl.GetRegion(i).Id = FLaneCtxId then tl.GetRegion(i).Locked := not tl.GetRegion(i).Locked;
+    3: for i := 0 to tl.ChordCount - 1 do
+         if tl.GetChord(i).Id = FLaneCtxId then tl.GetChord(i).Locked := not tl.GetChord(i).Locked;
+  else
+    Exit;
+  end;
+  FProject.Touch;
+  RefreshTimelineTab;
+end;
+
+{ True when the marker / scene / chord being dragged is locked: it stays where it is }
+function TfrmMain.TlLaneEditLocked: Boolean;
+var
+  tl: TTimeline;
+  i: Integer;
+begin
+  Result := False;
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  case FLaneEdit of
+    1: for i := 0 to tl.MarkerCount - 1 do
+         if tl.GetMarker(i).Id = FLaneEditId then Exit(tl.GetMarker(i).Locked);
+    2, 3, 4: for i := 0 to tl.RegionCount - 1 do
+         if tl.GetRegion(i).Id = FLaneEditId then Exit(tl.GetRegion(i).Locked);
+    5, 7: for i := 0 to tl.ChordCount - 1 do
+         if tl.GetChord(i).Id = FLaneEditId then Exit(tl.GetChord(i).Locked);
+  end;
+end;
+
+procedure TfrmMain.TlNudge(ADir: Integer; ACoarse: Boolean);
+var
+  tl: TTimeline;
+  ids: TArray<Integer>;
+  i, k, reps: Integer;
+  c, c0: TTimelineClip;
+  target, delta, stepSec, newStart: Double;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  reps := IfThen(ACoarse, 4, 1);
+  SetLength(ids, 0);
+  if FTlSelClipId >= 0 then ids := [FTlSelClipId];
+  for i := 0 to High(FTlSelClipIds) do ids := ids + [FTlSelClipIds[i]];
+  stepSec := 4 / Max(1.0, FTlView.PixelsPerSecond);
+  if Length(ids) = 0 then
+  begin
+    target := tl.PlayheadSeconds;
+    for k := 1 to reps do
+      if FTlView.SnapEnabled and (Abs(FTlView.SnapDir(target, ADir) - target) > 1e-6) then
+        target := FTlView.SnapDir(target, ADir)
+      else
+        target := target + ADir * stepSec;
+    if target < 0 then target := 0;
+    tl.PlayheadSeconds := target;
+    FRecInsertSeconds := target;
+    RefreshTimelineTab;
+    Exit;
+  end;
+  c0 := tl.ClipById(ids[0]);
+  if c0 = nil then Exit;
+  target := c0.StartSeconds;
+  for k := 1 to reps do
+    if FTlView.SnapEnabled and (Abs(FTlView.SnapDir(target, ADir) - target) > 1e-6) then
+      target := FTlView.SnapDir(target, ADir)
+    else
+      target := target + ADir * stepSec;
+  delta := target - c0.StartSeconds;
+  try
+    for i := 0 to High(ids) do
+    begin
+      c := tl.ClipById(ids[i]);
+      if (c = nil) or c.Locked then Continue;
+      newStart := Max(0.0, c.StartSeconds + delta);
+      FCmds.Perform(TMoveTimelineClipCommand.Create(FProject, ids[i], newStart, 0));
+    end;
+  except
+    on E: Exception do memTimeline.Lines.Insert(0, 'Nudge FAILED: ' + E.Message);
+  end;
+  RefreshTimelineTab;
+end;
+
+{ jump the playhead to the previous / next marker and bring it into view }
+{ Go to the start (0) or the end (the last clip's end) of the Timeline: works while playing,
+  the player reads the playhead live; the view scrolls to keep it on screen. }
+procedure TfrmMain.TlGotoEnd(AToEnd: Boolean);
+var
+  tl: TTimeline;
+  target, x: Double;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  if AToEnd then target := tl.LastClipEndSeconds else target := 0;
+  tl.PlayheadSeconds := Max(0.0, target);
+  FRecInsertSeconds := tl.PlayheadSeconds;
+  x := FTlView.SecondsToX(tl.PlayheadSeconds);
+  if (x < FTlView.HeaderWidth + 20) or (x > pbTimeline.Width - 20) then
+    FTlView.ScrollToSeconds(Max(0.0, tl.PlayheadSeconds - 2));
+  RefreshTimelineTab;
+end;
+
+procedure TfrmMain.TlGotoMarker(ADir: Integer);
+var
+  tl: TTimeline;
+  i: Integer;
+  best, s, x: Double;
+  found: Boolean;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  found := False;
+  best := 0;
+  for i := 0 to tl.MarkerCount - 1 do
+  begin
+    s := tl.GetMarker(i).Seconds;
+    if ((ADir > 0) and (s > tl.PlayheadSeconds + 1e-4) and (not found or (s < best))) or
+       ((ADir < 0) and (s < tl.PlayheadSeconds - 1e-4) and (not found or (s > best))) then
+    begin
+      best := s;
+      found := True;
+    end;
+  end;
+  if not found then Exit;
+  tl.PlayheadSeconds := best;
+  FRecInsertSeconds := best;
+  x := FTlView.SecondsToX(best);
+  if (x < FTlView.HeaderWidth + 20) or (x > pbTimeline.Width - 20) then
+    FTlView.ScrollToSeconds(Max(0.0, best - 2));
+  RefreshTimelineTab;
+end;
+
+{ zoom so the highlighted range (or the selected clips) fills the lanes }
+procedure TfrmMain.TlZoomToSelection;
+var
+  tl: TTimeline;
+  a, b: Double;
+  i: Integer;
+  c: TTimelineClip;
+  ids: TArray<Integer>;
+  have: Boolean;
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  have := False;
+  a := 0;
+  b := 0;
+  if FTlRangeActive then
+  begin
+    a := FTlRangeStartSec;
+    b := FTlRangeEndSec;
+    have := True;
+  end
+  else
+  begin
+    SetLength(ids, 0);
+    if FTlSelClipId >= 0 then ids := [FTlSelClipId];
+    for i := 0 to High(FTlSelClipIds) do ids := ids + [FTlSelClipIds[i]];
+    for i := 0 to High(ids) do
+    begin
+      c := tl.ClipById(ids[i]);
+      if c = nil then Continue;
+      if not have then
+      begin
+        a := c.StartSeconds;
+        b := c.EndSeconds;
+        have := True;
+      end
+      else
+      begin
+        a := Min(a, c.StartSeconds);
+        b := Max(b, c.EndSeconds);
+      end;
+    end;
+  end;
+  if not have or (b - a < 0.01) then Exit;
+  FTlView.SetZoom(TlLaneWidth / ((b - a) * 1.1));
+  FTlView.ScrollToSeconds(Max(0.0, a - (b - a) * 0.05));
+  RefreshTimelineTab;
+end;
+
+{ ---- Loop bar: the bottom strip of the ruler. Drag an edge to resize the loop,
+  drag its body to move it, drag over empty strip to make a new one, double-click
+  to switch it on / off. Everything snaps to the grid. ---- }
+function TfrmMain.TlLoopBarMouseDown(X, Y: Integer; Shift: TShiftState): Boolean;
+var
+  tl: TTimeline;
+  x1, x2, sec: Double;
+begin
+  Result := False;
+  if (FProject = nil) or (Y < LANE_RULER_H - 9) or (Y >= LANE_RULER_H) then Exit;
+  tl := FProject.Timeline;
+  sec := Max(0.0, FTlView.XToSeconds(X));
+  Result := True;
+  if ssDouble in Shift then
+  begin
+    if tl.LoopLengthSeconds > 0 then tl.LoopEnabled := not tl.LoopEnabled;
+    FProject.Touch;
+    RefreshTimelineTab;
+    Exit;
+  end;
+  FTlLoopDrag := 1;
+  FTlLoopAnchorSec := FTlView.Snap(sec);
+  FTlLoopMoved := False;
+  if tl.LoopLengthSeconds > 0 then
+  begin
+    x1 := FTlView.SecondsToX(tl.LoopStartSeconds);
+    x2 := FTlView.SecondsToX(tl.LoopStartSeconds + tl.LoopLengthSeconds);
+    if Abs(X - x1) <= 6 then FTlLoopDrag := 3
+    else if Abs(X - x2) <= 6 then FTlLoopDrag := 4
+    else if (X > x1) and (X < x2) then
+    begin
+      FTlLoopDrag := 2;
+      FTlLoopGrabSec := sec - tl.LoopStartSeconds;
+    end;
+  end;
+end;
+
+procedure TfrmMain.TlLoopBarMove(X: Integer);
+var
+  tl: TTimeline;
+  sec, s, e: Double;
+begin
+  tl := FProject.Timeline;
+  sec := FTlView.Snap(Max(0.0, FTlView.XToSeconds(X)));
+  case FTlLoopDrag of
+    1:
+      begin
+        s := Min(FTlLoopAnchorSec, sec);
+        e := Max(FTlLoopAnchorSec, sec);
+        if e - s < 0.01 then Exit;
+        tl.LoopStartSeconds := s;
+        tl.LoopLengthSeconds := e - s;
+        tl.LoopEnabled := True;
+      end;
+    2:
+      tl.LoopStartSeconds := FTlView.Snap(Max(0.0, FTlView.XToSeconds(X) - FTlLoopGrabSec));
+    3:
+      begin
+        e := tl.LoopStartSeconds + tl.LoopLengthSeconds;
+        s := Min(sec, e - 0.05);
+        tl.LoopStartSeconds := s;
+        tl.LoopLengthSeconds := e - s;
+      end;
+    4:
+      tl.LoopLengthSeconds := Max(0.05, sec - tl.LoopStartSeconds);
+  end;
+  FTlLoopMoved := True;
+  FTlSnapGuideOn := FTlView.SnapEnabled;
+  FTlSnapGuideSec := sec;
+  RefreshTimelineTab;
+end;
+
 procedure TfrmMain.pbTimelineMouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
@@ -13359,15 +23136,90 @@ begin
     every hotkey while a text field is focused. That is why Delete/Insert/
     Home/End "randomly" stopped working. Clicking the timeline hands focus
     to the page control so the hotkeys are live again. }
-  if (ActiveControl is TCustomEdit) or (ActiveControl is TCustomMemo) then
+  if (ActiveControl is TCustomEdit) or (ActiveControl is TCustomMemo) or (ActiveControl is TGLEdit) then
   begin
     if ActiveControl = edtTlTempo then
       edtTlTempoExit(edtTlTempo);   // commit a half-typed BPM like leaving the box would
     ActiveControl := pgc;
   end;
+  { a press cancels a menu still waiting out the double-click time; the second press of a
+    double-click (ssDouble) opens the effect window on release instead }
+  tmrTlEffMenu.Enabled := False;
+  FTlDblPress := (Button = mbLeft) and (ssDouble in Shift);
+  { double-click the spectrum in the top-left corner: the big analyser window }
+  if FTlDblPress and (X < FTlView.HeaderWidth) and (Y < LANE_RULER_H) then
+  begin
+    TlOpenSpectrumWindow;
+    Exit;
+  end;
   if FProject = nil then Exit;
   tl := FProject.Timeline;
   FTlView.SetViewportWidth(pbTimeline.Width);
+  TlApplyViewMetrics;
+
+  { Clip Stage column (scene buttons + one launch slot per track) }
+  if TlStageMouseDown(X, Y, Button) then Exit;
+  { Markers / Tempo / Signature lanes }
+  if TlLaneMouseDown(X, Y, Shift, Button) then Exit;
+  { Ctrl + drag a scene's start / end line over the lanes: resize the scene }
+  if (Button = mbLeft) and (ssCtrl in Shift) and (X >= FTlView.HeaderWidth) and
+     (Y >= FTlView.RulerHeight) and TlSceneEdgeGrab(X) then Exit;
+  { the "+ Add channel" placeholder under the last track }
+  if (Button = mbLeft) and (FTlMode = 0) and (Y >= FTlView.RulerHeight) and
+     PtInRect(TlAddChannelRect, Point(X, Y)) then
+  begin
+    btnTlAddTrackClick(nil);
+    Exit;
+  end;
+  { "Back to arrangement" on a launched track's banner }
+  if (Button = mbLeft) and (Length(FStageLaunches) > 0) and (X >= FTlView.HeaderWidth) and
+     TlTrackAtY(Y, ti) and (TlStageLaunchIndex(tl.GetTrack(ti).Id) >= 0) and
+     PtInRect(TlStageBackRect(TlTrackTop(ti), tl.GetTrack(ti).Height), Point(X, Y)) then
+  begin
+    TlStageBack;
+    Exit;
+  end;
+
+  { Shift + left-click on a lane marks out the whole region (the scene) under the click, on that
+    lane; with no scene there, the clip under the click is marked end to end }
+  if (Button = mbLeft) and (ssShift in Shift) and not (ssCtrl in Shift) and
+     (X >= FTlView.HeaderWidth) and (Y >= LANE_RULER_H) and TlTrackAtY(Y, ti) then
+  begin
+    sec := FTlView.XToSeconds(X);
+    if sec < 0 then sec := 0;
+    rngStart := -1;
+    rngEnd := -1;
+    for i := 0 to tl.RegionCount - 1 do
+      if (sec >= tl.GetRegion(i).StartSeconds) and (sec < tl.GetRegion(i).EndSeconds) and
+         ((rngStart < 0) or (tl.GetRegion(i).LengthSeconds < rngEnd - rngStart)) then
+      begin
+        rngStart := tl.GetRegion(i).StartSeconds;
+        rngEnd := tl.GetRegion(i).EndSeconds;
+      end;
+    if rngStart < 0 then
+    begin
+      c := TlClipAtPoint(X, Y);
+      if c <> nil then
+      begin
+        rngStart := c.StartSeconds;
+        rngEnd := c.EndSeconds;
+      end;
+    end;
+    if rngStart >= 0 then
+    begin
+      FTlCtxTrackId := tl.GetTrack(ti).Id;
+      FTlExtraTrackIds := nil;
+      FTlSelectedTrackId := FTlCtxTrackId;
+      FTlEffCtxActive := False;
+      FTlRulerCtxActive := False;
+      TlSetSingleSelection(-1);
+      FTlRangeActive := True;
+      FTlRangeStartSec := rngStart;
+      FTlRangeEndSec := rngEnd;
+      RefreshTimelineTab;
+      Exit;
+    end;
+  end;
 
   { track under the cursor, header column included, so right-clicking a
     track's header (or an empty lane) can still target it for "Remove
@@ -13397,6 +23249,15 @@ begin
       end
       else
       begin
+        { a plain click on a lane title (header column) toggles: select it, click it
+          again and it is unselected }
+        if (X < TlHdrW - 8) and (FTlSelectedTrackId = FTlCtxTrackId) and
+           (Length(FTlExtraTrackIds) = 0) then
+        begin
+          FTlSelectedTrackId := -1;
+          RefreshTimelineTab;
+          Exit;
+        end;
         FTlExtraTrackIds := nil;
         FTlSelectedTrackId := FTlCtxTrackId;
       end;
@@ -13417,14 +23278,24 @@ begin
 
   { grab zone lies wholly on the header side of the boundary so the lane area
     (X >= HeaderWidth) never conflicts with range/clip selection }
-  if (Button = mbLeft) and (X >= FTlView.HeaderWidth - 8) and (X < FTlView.HeaderWidth) then
+  if (Button = mbLeft) and (X >= TlHdrW - 8) and (X < TlHdrW) then
   begin
     { left-drag on the header/lane boundary resizes the track-header column -
       see UDAW.Timeline.Model.TTimeline.HeaderWidth, persisted per-project. }
     FTlHeaderResizing := True;
     FTlHeaderResizeStartX := X;
-    FTlHeaderResizeStartWidth := FTlView.HeaderWidth;
+    FTlHeaderResizeStartWidth := TlHdrW;
     pbTimeline.Cursor := crSizeWE;
+    Exit;
+  end;
+
+  { the icon at the left end of a clip's header opens that clip's editor (video clips are
+    edited on the Timeline itself, so they have no such click) }
+  if (Button = mbLeft) and (X >= FTlView.HeaderWidth) and TlClipIconAt(X, Y, c) then
+  begin
+    TlSetSingleSelection(c.Id);
+    TlOpenClipEditor(c);
+    RefreshTimelineTab;
     Exit;
   end;
 
@@ -13448,6 +23319,20 @@ begin
     Exit;
   end;
 
+  { a double left-click on an audio clip: its audio opens in the audio file editor }
+  if FTlDblPress and (X >= FTlView.HeaderWidth) then
+  begin
+    c := TlClipAtPoint(X, Y);
+    if (c <> nil) and (TlClipKind(c) = ckAudio) then
+    begin
+      FTlDblPress := False;
+      TlSetSingleSelection(c.Id);
+      TlEditClipAudio(c);
+      RefreshTimelineTab;
+      Exit;
+    end;
+  end;
+
   if Button <> mbLeft then
   begin
     { A right-click landing in the ruler (Y < RulerHeight) is a completely
@@ -13458,7 +23343,7 @@ begin
       End - can just act on tl.PlayheadSeconds like their existing toolbar
       counterparts (btnTlLoopStartClick etc.) instead of needing their own
       separate "clicked position" plumbing. }
-    if (X >= FTlView.HeaderWidth) and (Y < FTlView.RulerHeight) then
+    if (X >= FTlView.HeaderWidth) and (Y < LANE_RULER_H) then
     begin
       FTlRulerCtxActive := True;
       sec := FTlView.XToSeconds(X);
@@ -13501,23 +23386,9 @@ begin
 
   if X < FTlView.HeaderWidth then
   begin
-    { header mute button ("X"): live toggle, same monitoring-only semantics
-      as pmTlMuteTrackClick - not run through the undo stack, and takes
-      effect immediately mid-playback since TTimelinePlayer reads
-      trk.Muted live per-sample. }
-    if TlTrackAtY(Y, ti) and PtInRect(TlMuteButtonRect(TlTrackTop(ti)), Point(X, Y)) then
-    begin
-      trkForIdx := tl.GetTrack(ti);
-      trkForIdx.Muted := not trkForIdx.Muted;
-      FProject.Touch;
-    end
-    else if TlTrackAtY(Y, ti) and TlPrimaryTempoUnknown(tl.GetTrack(ti)) and
-      PtInRect(TlTempoUnknownRect(TlTrackTop(ti), tl.GetTrack(ti).Height), Point(X, Y)) then
-    begin
-      FTlSelectedTrackId := tl.GetTrack(ti).Id;
-      TlTempoUnknownClick;
-      Exit;
-    end;
+    { M / S / R, "BPM ?", volume and pan are widgets in the header column now
+      (TGLTrackHeader); what reaches here is the narrow strip between the
+      headers and the Clip Stage column. }
     RefreshTimelineTab;  // show the Browser import destination immediately
     Exit;
   end;
@@ -13525,7 +23396,9 @@ begin
   sec := FTlView.XToSeconds(X);
   if sec < 0 then sec := 0;
 
-  if Y < FTlView.RulerHeight then
+  if (Button = mbLeft) and TlLoopBarMouseDown(X, Y, Shift) then Exit;
+
+  if Y < LANE_RULER_H then
   begin
     { ruler click -> move the playhead (snapped); a left-drag from here
       instead defines a time-range "section" selection spanning every
@@ -13549,13 +23422,29 @@ begin
   FTlRangeActive := False;   { any lane interaction below clears a pending range selection }
   { Ctrl+left-drag anywhere in the lanes (even over clips) highlights a time
     range, same as the ruler / empty-lane drag. Shift remains multi-select. }
-  if ssCtrl in Shift then
+  if (ssCtrl in Shift) or (FTlTool = 1) then
   begin
     FTlRangeDragging := True;
     FTlRangeAnchorSec := FTlView.Snap(sec);
     FTlRangeStartSec := FTlRangeAnchorSec;
     FTlRangeEndSec := FTlRangeAnchorSec;
     RefreshTimelineTab;
+    Exit;
+  end;
+  { Split / Erase tools: one click on a clip cuts it at the pointer / deletes it }
+  if FTlTool in [2, 3] then
+  begin
+    c := TlClipAtPoint(X, Y);
+    if (c <> nil) and (not c.Locked) and TlTrackAtY(Y, ti) then
+    begin
+      if FTlTool = 2 then TlSplitTrackAt(tl.GetTrack(ti), FTlView.Snap(sec))
+      else
+      begin
+        TlSetSingleSelection(c.Id);
+        btnTlDeleteClipClick(nil);
+      end;
+      RefreshTimelineTab;
+    end;
     Exit;
   end;
   multi := ssShift in Shift;
@@ -13586,7 +23475,7 @@ begin
       FTlTrimClipId := c.Id;
       FTlTrimEdge := edge;
     end
-    else
+    else if not c.Locked then
     begin
       FTlDragging := True;
       FTlDragMouseStartSec := sec;
@@ -13618,6 +23507,10 @@ begin
           ids[High(ids)] := FTlSelClipIds[i];
         end;
       end;
+      { a locked clip in a multi-selection stays where it is while the others move }
+      for i := High(ids) downto 0 do
+        if (tl.ClipById(ids[i]) <> nil) and tl.ClipById(ids[i]).Locked then
+          Delete(ids, i, 1);
       FTlDragIds := ids;
       SetLength(FTlMultiDragStartSecs, Length(ids));
       SetLength(FTlMultiDragStartTrackIdx, Length(ids));
@@ -13709,10 +23602,35 @@ var
   delta, newStart, sec, newFade, rawSec: Double;
   c: TTimelineClip;
   edge: TClipEdge;
-  i, ti, curTrackIdx, deltaTrackIdx, newTrackIdx, newTrackId: Integer;
-  origTrk, candTrk: TTimelineTrack;
+  i, ti: Integer;
 begin
   if FProject = nil then Exit;
+  TlStageUpdateHint(X, Y);
+
+  if FLaneDragging then
+  begin
+    FLaneDragCurSec := FTlView.Snap(Max(0.0, FTlView.XToSeconds(X)));
+    pbTimeline.Invalidate;
+    Exit;
+  end;
+
+  if FTlLoopDrag <> 0 then
+  begin
+    TlLoopBarMove(X);
+    Exit;
+  end;
+
+  if FLaneEdit <> 0 then
+  begin
+    TlLaneEditMove(X);
+    Exit;
+  end;
+
+  if FTempoDrag then
+  begin
+    TlTempoDragMove(X, Y, ssShift in Shift);
+    Exit;
+  end;
 
   if FTlMiddlePanning then
   begin
@@ -13805,6 +23723,8 @@ begin
   begin
     sec := FTlView.Snap(FTlView.XToSeconds(X));
     if sec < 0 then sec := 0;
+    FTlSnapGuideOn := FTlView.SnapEnabled;
+    FTlSnapGuideSec := sec;
     try
       FCmds.Perform(TTrimTimelineClipCommand.Create(FProject, FTlTrimClipId, FTlTrimEdge, sec));
     except
@@ -13823,8 +23743,10 @@ begin
     { hover feedback: a resize cursor over a draggable clip edge, or a
       diagonal-resize cursor over a fade handle corner }
     c := TlClipAtPoint(X, Y);
-    if (X >= FTlView.HeaderWidth - 8) and (X < FTlView.HeaderWidth) then
+    if (X >= TlHdrW - 8) and (X < TlHdrW) then
       pbTimeline.Cursor := crSizeWE
+    else if TlTempoLaneAt(X, Y) then
+      pbTimeline.Cursor := crSizeNS
     else if (c <> nil) and not c.Locked and TlTrackAtY(Y, ti) and
        TlHitTestFadeHandle(c, ti, X, Y, edge) then
       pbTimeline.Cursor := crSizeAll
@@ -13839,37 +23761,22 @@ begin
   { group move: every clip captured in FTlDragIds/FTlMultiDragStartSecs at
     mouse-down rides the same delta, so a multi-selected drag keeps the
     clips' relative offsets exactly as they were - like every other DAW's
-    playlist/arrangement view. A vertical drag carries the same track-index
-    delta onto each clip's own start track, so dragging a clip (or a whole
-    selection) onto a different lane re-parents it there - but only when the
-    destination track is the same kind as the clip's own track (an audio
-    clip dragged onto e.g. a Tracker/MIDI lane just keeps its original track,
-    so a diagonal drag can't silently misfile it into an incompatible lane). }
+    playlist/arrangement view. Dragging a clip (or a whole selection) never
+    changes lane: a clip always stays on its own track however far
+    the cursor strays vertically - moving clips to another channel is done with the
+    clip menu, which validates the destination. }
   delta := FTlView.XToSeconds(X) - FTlDragMouseStartSec;
-  if TlTrackAtY(Y, curTrackIdx) then
-    deltaTrackIdx := curTrackIdx - FTlDragStartTrackIdx
-  else
-    deltaTrackIdx := 0;
   try
     for i := 0 to High(FTlDragIds) do
     begin
       newStart := FTlView.Snap(FTlMultiDragStartSecs[i] + delta);
       if newStart < 0 then newStart := 0;
-      newTrackId := 0;   // 0 = TMoveTimelineClipCommand keeps the clip's current track
-      if (deltaTrackIdx <> 0) and (i <= High(FTlMultiDragStartTrackIdx)) and
-         (FTlMultiDragStartTrackIdx[i] >= 0) then
+      if i = 0 then
       begin
-        newTrackIdx := EnsureRange(FTlMultiDragStartTrackIdx[i] + deltaTrackIdx,
-          0, FProject.Timeline.TrackCount - 1);
-        if newTrackIdx <> FTlMultiDragStartTrackIdx[i] then
-        begin
-          origTrk := FProject.Timeline.GetTrack(FTlMultiDragStartTrackIdx[i]);
-          candTrk := FProject.Timeline.GetTrack(newTrackIdx);
-          if candTrk.Kind = origTrk.Kind then
-            newTrackId := candTrk.Id;
-        end;
+        FTlSnapGuideOn := FTlView.SnapEnabled;
+        FTlSnapGuideSec := newStart;
       end;
-      FCmds.Perform(TMoveTimelineClipCommand.Create(FProject, FTlDragIds[i], newStart, newTrackId));
+      FCmds.Perform(TMoveTimelineClipCommand.Create(FProject, FTlDragIds[i], newStart, 0));   // 0 = keep the clip's own track
     end;
   except
     on E: Exception do
@@ -13879,6 +23786,89 @@ begin
     end;
   end;
   RefreshTimelineTab;
+end;
+
+{ The audio of the pressed effect region as it was before the effect, from the original the
+  first rendered effect kept on the clip (OrigSourceId / OrigDelta). False when no original
+  was kept or it can't be read. }
+function TfrmMain.TlRegionAudioBefore(out APlanar: TAudioPlanar; out ARate: Integer): Boolean;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  c: TTimelineClip;
+  o: TMediaSource;
+  player: TTimelinePlayer;
+  odec: TDecodedSource;
+  j, i, ch, startFrame, n: Integer;
+  s0, s1: Double;
+begin
+  Result := False;
+  APlanar := nil;
+  ARate := 0;
+  if (FProject = nil) or not FTlRangeActive then Exit;
+  tl := FProject.Timeline;
+  trk := tl.TrackById(FTlSelectedTrackId);
+  if trk = nil then Exit;
+  for j := 0 to trk.ClipCount - 1 do
+  begin
+    c := trk.GetClip(j);
+    s0 := Max(c.StartSeconds, FTlRangeStartSec);
+    s1 := Min(c.EndSeconds, FTlRangeEndSec);
+    if (s1 - s0 <= TIMELINE_MIN_CLIP_SECONDS) or not c.HasOrig then Continue;
+    o := tl.SourceById(c.OrigSourceId);
+    if (o = nil) or ((o.Path <> '') and not FileExists(o.Path)) then Continue;
+    player := TTimelinePlayer.Create(tl);
+    try
+      player.EnsureSourcesLoaded;
+      odec := player.GetDecodedSource(o.Id);
+      if (odec = nil) or odec.Failed or (odec.FrameCount = 0) or (odec.SampleRate <= 0) then Continue;
+      ARate := odec.SampleRate;
+      ch := odec.Channels;
+      startFrame := Round((c.SourceOffsetSeconds + c.OrigDelta + (s0 - c.StartSeconds)) * ARate);
+      n := Round((s1 - s0) * ARate);
+      if (startFrame < 0) or (ch < 1) then Continue;
+      if startFrame + n > odec.FrameCount then n := odec.FrameCount - startFrame;
+      if n < 2 then Continue;
+      SetLength(APlanar, ch);
+      for i := 0 to ch - 1 do
+      begin
+        SetLength(APlanar[i], n);
+        Move(odec.Data[i][startFrame], APlanar[i][0], n * SizeOf(Single));
+      end;
+      Exit(True);
+    finally
+      player.Free;
+    end;
+  end;
+end;
+
+{ A right click opens the Edit / Undo menu at once. A left click waits out the double-click
+  time first: a second press inside it is a double-click, which opens the effect window
+  instead (tmrTlEffMenu shows the menu when no second press came). }
+procedure TfrmMain.TlEffectMenuOrEdit(AButton: TMouseButton; AX, AY: Integer);
+begin
+  if AButton <> mbLeft then
+  begin
+    TlShowEffectMenu(AX, AY);
+    Exit;
+  end;
+  if FTlDblPress then
+  begin
+    FTlDblPress := False;
+    tmrTlEffMenu.Enabled := False;
+    pmTlEffEditClick(nil);
+    Exit;
+  end;
+  FTlEffMenuPt := Point(AX, AY);
+  tmrTlEffMenu.Enabled := False;
+  tmrTlEffMenu.Interval := Integer(GetDoubleClickTime) + 40;
+  tmrTlEffMenu.Enabled := True;
+end;
+
+procedure TfrmMain.tmrTlEffMenuTimer(Sender: TObject);
+begin
+  tmrTlEffMenu.Enabled := False;
+  if (FProject <> nil) and FTlRangeActive then TlShowEffectMenu(FTlEffMenuPt.X, FTlEffMenuPt.Y);
 end;
 
 { Pops up pmTlEffect (Edit / Undo) for FTlEffCtx at a pbTimeline point.
@@ -13891,7 +23881,7 @@ begin
   pt := pbTimeline.ClientToScreen(Point(AX, AY));
   FMenuLoopActive := True;
   try
-    pmTlEffect.Popup(pt.X, pt.Y);
+    GLShowPopup(pmTlEffect, pt.X, pt.Y);
   finally
     FMenuLoopActive := False;
   end;
@@ -13906,6 +23896,32 @@ var
   trk: TTimelineTrack;
   rngStart, rngEnd: Double;
 begin
+  if FLaneDragging then
+  begin
+    TlLaneMouseUp;
+    Exit;
+  end;
+  if FLaneEdit <> 0 then
+  begin
+    TlLaneEditEnd;
+    Exit;
+  end;
+  if FTempoDrag then
+  begin
+    FTempoDrag := False;
+    FTlSnapGuideOn := False;
+    RefreshTimelineTab;
+    Exit;
+  end;
+  if FTlLoopDrag <> 0 then
+  begin
+    FTlLoopDrag := 0;
+    FTlSnapGuideOn := False;
+    if FTlLoopMoved and (FProject <> nil) then FProject.Touch;
+    RefreshTimelineTab;
+    Exit;
+  end;
+  FTlSnapGuideOn := False;
   { a plain left click on a clip body (pressed, never dragged, no modifier) }
   plainClick := (Button = mbLeft) and FTlDragging and not FTlPressMoved and
     (FTlPressClipId >= 0) and ([ssShift, ssCtrl, ssAlt] * Shift = []);
@@ -13927,7 +23943,7 @@ begin
       FTlRangeStartSec := rngStart;
       FTlRangeEndSec := rngEnd;
       RefreshTimelineTab;
-      TlShowEffectMenu(X, Y);
+      TlEffectMenuOrEdit(Button, X, Y);
       Exit;
     end;
   end;
@@ -13962,7 +23978,7 @@ begin
     { an effect name was pressed (pbTimelineMouseDown already highlighted its
       region): offer Edit / Undo for that region only }
     FTlEffCtxActive := False;
-    TlShowEffectMenu(X, Y);
+    TlEffectMenuOrEdit(Button, X, Y);
     Exit;
   end;
   if Button = mbRight then
@@ -13985,9 +24001,9 @@ begin
     FMenuLoopActive := True;
     try
       if FTlRulerCtxActive then
-        pmTimelineRuler.Popup(pt.X, pt.Y)
+        GLShowPopup(pmTimelineRuler, pt.X, pt.Y)
       else
-        pmTimeline.Popup(pt.X, pt.Y);
+        GLShowPopup(pmTimeline, pt.X, pt.Y);
     finally
       FMenuLoopActive := False;
     end;
@@ -13999,7 +24015,7 @@ const
   CLIP_HEADER_H = 15;
   EDGE_R = 5;
 var
-  cv: TCanvas;
+  cv: TGLCanvas;
   w, h, ti, j, top, laneH, x, x2, cw: Integer;
   tl: TTimeline;
   grid: TGridContext;
@@ -14019,11 +24035,21 @@ var
   playX, loopX1, loopX2, rngX1, rngX2: Double;
   theme: TUDAWTheme;
   bodyTop: Integer;
-  badgeX: Integer;
-  muteRect, titleRect: TRect;
+  titleRect: TRect;
   smallFontH: Integer;
-  clipSave: Integer;
   clipLabel: string;
+  trkColor, hdrColor, bodyColor: TColor;
+  hdrW, launchIdx: Integer;
+  belowTop, beatIdx: Integer;
+  beatSec: Double;
+
+  function IsLight(AColor: TColor): Boolean;
+  var
+    c: LongInt;
+  begin
+    c := ColorToRGB(AColor);
+    Result := ((c and $FF) * 299 + ((c shr 8) and $FF) * 587 + ((c shr 16) and $FF) * 114) div 1000 > 140;
+  end;
 
   procedure DrawFittedLabel(const AText: string; AX, AY, ARight, ABottom: Integer);
   var
@@ -14076,43 +24102,68 @@ var
       (Byte(Round(ab + (bb - ab) * T)) shl 16));
   end;
 
-  { small filled badge with a 1-char label, for M/S/L track/clip indicators }
-  procedure Badge(var AX: Integer; AY: Integer; AColor: TColor; const ALabel: string);
-  const
-    BW = 15; BH = 13;
+  { beat (faint) and bar (stronger) grid lines over [AY1, AY2) of the lane area }
+  procedure DrawGrid(AY1, AY2: Integer);
+  var
+    bi: Integer;
+    gx: Double;
+    beatCol: TColor;
   begin
-    cv.Brush.Style := bsSolid;
-    cv.Brush.Color := AColor;
-    cv.Pen.Color := Mix(AColor, clBlack, 0.35);
-    cv.RoundRect(AX, AY, AX + BW, AY + BH, 4, 4);
-    cv.Brush.Style := bsClear;
-    cv.Font.Color := clBlack;
-    cv.TextOut(AX + 4, AY - 1, ALabel);
-    cv.Brush.Style := bsSolid;
-    Inc(AX, BW + 3);
+    if (AY2 <= AY1) or not grid.IsValid then Exit;
+    beatCol := Mix(theme.Grid, theme.Background, 0.55);
+    if beatSec * FTlView.PixelsPerSecond >= 14 then
+    begin
+      bi := Max(0, Trunc(SecondsToBeats(grid, FTlView.VisibleStartSeconds)) - 1);
+      repeat
+        gx := FTlView.SecondsToX(BeatsToSeconds(grid, bi));
+        if (gx >= FTlView.HeaderWidth) and (bi mod Max(1, grid.TSigNum) <> 0) then
+          VLine(Round(gx), AY1, AY2, beatCol);
+        Inc(bi);
+      until gx > w;
+    end;
+    bi := Max(0, Trunc(SecondsToBars(grid, FTlView.VisibleStartSeconds)) - 1);
+    repeat
+      gx := FTlView.SecondsToX(BarsToSeconds(grid, bi));
+      if gx >= FTlView.HeaderWidth then VLine(Round(gx), AY1, AY2, theme.Grid);
+      Inc(bi);
+    until gx > w;
   end;
 
 begin
   w := pbTimeline.Width;
   h := pbTimeline.Height;
   if (w <= 0) or (h <= 0) then Exit;
-  { paint into an off-screen bitmap and blit it in one shot - pbTimeline is
-    invalidated at near-frame rate during playback, and drawing this many
-    lines/rects/waveform columns straight to the on-screen DC flickered
-    badly; this is what "double buffer the timeline" fixes. }
-  FTlBuffer.SetSize(w, h);
-  cv := FTlBuffer.Canvas;
+  { pbTimeline is an OpenGL 3.3 surface (TGLView): every call below is
+    recorded into one batched vertex stream and drawn, then buffer-swapped, once
+    per paint - no flicker and no per-line GDI cost during playback. }
+  cv := pbTimeline.GL;
   theme := CurrentTheme;
   cv.Brush.Color := theme.Background;
   cv.Brush.Style := bsSolid;
   cv.FillRect(Rect(0, 0, w, h));
 
+  if FProject = nil then TlHeaderTick;   { clears the header widgets of a closed project }
   if FProject <> nil then
   begin
   tl := FProject.Timeline;
   grid := TimelineGrid;
+  hdrW := TlHdrW;
+  TlApplyViewMetrics;
   FTlView.SetGrid(grid);
   FTlView.SetViewportWidth(w);
+  TlHeaderTick;
+  barSec := 1;
+  beatSec := 1;
+  if grid.IsValid then
+  begin
+    barSec := grid.SecondsPerBar;
+    beatSec := grid.SecondsPerBeat;
+  end;
+
+  { ---- ruler band: a darker strip that reads as its own header ---- }
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := Mix(theme.PanelBackground, theme.Background, 0.5);
+  cv.FillRect(Rect(FTlView.HeaderWidth, 0, w, LANE_RULER_H));
 
   { ---- loop region shading on the ruler ---- }
   if tl.LoopLengthSeconds > 0 then
@@ -14129,8 +24180,12 @@ begin
       else
         cv.Brush.Color := theme.SecondaryText;
       cv.Pen.Style := psClear;
-      cv.Rectangle(Round(loopX1), 0, Round(loopX2), FTlView.RulerHeight);
+      cv.Rectangle(Round(loopX1), 0, Round(loopX2), LANE_RULER_H);
       cv.Pen.Style := psSolid;
+      { grab handles on both edges }
+      cv.Brush.Color := theme.Background;
+      cv.FillRect(Rect(Round(loopX1), LANE_RULER_H - 9, Round(loopX1) + 3, LANE_RULER_H));
+      cv.FillRect(Rect(Round(loopX2) - 3, LANE_RULER_H - 9, Round(loopX2), LANE_RULER_H));
     end;
   end;
 
@@ -14151,27 +24206,41 @@ begin
       cv.Brush.Style := bsSolid;
       cv.Brush.Color := Mix(theme.Selection, theme.Background, 0.25);
       cv.Pen.Style := psClear;
-      cv.Rectangle(Round(rngX1), 0, Round(rngX2), FTlView.RulerHeight);
+      cv.Rectangle(Round(rngX1), 0, Round(rngX2), LANE_RULER_H);
       cv.Pen.Style := psSolid;
     end;
   end;
 
-  { ---- bar/beat grid over the lane area ---- }
+  { ---- ruler: bar numbers, m:ss time under them, bar + beat ticks ---- }
   if grid.IsValid then
   begin
-    barSec := grid.SecondsPerBar;
-    barIdx := Trunc(FTlView.VisibleStartSeconds / barSec) - 1;
+    if beatSec * FTlView.PixelsPerSecond >= 14 then
+    begin
+      beatIdx := Max(0, Trunc(SecondsToBeats(grid, FTlView.VisibleStartSeconds)) - 1);
+      repeat
+        sx := FTlView.SecondsToX(BeatsToSeconds(grid, beatIdx));
+        if (sx >= FTlView.HeaderWidth) and (beatIdx mod Max(1, grid.TSigNum) <> 0) then
+          VLine(Round(sx), LANE_RULER_H - 4, LANE_RULER_H, theme.Grid);
+        Inc(beatIdx);
+      until sx > w;
+    end;
+    barIdx := Trunc(SecondsToBars(grid, FTlView.VisibleStartSeconds)) - 1;
     if barIdx < 0 then barIdx := 0;
     repeat
-      tSec := barIdx * barSec;
+      tSec := BarsToSeconds(grid, barIdx);
       sx := FTlView.SecondsToX(tSec);
       if sx > w then Break;
       if sx >= FTlView.HeaderWidth then
       begin
-        VLine(Round(sx), 0, h, theme.Grid);
+        VLine(Round(sx), LANE_RULER_H - 9, LANE_RULER_H, theme.SecondaryText);
         cv.Brush.Style := bsClear;
-        cv.Font.Color := theme.SecondaryText;
-        cv.TextOut(Round(sx) + 2, 2, IntToStr(barIdx + 1));
+        cv.Font.Color := theme.Text;
+        cv.TextOut(Round(sx) + 3, 2, IntToStr(barIdx + 1));
+        if barSec * FTlView.PixelsPerSecond >= 64 then
+        begin
+          cv.Font.Color := theme.SecondaryText;
+          cv.TextOut(Round(sx) + 3, 14, Format('%d:%.2d', [Trunc(tSec) div 60, Trunc(tSec) mod 60]));
+        end;
         cv.Brush.Style := bsSolid;
       end;
       Inc(barIdx);
@@ -14180,13 +24249,16 @@ begin
 
   { ---- ruler baseline ---- }
   cv.Pen.Color := theme.Border;
-  cv.MoveTo(0, FTlView.RulerHeight);
-  cv.LineTo(w, FTlView.RulerHeight);
+  cv.MoveTo(0, LANE_RULER_H);
+  cv.LineTo(w, LANE_RULER_H);
 
   { ---- master spectrum in the top-left corner (resizes with HeaderWidth) ---- }
-  DrawTimelineSpectrum(cv, Rect(0, 0, FTlView.HeaderWidth - 1, FTlView.RulerHeight - 1));
+  DrawTimelineSpectrum(cv, Rect(0, 0, hdrW - 1, LANE_RULER_H - 1));
+  if FStageVisible then TlStagePaintSceneHeader(cv);
+  if FLanesVisible then TlPaintLaneStack(cv, w);
 
-  { ---- markers ---- }
+  { ---- markers (in the ruler only while the Markers lane is hidden) ---- }
+  if not FLanesVisible then
   for j := 0 to tl.MarkerCount - 1 do
   begin
     sx := FTlView.SecondsToX(tl.GetMarker(j).Seconds);
@@ -14209,13 +24281,13 @@ begin
     above the ruler while scrolling, and without this it would paint straight
     over the ruler - which must stay a fixed, un-scrolled "sticky header" at
     all times. }
-  clipSave := SaveDC(cv.Handle);
-  IntersectClipRect(cv.Handle, 0, FTlView.RulerHeight, w, h);
+  cv.PushClip(Rect(0, FTlView.RulerHeight, w, h));
   try
     for ti := 0 to tl.TrackCount - 1 do
     begin
       trk := tl.GetTrack(ti);
       top := TlTrackTop(ti);
+      trkColor := TlTrackAccent(trk, ti);
       trackHasEffects := FProject.Mixer.SourceHasEffects(trk.Id);
       laneH := trk.Height;
       if top > h then Break;
@@ -14273,84 +24345,30 @@ begin
     else
       cv.Brush.Color := Mix(theme.PanelBackground, theme.Background, 0.15);
     cv.Brush.Style := bsSolid;
-    cv.FillRect(Rect(0, top, FTlView.HeaderWidth, top + laneH));
+    cv.FillRect(Rect(0, top, hdrW, top + laneH));
     cv.Pen.Color := theme.Border;
     cv.MoveTo(0, top + laneH); cv.LineTo(w, top + laneH);
-    cv.MoveTo(FTlView.HeaderWidth, top); cv.LineTo(FTlView.HeaderWidth, top + laneH);
-    { horizontal splitter: a 5px grab strip at the header/lane boundary,
+    cv.MoveTo(hdrW, top); cv.LineTo(hdrW, top + laneH);
+    { horizontal splitter: a 5px grab strip at the header/stage boundary,
       inside the header column so it clears both the header content and the
       channel data. }
     cv.Brush.Color := Mix(theme.Border, theme.PanelBackground, 0.5);
-    cv.FillRect(Rect(FTlView.HeaderWidth - 5, top, FTlView.HeaderWidth, top + laneH));
-    { mute button - a real toggle button, not just a status badge: pressed-in
-      and highlighted while the track is muted, flat/normal otherwise. Fixed
-      top-left corner of the header so it stays in the same spot across every
-      track regardless of name length; pbTimelineMouseDown hit-tests this
-      exact rect (see TlMuteButtonRect). }
-    cv.Brush.Style := bsSolid;
-    if trk.Muted then
-    begin
-      cv.Brush.Color := theme.MeterClip;
-      cv.Pen.Color := Mix(theme.MeterClip, clBlack, 0.4);
-    end
-    else
-    begin
-      cv.Brush.Color := Mix(theme.PanelBackground, theme.Background, 0.3);
-      cv.Pen.Color := theme.Border;
-    end;
-    muteRect := TlMuteButtonRect(top);
-    cv.RoundRect(muteRect.Left, muteRect.Top, muteRect.Right, muteRect.Bottom, 3, 3);
-    cv.Brush.Style := bsClear;
-    cv.Font.Color := IfThen(trk.Muted, clWhite, theme.SecondaryText);
-    cv.TextOut(muteRect.Left + 5, muteRect.Top + 1, 'X');
-    cv.Font.Color := theme.Text;
-    DrawFittedLabel(trk.Name, 26, top + 5, FTlView.HeaderWidth - 34, top + 20);
-    if trk.Id = FTlSelectedTrackId then
-    begin
-      cv.Font.Color := theme.Accent;
-      cv.TextOut(FTlView.HeaderWidth - 28, top + 5, 'IN');
-    end;
-    cv.Font.Color := theme.SecondaryText;
-    cv.TextOut(26, top + 20, Format('%s  %.1f dB', [TrackKindDisplay(trk.Kind), trk.GainDb]));
-    cv.Brush.Style := bsSolid;
-    { Video channels get a prominent filled tag in the header so users can
-      tell video from audio/music channels at a glance. }
-    if trk.Kind = tkVideo then
-    begin
-      cv.Brush.Color := $00C06020;
-      cv.Pen.Color := Mix($00C06020, clBlack, 0.4);
-      cv.RoundRect(FTlView.HeaderWidth - 58, top + laneH - 20, FTlView.HeaderWidth - 10, top + laneH - 4, 4, 4);
-      cv.Brush.Style := bsClear;
-      cv.Font.Color := clWhite;
-      cv.TextOut(FTlView.HeaderWidth - 52, top + laneH - 20, 'VIDEO');
-      cv.Font.Color := theme.SecondaryText;
-      cv.Brush.Style := bsSolid;
-    end;
+    cv.FillRect(Rect(hdrW - 5, top, hdrW, top + laneH));
+    { track colour stripe down the header's left edge, wider when selected }
+    cv.Brush.Color := trkColor;
+    cv.FillRect(Rect(0, top, IfThen(trk.Id = FTlSelectedTrackId, 6, 3), top + laneH));
 
-    { "?" - tempo unknown on the primary channel (baseline BPM could not be
-      established); click to enter it. Gone once the tempo is known. }
-    if TlPrimaryTempoUnknown(trk) then
-    begin
-      muteRect := TlTempoUnknownRect(top, laneH);
-      cv.Brush.Color := $0030C0F0;
-      cv.Pen.Color := Mix($0030C0F0, clBlack, 0.4);
-      cv.RoundRect(muteRect.Left, muteRect.Top, muteRect.Right, muteRect.Bottom, 3, 3);
-      cv.Brush.Style := bsClear;
-      cv.Font.Color := clBlack;
-      cv.TextOut(muteRect.Left + 5, muteRect.Top + 1, '?');
-      cv.Font.Color := theme.SecondaryText;
-      cv.Brush.Style := bsSolid;
-    end;
+    { the header content - avatar, name, sub-label, M / S / R, volume, pan, "BPM ?" -
+      is a TGLTrackHeader widget laid over this strip (see TlHeaderTick) }
 
-    { solo/arm badges - filled and colour-coded, not just letters in text;
-      mute now has its own dedicated button above, so it is not repeated here }
-    badgeX := 6;
-    if trk.Soloed then Badge(badgeX, top + laneH - 17, $0030C0F0, 'S');
-    if trk.Armed then Badge(badgeX, top + laneH - 17, $004040F0, 'R');
+    { Clip Stage launch slots for this track, between its header and its lane }
+    if FStageVisible then TlStagePaintCells(cv, trk, top, laneH, trkColor);
 
-    { lane background }
-    cv.Brush.Color := theme.Background;
+    { lane background, every other lane a touch lighter, then its grid }
+    if Odd(ti) then cv.Brush.Color := Mix(theme.Background, theme.PanelBackground, 0.18)
+    else cv.Brush.Color := theme.Background;
     cv.FillRect(Rect(FTlView.HeaderWidth, top, w, top + laneH));
+    DrawGrid(top, top + laneH);
 
     { clips }
     for j := 0 to trk.ClipCount - 1 do
@@ -14380,13 +24398,15 @@ begin
       { rounded body, a thin header strip carrying the name, subtle border,
         brighter+accent-bordered when selected (single or multi), dimmed when muted }
       isSel := TlIsClipSelected(clip.Id);
-      if clip.HasEffects or trackHasEffects then clipBackground := theme.ClipEffectsBackground
-      else clipBackground := theme.PanelBackground;
+      bodyColor := Mix(trkColor, theme.Background, 0.7);
+      if clip.HasEffects or trackHasEffects then
+        clipBackground := Mix(bodyColor, theme.ClipEffectsBackground, 0.4)
+      else clipBackground := bodyColor;
       if isSel then clipBackground := Mix(clipBackground, theme.Selection, 0.35);
       if clip.Muted then clipBackground := Mix(clipBackground, theme.Background, 0.5);
       cv.Brush.Color := clipBackground;
       if isSel then cv.Pen.Color := theme.Selection
-      else cv.Pen.Color := theme.Border;
+      else cv.Pen.Color := Mix(trkColor, clBlack, 0.35);
       cv.Pen.Width := IfThen(isSel, 2, 1);
       cv.RoundRect(x, top + 2, x2, top + laneH - 2, EDGE_R, EDGE_R);
       cv.Pen.Width := 1;
@@ -14396,7 +24416,9 @@ begin
       begin
         { header strip stays neutral; an applied effect's colour is confined to
           its own region (below), not the whole clip }
-        cv.Brush.Color := Mix(theme.PanelBackground, clBlack, 0.2);
+        hdrColor := trkColor;
+        if clip.Muted then hdrColor := Mix(hdrColor, theme.Background, 0.5);
+        cv.Brush.Color := hdrColor;
         if (clip.EffectName = '') and (clip.Color <> 0) then
           cv.Brush.Color := clip.Color;
         cv.Pen.Color := cv.Brush.Color;
@@ -14416,12 +24438,15 @@ begin
               cv.FillRect(Rect(fxX1, top + 3, fxX2, bodyTop));
             end;
           end;
-        cv.Pen.Color := theme.Border;
+        cv.Pen.Color := Mix(trkColor, clBlack, 0.35);
         cv.MoveTo(x + 1, bodyTop); cv.LineTo(x2 - 1, bodyTop);
-      end;
+      end
+      else
+        hdrColor := trkColor;
 
       cv.Brush.Style := bsClear;
-      cv.Font.Color := theme.Text;
+      if IsLight(hdrColor) then cv.Font.Color := Mix(trkColor, clBlack, 0.85)
+      else cv.Font.Color := clWhite;
       { the effect's name, right at the clip's own start (region start point)
         rather than a fixed screen position - x is recomputed every paint
         from FTlView's current scroll/zoom, so this moves with the clip and
@@ -14430,14 +24455,28 @@ begin
         colour (clip.Color, set by TlApplyEffectToRange/TlApplySilenceToRange
         via TlEffectColor) }
       clipLabel := clip.Name;
-      if clip.Locked then
-        DrawFittedLabel(clipLabel, x + 4, top + 3, x2 - 18, bodyTop)
-      else
-        DrawFittedLabel(clipLabel, x + 4, top + 3, x2 - 4, bodyTop);
+      { the icon that says what the clip is; a click on it opens the clip's editor }
+      var iconR := TlClipIconRect(clip, ti);
+      var labelX := x + 4;
+      if iconR.Right > iconR.Left then
+      begin
+        TlDrawClipIcon(cv, iconR, TlClipKind(clip), cv.Font.Color);
+        labelX := iconR.Right + 4;
+      end;
+      { a clip set to loop shows a loop icon at the right end of its header }
+      var loopRight := x2 - 4;
+      if clip.Locked then loopRight := x2 - 18;
+      if clip.Loop and (x2 - x >= 64) then
+      begin
+        TGLIconBar.DrawIcon(cv, 'loop', Rect(loopRight - 16, top + 2, loopRight, top + 2 + 15), cv.Font.Color);
+        cv.Brush.Style := bsClear;
+        loopRight := loopRight - 18;
+      end;
+      DrawFittedLabel(clipLabel, labelX, top + 3, loopRight, bodyTop);
       if clip.Locked and (cw >= 18) then
       begin
-        cv.Font.Color := theme.MeterClip;
-        DrawFittedLabel('L', x2 - 14, top + 3, x2 - 2, bodyTop);
+        TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, top + 2, x2 - 3, top + 2 + 15), theme.MeterClip);
+        cv.Brush.Style := bsClear;
       end;
       cv.Brush.Style := bsSolid;
 
@@ -14521,7 +24560,17 @@ begin
 
       midY := bodyTop + (top + laneH - 2 - bodyTop) / 2;
       halfH := (top + laneH - 2 - bodyTop - 4) / 2;
-      if (src <> nil) and (src.Waveform <> nil) and (src.SampleRate > 0) and (halfH > 2) then
+      { MIDI clip: its notes as piano-roll dashes (time across, pitch up) }
+      if clip.IsMidiClip and (bodyTop < top + laneH - 4) and (cw > 4) then
+        TlDrawMidiDashes(cv, clip, Rect(x + 2, bodyTop + 2, x2 - 2, top + laneH - 4),
+          FTlView.XToSeconds(x + 2), FTlView.XToSeconds(x2 - 2),
+          Mix(trkColor, clWhite, IfThen(isSel, 0.8, 0.6)), IfThen(laneH >= 70, 3, 2));
+      var isTrkClip := (bodyTop < top + laneH - 4) and (cw > 4) and
+        TlDrawTrackerNotation(cv, clip, src, Rect(x + 2, bodyTop + 2, x2 - 2, top + laneH - 4),
+          Mix(trkColor, clWhite, IfThen(isSel, 0.8, 0.6)), IfThen(laneH >= 70, 3, 2));
+      if isTrkClip then
+        { notation drawn - no waveform }
+      else if (src <> nil) and (src.Waveform <> nil) and (src.SampleRate > 0) and (halfH > 2) then
       begin
         { A tempo-conformed clip plays the stretched copy, so one timeline
           second covers 1/factor seconds of the original file (factor = source
@@ -14542,7 +24591,22 @@ begin
         ch := 0;
         { waveform: the effect's colour only inside the effect region }
         var regs := TlClipRegions(clip);
-        var baseCol := theme.Waveform;
+        { the region's own tint behind the wave, selected or not }
+        for var ri := 0 to High(regs) do
+          if regs[ri].Color <> 0 then
+          begin
+            var tx1 := EnsureRange(Round(FTlView.SecondsToX(clip.StartSeconds + regs[ri].OffsetSeconds)), x, x2);
+            var tx2 := x2;
+            if regs[ri].LengthSeconds > 0 then
+              tx2 := EnsureRange(Round(FTlView.SecondsToX(
+                clip.StartSeconds + regs[ri].OffsetSeconds + regs[ri].LengthSeconds)), x, x2);
+            if tx2 > tx1 then
+            begin
+              cv.Brush.Color := Mix(clipBackground, regs[ri].Color, 0.3);
+              cv.FillRect(Rect(Max(tx1, x + 2), bodyTop + 1, Min(tx2, x2 - 2), top + laneH - 3));
+            end;
+          end;
+        var baseCol := Mix(trkColor, clWhite, 0.4);
         if isSel then baseCol := Mix(baseCol, clWhite, 0.3);
         for colX := 0 to cw - 1 do
         begin
@@ -14554,8 +24618,8 @@ begin
                ((regs[ri].LengthSeconds <= 0) or
                 (colSec <= clip.StartSeconds + regs[ri].OffsetSeconds + regs[ri].LengthSeconds)) then
             begin
-              cv.Pen.Color := regs[ri].Color;
-              if isSel then cv.Pen.Color := Mix(cv.Pen.Color, clWhite, 0.3);
+              { lifted a little even when not selected, so a dark swatch still reads on the clip body }
+              cv.Pen.Color := Mix(regs[ri].Color, clWhite, IfThen(isSel, 0.3, 0.12));
               Break;
             end;
           px := colFirstSec + colX / FTlView.PixelsPerSecond * srcScale;
@@ -14575,7 +24639,7 @@ begin
           cv.LineTo(x + colX, EnsureRange(Round(midY - pk.MinV * halfH), bodyTop, top + laneH - 2));
         end;
       end
-      else
+      else if not clip.IsMidiClip then
       begin
         { no cache (missing file / generated) - a flat centre line, never a fake wave }
         cv.Pen.Color := theme.SecondaryText;
@@ -14620,14 +24684,45 @@ begin
 
       { trim-edge hover handles - thin bright strips at each end, echoing the
         ~6px hit zone used by TlHitTestClipEdge }
-      cv.Pen.Color := theme.Border;
-      VLine(x + 2, top + 3, top + laneH - 3, theme.Border);
-      VLine(x2 - 2, top + 3, top + laneH - 3, theme.Border);
+      cv.Pen.Color := Mix(trkColor, clBlack, 0.4);
+      VLine(x + 2, top + 3, top + laneH - 3, Mix(trkColor, clBlack, 0.4));
+      VLine(x2 - 2, top + 3, top + laneH - 3, Mix(trkColor, clBlack, 0.4));
     end;
     TlPaintVideoFx(cv, trk, top, laneH, w);
+    launchIdx := TlStageLaunchIndex(trk.Id);
+    if launchIdx >= 0 then TlStagePaintBanner(cv, trk, launchIdx, top, laneH, w, trkColor);
     end;
   finally
-    RestoreDC(cv.Handle, clipSave);
+    cv.PopClip;
+  end;
+
+  { grid continues through the empty area under the last track }
+  if tl.TrackCount > 0 then
+    belowTop := TlTrackTop(tl.TrackCount - 1) + tl.GetTrack(tl.TrackCount - 1).Height
+  else
+    belowTop := FTlView.RulerHeight;
+  DrawGrid(Max(belowTop, FTlView.RulerHeight + 1), h);
+
+  { placeholder for the next channel; clicking it adds one (pbTimelineMouseDown) }
+  if FTlMode = 0 then
+  begin
+    cv.PushClip(Rect(0, FTlView.RulerHeight, w, h));
+    try
+      titleRect := TlAddChannelRect;
+      cv.Brush.Style := bsClear;
+      cv.Pen.Style := psSolid;
+      cv.Pen.Color := theme.Border;
+      cv.Pen.Style := psDash;
+      cv.Rectangle(titleRect.Left, titleRect.Top, titleRect.Right, titleRect.Bottom);
+      cv.Pen.Style := psSolid;
+      cv.Font.Color := theme.SecondaryText;
+      cv.TextOut(titleRect.Left + (titleRect.Right - titleRect.Left - cv.TextWidth('+ Add channel')) div 2,
+        titleRect.Top + (titleRect.Bottom - titleRect.Top - cv.TextHeight('+ Add channel')) div 2,
+        '+ Add channel');
+    finally
+      cv.PopClip;
+    end;
+    cv.Brush.Style := bsSolid;
   end;
 
   { ---- playhead: bold, bright accent line with a drop-triangle on the ruler -
@@ -14638,12 +24733,24 @@ begin
   playX := FTlView.SecondsToX(tl.PlayheadSeconds);
   if (playX >= FTlView.HeaderWidth) and (playX <= w) then
   begin
-    cv.Pen.Width := 3;
+    cv.Pen.Width := 2;
     VLine(Round(playX), 0, h, theme.Accent);
     cv.Pen.Width := 1;
     cv.Brush.Color := theme.Accent;
     cv.Pen.Color := theme.Accent;
     cv.Polygon([Point(Round(playX) - 6, 0), Point(Round(playX) + 6, 0), Point(Round(playX), 10)]);
+  end;
+
+  { ---- snap guide: a dashed line at the grid position a drag / trim / loop edit is snapping to ---- }
+  if FTlSnapGuideOn then
+  begin
+    x := Round(FTlView.SecondsToX(FTlSnapGuideSec));
+    if (x >= FTlView.HeaderWidth) and (x <= w) then
+    begin
+      cv.Pen.Style := psDash;
+      VLine(x, LANE_RULER_H, h, theme.Accent);
+      cv.Pen.Style := psSolid;
+    end;
   end;
 
   { ---- range/section selection: dashed boundary lines spanning every
@@ -14658,6 +24765,37 @@ begin
       if rngX1 >= FTlView.HeaderWidth then VLine(Round(rngX1), FTlView.RulerHeight, h, theme.Selection);
       if rngX2 <= w then VLine(Round(rngX2), FTlView.RulerHeight, h, theme.Selection);
       cv.Pen.Style := psSolid;
+    end;
+  end;
+
+  { ---- the picked scene: its start and end shown as coloured lines with handles; Ctrl + drag one to resize ---- }
+  begin
+    var sc := TlPickedScene;
+    if sc <> nil then
+    begin
+      var sIdx := 0;
+      for sIdx := 0 to tl.RegionCount - 1 do
+        if tl.GetRegion(sIdx).Id = sc.Id then Break;
+      var scCol := TlStageSceneColor(Min(sIdx, tl.RegionCount - 1));
+      rngX1 := FTlView.SecondsToX(sc.StartSeconds);
+      rngX2 := FTlView.SecondsToX(sc.EndSeconds);
+      if (rngX2 >= FTlView.HeaderWidth) and (rngX1 <= w) then
+      begin
+        cv.Pen.Width := 2;
+        if rngX1 >= FTlView.HeaderWidth then
+        begin
+          VLine(Round(rngX1), FTlView.RulerHeight, h, scCol);
+          cv.Brush.Color := scCol;
+          cv.FillRect(Rect(Round(rngX1) - 1, FTlView.RulerHeight, Round(rngX1) + 7, FTlView.RulerHeight + 14));
+        end;
+        if rngX2 <= w then
+        begin
+          VLine(Round(rngX2), FTlView.RulerHeight, h, scCol);
+          cv.Brush.Color := scCol;
+          cv.FillRect(Rect(Round(rngX2) - 7, FTlView.RulerHeight, Round(rngX2) + 1, FTlView.RulerHeight + 14));
+        end;
+        cv.Pen.Width := 1;
+      end;
     end;
   end;
 
@@ -14696,7 +24834,6 @@ begin
   end;
   end;
 
-  pbTimeline.Canvas.Draw(0, 0, FTlBuffer);
 end;
 
 { Fast attack / slow release ballistics for FTlMeterL/R, called once per UI
@@ -14723,6 +24860,85 @@ begin
   if FTlVideo <> nil then FTlVideo.HostResized;
 end;
 
+{ A double left-click on the video pane (or on the effect picture over it) pops the video out
+  into its own window. Spotted by timing the two presses - the renderer draws straight into
+  the pane's window, which is not set up to receive double-click messages. }
+procedure TfrmMain.pnlTlVideoMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+  X, Y: Integer);
+var
+  pt: TPoint;
+  now_: UInt64;
+begin
+  if Button <> mbLeft then Exit;
+  pt := TControl(Sender).ClientToScreen(Point(X, Y));
+  now_ := GetTickCount64;
+  if (ssDouble in Shift) or
+     ((FVideoClickTick <> 0) and (now_ - FVideoClickTick <= GetDoubleClickTime) and
+      (Abs(pt.X - FVideoClickPos.X) <= GetSystemMetrics(SM_CXDOUBLECLK)) and
+      (Abs(pt.Y - FVideoClickPos.Y) <= GetSystemMetrics(SM_CYDOUBLECLK))) then
+  begin
+    FVideoClickTick := 0;
+    TlVideoPopOut;
+  end
+  else
+  begin
+    FVideoClickTick := now_;
+    FVideoClickPos := pt;
+  end;
+end;
+
+{ the picture is on screen: in its pane, or in the pop-out window }
+function TfrmMain.TlVideoActive: Boolean;
+begin
+  Result := pnlTlVideo.Visible or ((FVideoWindow <> nil) and FVideoWindow.Visible);
+end;
+
+{ the video plays, at its own size, in a window with nothing but a close button }
+procedure TfrmMain.TlVideoPopOut;
+var
+  w, h: Integer;
+begin
+  if FTlVideo = nil then Exit;
+  if FVideoWindow = nil then
+  begin
+    FVideoWindow := TfrmVideoPlayer.Create(Self);
+    FVideoWindow.OnClosed := TlVideoWindowClosed;
+    FVideoWindow.OnVideoResized := TlVideoWindowResized;
+  end;
+  if FVideoWindow.Visible then
+  begin
+    FVideoWindow.BringToFront;
+    Exit;
+  end;
+  FVideoWindow.Show;
+  if FTlVideo.NativeVideoSize(w, h) then FVideoWindow.FitToVideo(w, h);
+  FTlVideo.SetHost(FVideoWindow.pnlVideo);
+  FTlVideo.HostResized;
+end;
+
+procedure TfrmMain.TlVideoWindowClosed(Sender: TObject);
+begin
+  if FTlVideo <> nil then
+  begin
+    FTlVideo.SetHost(pnlTlVideo);   // back into the Timeline's own pane
+    FTlVideo.HostResized;
+  end;
+end;
+
+procedure TfrmMain.TlOpenSpectrumWindow;
+begin
+  if FSpectrumWindow = nil then FSpectrumWindow := TfrmSpectrum.Create(Self);
+  if FSpectrumWindow.Visible then
+    FSpectrumWindow.BringToFront
+  else
+    FSpectrumWindow.Show;
+end;
+
+procedure TfrmMain.TlVideoWindowResized(Sender: TObject);
+begin
+  if FTlVideo <> nil then FTlVideo.HostResized;
+end;
+
 procedure TfrmMain.pbTlMetersPaint(Sender: TObject);
 const
   LABEL_W = 16;
@@ -14731,7 +24947,7 @@ const
   SEGMENT_GAP = 1;
   UNLIT_COLOR = $00303030;
 var
-  cv: TCanvas;
+  cv: TGLCanvas;
   w, h, barH, gap, y: Integer;
 
   { Classic LED-ladder meter: a FIXED-size gauge - exactly SEGMENT_COUNT
@@ -14773,8 +24989,7 @@ begin
   w := pbTlMeters.Width;
   h := pbTlMeters.Height;
   if (w <= 0) or (h <= 0) then Exit;
-  FTlMeterBuffer.SetSize(w, h);
-  cv := FTlMeterBuffer.Canvas;
+  cv := pbTlMeters.GL;
   cv.Brush.Color := clBlack;
   cv.Brush.Style := bsSolid;
   cv.FillRect(Rect(0, 0, w, h));
@@ -14789,13 +25004,12 @@ begin
     DrawBar('R', FTlMeterR, y);
   end;
 
-  pbTlMeters.Canvas.Draw(0, 0, FTlMeterBuffer);
 end;
 
 { One master-output spectrum (log frequency, 0..-90 dB) filling ARect - the
   Timeline's header-column corner. Follows the mixer because the tap is the
   engine's post-mixer output. Flat while not playing. }
-procedure TfrmMain.DrawTimelineSpectrum(ACanvas: TCanvas; const ARect: TRect);
+procedure TfrmMain.DrawTimelineSpectrum(ACanvas: TGLCanvas; const ARect: TRect);
 const
   MIN_HZ = 30.0;
   TOP_DB = 0.0;
@@ -14818,8 +25032,8 @@ begin
   prevBin := 0;
   for x := 0 to w - 1 do
   begin
-    hz0 := MIN_HZ * Exp(Ln(nyq / MIN_HZ) * x / w);
-    hz1 := MIN_HZ * Exp(Ln(nyq / MIN_HZ) * (x + 1) / w);
+    hz0 := MIN_HZ * FastExp(FastLn(nyq / MIN_HZ) * x / w);
+    hz1 := MIN_HZ * FastExp(FastLn(nyq / MIN_HZ) * (x + 1) / w);
     bin := Round(hz0 / nyq * (n - 1));
     b := Round(hz1 / nyq * (n - 1));
     if bin < prevBin then bin := prevBin;
@@ -14965,7 +25179,8 @@ begin
     FRec.ClearTakes;
     FRec.Configure(settings);
     FRec.Arm;
-    FRecTrackId := Max(0, TlSelectedAudioTrackId);
+    FRecTrackId := TlArmedAudioTrackId;   // a track armed with its header R button wins
+    if FRecTrackId = 0 then FRecTrackId := Max(0, TlSelectedAudioTrackId);
     FRecCommitted := False;
     FRec.Start(RecordingPosition);
     FRecRing := TAudioRing.Create(settings.Channels, settings.SampleRate * 4);
@@ -15300,13 +25515,13 @@ end;
 { Paints into FRecBuffer and blits it in one shot instead of drawing every
   take rectangle straight to the screen DC - this box is invalidated at
   near-frame rate by tmrUI while recording (see RefreshRecordingTab), and
-  drawing directly flickered badly; mirrors pbTimelinePaint/FTlBuffer and
+  drawing directly flickered badly; mirrors pbMixerPaint and
   pbMixerPaint/FMixBuffer. FRecTakeRects/FRecTakeIds are rebuilt on every
   paint so pbRecTakesMouseDown can hit-test a click against the take actually
   on screen right now, exactly like FMixStripRects. }
 procedure TfrmMain.pbRecTakesPaint(Sender: TObject);
 var
-  cv: TCanvas;
+  cv: TGLCanvas;
   w, h, i, y, x1, x2: Integer;
   span, s: Double;
   tk: TRecordedTake;
@@ -15315,8 +25530,7 @@ begin
   w := pbRecTakes.Width;
   h := pbRecTakes.Height;
   if (w <= 0) or (h <= 0) then Exit;
-  FRecBuffer.SetSize(w, h);
-  cv := FRecBuffer.Canvas;
+  cv := pbRecTakes.GL;
   cv.Brush.Color := $00202020;
   cv.Brush.Style := bsSolid;
   cv.FillRect(Rect(0, 0, w, h));
@@ -15324,7 +25538,6 @@ begin
   SetLength(FRecTakeIds, 0);
   if FRecWriter <> nil then
   begin
-    pbRecTakes.Canvas.Draw(0, 0, FRecBuffer);
     Exit;
   end;
   if (FRec = nil) or (FRec.TakeCount = 0) then
@@ -15332,7 +25545,6 @@ begin
     cv.Brush.Style := bsClear;
     cv.Font.Color := $00A0A0A0;
     cv.TextOut(10, 10, 'Select a timeline destination, then start live recording or add saved audio.');
-    pbRecTakes.Canvas.Draw(0, 0, FRecBuffer);
     Exit;
   end;
 
@@ -15418,7 +25630,6 @@ begin
     cv.Rectangle(Min(FCompSwipeX0, FCompSwipeX1), 20, Max(FCompSwipeX0, FCompSwipeX1), h - 4);
     cv.Pen.Width := 1;
   end;
-  pbRecTakes.Canvas.Draw(0, 0, FRecBuffer);
 end;
 
 { Click-to-select a take, so "Save Selected Take As..." / "Add Selected Take
@@ -15754,7 +25965,8 @@ begin
   for i := 0 to FProject.Timeline.TrackCount - 1 do
   begin
     trk := FProject.Timeline.GetTrack(i);
-    if trk.Kind <> tkAudio then Continue;
+    { audio lanes, and MIDI / instrument lanes too (their strip carries the lane's fader and pan) }
+    if not (trk.Kind in [tkAudio, tkMidi, tkInstrument]) then Continue;
     claimed := False;
     for j := 0 to FProject.Mixer.StripCount - 1 do
       if FProject.Mixer.GetStrip(j).InputSourceId = trk.Id then
@@ -15781,11 +25993,17 @@ var
   sb: TStringBuilder;
 begin
   if (FProject = nil) or FMixRefreshing then Exit;
-  EnsureMixerStripsForTimelineTracks;
+  if FMixViewTracker then
+    EnsureTrackerMixerStrips(FProject.TrackerMixer, FProject.Tracker.Channels, FProject.Tracker)
+  else
+    EnsureMixerStripsForTimelineTracks;
   FMixRefreshing := True;
   try
-    m := FProject.Mixer;
+    m := MixCur;
     keepId := SelectedMixStripId;
+    MixEqSync;
+    if cboMixEqPreset.Text = '' then cboMixEqPreset.Text := 'My preset';
+    if cboMixEqPreset.Items.Count = 0 then MixEqRefreshPresets;
 
     cboMixStrip.Items.BeginUpdate;
     try
@@ -15881,7 +26099,7 @@ begin
 
     sb := TStringBuilder.Create;
     try
-      sb.AppendLine(FProject.Mixer.Describe);
+      sb.AppendLine(MixCur.Describe);
       sb.AppendLine('');
       sb.AppendLine('--- preview ---');
       sb.AppendLine(FMixPreview);
@@ -15901,6 +26119,36 @@ begin
   RefreshMixerTab;
 end;
 
+{ the mixer the Mixer tab is showing and editing }
+function TfrmMain.MixCur: TMixerModel;
+begin
+  if FMixViewTracker then Result := FProject.TrackerMixer else Result := FProject.Mixer;
+end;
+
+{ performs a mixer command on the mixer being shown }
+function TfrmMain.MixPerform(ACmd: TDAWCommand): Boolean;
+begin
+  if FMixViewTracker and (ACmd is TMixerCommand) then TMixerCommand(ACmd).TrackerSide := True;
+  Result := FCmds.Perform(ACmd);
+end;
+
+{ Timeline / Tracker: the Timeline view shows the Timeline's strips; the Tracker view only the
+  TRK-CHN strips (one per tracker channel), the master EQ and the Master, which the Tracker plays
+  through }
+procedure TfrmMain.cboMixViewChange(Sender: TObject);
+begin
+  if FMixRefreshing then Exit;
+  FMixViewTracker := cboMixView.ItemIndex = 1;
+  FMixFirst := 0;
+  FMixSig := '';
+  mnuMixRemove.Enabled := False;
+  pmMixRemove.Enabled := False;
+  RefreshMixerTab;
+  MixEqSync;
+  pnlMixEq.Title := IfThen(FMixViewTracker, 'Tracker Master Graphic 16-Band EQ', 'Master Graphic 16-Band EQ');
+  pbMixer.Invalidate;
+end;
+
 procedure TfrmMain.cboMixTrackLinkChange(Sender: TObject);
 var
   trackId: Integer;
@@ -15908,7 +26156,7 @@ begin
   if FMixRefreshing or (cboMixTrackLink.ItemIndex < 0) or (SelectedMixStripId = 0) then Exit;
   trackId := Integer(NativeInt(cboMixTrackLink.Items.Objects[cboMixTrackLink.ItemIndex]));
   try
-    FCmds.Perform(TSetMixStripInputCommand.Create(FProject, SelectedMixStripId, trackId));
+    MixPerform(TSetMixStripInputCommand.Create(FProject, SelectedMixStripId, trackId));
   except
     on E: EUDAWError do
       MessageDlg(E.Message, mtWarning, [mbOK], 0);
@@ -15923,6 +26171,12 @@ var
   i: Integer;
   trackClaimed: Boolean;
 begin
+  if FMixViewTracker then
+  begin
+    MessageDlg('The Tracker mixer has one TRK-CHN strip for each tracker channel. Switch the view to Timeline to add Timeline track strips.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
   { If a Timeline track is selected and no strip already links to it, name
     the new strip after it and link it immediately - the common case is
     "give this Timeline track a channel strip", and making that the one-click
@@ -15933,8 +26187,8 @@ begin
   begin
     trk := FProject.Timeline.TrackById(FTlSelectedTrackId);
     trackClaimed := False;
-    for i := 0 to FProject.Mixer.StripCount - 1 do
-      if FProject.Mixer.GetStrip(i).InputSourceId = FTlSelectedTrackId then
+    for i := 0 to MixCur.StripCount - 1 do
+      if MixCur.GetStrip(i).InputSourceId = FTlSelectedTrackId then
       begin
         trackClaimed := True;
         Break;
@@ -15960,22 +26214,22 @@ end;
 
 procedure TfrmMain.btnMixAddBusClick(Sender: TObject);
 begin
-  FCmds.Perform(TAddMixStripCommand.Create(FProject, skBus,
-    Format('Bus %d', [FProject.Mixer.StripCount])));
+  MixPerform(TAddMixStripCommand.Create(FProject, skBus,
+    Format('Bus %d', [MixCur.StripCount])));
   RefreshMixerTab;
 end;
 
 procedure TfrmMain.btnMixAddAuxClick(Sender: TObject);
 begin
-  FCmds.Perform(TAddMixStripCommand.Create(FProject, skAux,
-    Format('Aux %d', [FProject.Mixer.StripCount])));
+  MixPerform(TAddMixStripCommand.Create(FProject, skAux,
+    Format('Aux %d', [MixCur.StripCount])));
   RefreshMixerTab;
 end;
 
 procedure TfrmMain.btnMixAddVCAClick(Sender: TObject);
 begin
-  FCmds.Perform(TAddMixStripCommand.Create(FProject, skVCA,
-    Format('VCA %d', [FProject.Mixer.StripCount])));
+  MixPerform(TAddMixStripCommand.Create(FProject, skVCA,
+    Format('VCA %d', [MixCur.StripCount])));
   RefreshMixerTab;
 end;
 
@@ -15999,8 +26253,15 @@ begin
       mtWarning, [mbOK], 0);
     Exit;
   end;
+  if FMixViewTracker and (MixCur.StripById(SelectedMixStripId) <> nil) and
+     (MixCur.StripById(SelectedMixStripId).InputSourceId > 0) then
+  begin
+    MessageDlg('A TRK-CHN strip belongs to its tracker channel and cannot be removed.',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
   try
-    FCmds.Perform(TRemoveMixStripCommand.Create(FProject, SelectedMixStripId));
+    MixPerform(TRemoveMixStripCommand.Create(FProject, SelectedMixStripId));
   except
     on E: EUDAWError do
       MessageDlg(E.Message, mtWarning, [mbOK], 0);
@@ -16019,7 +26280,7 @@ var
 begin
   id := SelectedMixStripId;
   if id = 0 then Exit;
-  FCmds.Perform(TSetMixStripFlagCommand.Create(FProject, id, mfgMute, chkMixMute.Checked));
+  MixPerform(TSetMixStripFlagCommand.Create(FProject, id, mfgMute, chkMixMute.Checked));
   pbMixer.Invalidate;
 end;
 
@@ -16029,7 +26290,7 @@ var
 begin
   id := SelectedMixStripId;
   if id = 0 then Exit;
-  FCmds.Perform(TSetMixStripFlagCommand.Create(FProject, id, mfgSolo, chkMixSolo.Checked));
+  MixPerform(TSetMixStripFlagCommand.Create(FProject, id, mfgSolo, chkMixSolo.Checked));
   pbMixer.Invalidate;
 end;
 
@@ -16049,11 +26310,11 @@ begin
   if not TryStrToFloat(StringReplace(edtMixPan.Text, ',', '.', [rfReplaceAll]), pan, fs) then
     pan := 0;
   try
-    FCmds.Perform(TSetMixStripFloatCommand.Create(FProject, id, mffFader, fader));
-    FCmds.Perform(TSetMixStripFloatCommand.Create(FProject, id, mffPan, pan));
-    FCmds.Perform(TSetMixStripFlagCommand.Create(FProject, id, mfgMute, chkMixMute.Checked));
-    FCmds.Perform(TSetMixStripFlagCommand.Create(FProject, id, mfgSolo, chkMixSolo.Checked));
-    s := FProject.Mixer.StripById(id);
+    MixPerform(TSetMixStripFloatCommand.Create(FProject, id, mffFader, fader));
+    MixPerform(TSetMixStripFloatCommand.Create(FProject, id, mffPan, pan));
+    MixPerform(TSetMixStripFlagCommand.Create(FProject, id, mfgMute, chkMixMute.Checked));
+    MixPerform(TSetMixStripFlagCommand.Create(FProject, id, mfgSolo, chkMixSolo.Checked));
+    s := MixCur.StripById(id);
     if FTlPlaying and (s <> nil) and
        (s.AutomationMode in [amTouch, amLatch, amWrite]) then
     begin
@@ -16067,7 +26328,7 @@ begin
     if cboMixRoute.ItemIndex >= 0 then
     begin
       routeId := Integer(NativeInt(cboMixRoute.Items.Objects[cboMixRoute.ItemIndex]));
-      FCmds.Perform(TSetMixStripRouteCommand.Create(FProject, id, routeId));
+      MixPerform(TSetMixStripRouteCommand.Create(FProject, id, routeId));
     end;
   except
     on E: EUDAWError do
@@ -16112,6 +26373,8 @@ begin
     25: begin kind := 'mastering'; params := ''; end;       // TMasteringNode fills in its own defaults
     26: begin kind := 'distortion'; params := 'type=tube;drive=3;trim=0;mix=1'; end;
     27: begin kind := 'distortion'; params := 'type=softclip;drive=2;trim=0;mix=1'; end;
+    { the key is another strip's signal: type its strip id into the sidechain row }
+    28: begin kind := 'compressor'; params := 'type=ducker;thresh=-30;knee=6;attack=5;release=250;makeup=0;hold=60;range=-12;sidechain=0'; end;
   else
     kind := 'gain'; params := 'db=0';
   end;
@@ -16125,13 +26388,13 @@ begin
   if not TfrmMixInsertParams.Edit(Self, kind, cboMixInsertKind.Text, params, editedParams) then
     Exit;
   sc := ExtractSidechainParam(editedParams);
-  FCmds.Perform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId, kind, editedParams,
+  MixPerform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId, kind, editedParams,
     -1, cboMixInsertKind.Text));
   if sc >= 0 then
   begin
-    s := FProject.Mixer.StripById(SelectedMixStripId);
+    s := MixCur.StripById(SelectedMixStripId);
     if (s <> nil) and (s.InsertCount > 0) then
-      FCmds.Perform(TSetMixInsertSidechainCommand.Create(FProject, SelectedMixStripId,
+      MixPerform(TSetMixInsertSidechainCommand.Create(FProject, SelectedMixStripId,
         s.InsertCount - 1, sc));
   end;
   RefreshMixerTab;
@@ -16141,9 +26404,9 @@ procedure TfrmMain.btnMixDelInsertClick(Sender: TObject);
 var
   s: TMixStrip;
 begin
-  s := FProject.Mixer.StripById(SelectedMixStripId);
+  s := MixCur.StripById(SelectedMixStripId);
   if (s = nil) or (s.InsertCount = 0) then Exit;
-  FCmds.Perform(TRemoveMixInsertCommand.Create(FProject, s.Id, s.InsertCount - 1));
+  MixPerform(TRemoveMixInsertCommand.Create(FProject, s.Id, s.InsertCount - 1));
   RefreshMixerTab;
 end;
 
@@ -16189,7 +26452,7 @@ begin
   SetLength(tmp, n);
   for i := 0 to n - 1 do
   begin
-    tmp[i] := Single(0.2 * Sin(FPhase));
+    tmp[i] := Single(0.2 * FastSin(FPhase));
     FPhase := FPhase + 2 * Pi * freq / FRate;
     if FPhase > 2 * Pi then FPhase := FPhase - 2 * Pi;
   end;
@@ -16213,12 +26476,12 @@ var
   frames, ch, i: Integer;
   pk, rms: Double;
 begin
-  proc := TMixerProcessor.Create(FProject.Mixer);
+  proc := TMixerProcessor.Create(MixCur);
   try
     prov := TMixToneProvider.Create(FProject.SampleRate);
     proc.SetInputProvider(prov);
-    proc.SetAutomation(FProject.Mixer.Automation);
-    proc.SetModulation(FProject.Mixer.Modulation);
+    proc.SetAutomation(MixCur.Automation);
+    proc.SetModulation(MixCur.Modulation);
     proc.SetPlayheadSeconds(FProject.Timeline.PlayheadSeconds);
     try
       proc.Prepare(FProject.SampleRate, 480, FProject.Channels);
@@ -16242,7 +26505,7 @@ begin
       end;
     if (Length(planar) > 0) and (frames > 0) then
       rms := Sqrt(rms / (Length(planar) * frames));
-    master := FProject.Mixer.MasterStrip;
+    master := MixCur.MasterStrip;
     FMixPreview := Format(
       'rendered %d strip(s), %d frames @ %d Hz'#13#10 +
       '  master out : peak %.4f (%.1f dBFS)   rms %.4f (%.1f dBFS)'#13#10 +
@@ -16256,329 +26519,374 @@ begin
   RefreshMixerTab;
 end;
 
-{ Colour badge per strip kind - a quick visual "what is this" cue distinct
-  from the name text, since Track / Bus / Aux / VCA / Master strips behave
-  quite differently (routing targets, whether they carry audio at all). }
-function MixKindBadgeColor(AKind: TMixStripKind): TColor;
+{ The strip's accent colour: the linked Timeline track's colour (so a strip
+  matches its track's header stripe and clips), else the strip's own, else the
+  same rotating palette the Timeline uses. }
+function TfrmMain.MixStripAccent(const AStrip: TMixStrip; AIndex: Integer): TColor;
+var
+  trk: TTimelineTrack;
+  ti: Integer;
 begin
-  case AKind of
-    skMaster: Result := $00A0703C;   // blue-ish accent (BGR: warm gold)
-    skVCA:    Result := $00A050A0;   // violet
-    skBus:    Result := $00A0A050;   // teal
-    skAux:    Result := $0050A0A0;   // olive
-    skInput:  Result := $00707070;   // grey
-  else
-    Result := $00707030;            // audio track: steel blue
+  if AStrip.Kind = skMaster then Exit(CurrentTheme.Accent);
+  if FMixViewTracker then Exit(TlTrackAccent(nil, Max(AIndex, 0)));   // a tracker channel: no Timeline track
+  trk := nil;
+  ti := AIndex;
+  if (FProject <> nil) and (AStrip.InputSourceId <> 0) then
+  begin
+    trk := FProject.Timeline.TrackById(AStrip.InputSourceId);
+    if trk <> nil then ti := TlTrackIndexById(trk.Id);
   end;
+  if (trk = nil) and (AStrip.Color > 0) then Exit(TColor(AStrip.Color));
+  Result := TlTrackAccent(trk, Max(ti, 0));
 end;
 
-function MixKindBadgeLetter(AKind: TMixStripKind): string;
-begin
-  case AKind of
-    skMaster: Result := 'MST';
-    skVCA:    Result := 'VCA';
-    skBus:    Result := 'BUS';
-    skAux:    Result := 'AUX';
-    skInput:  Result := 'IN';
-  else
-    Result := 'TRK';
-  end;
-end;
-
-{ Renders one professional-looking channel strip - kind badge, name, M/S
-  indicators, a labelled dB scale next to a groove-and-cap fader, a two-tone
-  peak meter with a distinct clip zone, a pan notch and an insert/send dot
-  row - into ABuf at AX..AX+AWidth, ARect returning the strip's full on-screen
-  hit box for click-to-select. }
-function MixColor(A, B: TColor; T: Double): TColor; forward;
 function MixInsertKindDisplay(const AKind, AParams: string): string; forward;
 
-procedure TfrmMain.DrawMixStrip(ABuf: TCanvas; AX, AWidth, AHeight: Integer;
-  const AStrip: TMixStrip; ASelected: Boolean; out ARect: TRect);
+{ Everything that decides how many strip widgets there are and what is on them:
+  when it changes, MixSyncStrips re-applies the model. Fader, pan, flags and
+  meters are not in it - those are pushed every refresh by MixUpdateStrips. }
 const
-  HEADER_H = 34;
-  FOOTER_H = 100;   { room for the dot row + up to 4 effect-name lines; keep equal to pbMixerMouseDown/MouseMove }
+  MIX_COLLAPSED_W = 26;   { width of a folded strip }
+
+function TfrmMain.MixStripSignature: string;
 var
-  theme: TUDAWTheme;
-  bodyTop, bodyBottom, meterTop, meterBottom, faderTop, faderBottom: Integer;
-  faderY, meterH, meterHR, panX, i, dotX, dotY: Integer;
-  frac: Double;
-  meterCol: TColor;
-  txt: string;
+  m: TMixerModel;
+  sb: TStringBuilder;
+  i, j: Integer;
+  s: TMixStrip;
+  ins: TMixInsert;
 begin
-  theme := CurrentTheme;
-  ARect := Rect(AX, 2, AX + AWidth - 4, AHeight - 2);
-
-  { strip frame, tinted by kind, brighter border when selected }
-  ABuf.Brush.Style := bsSolid;
-  if AStrip.Kind = skMaster then ABuf.Brush.Color := $00302820
-  else if AStrip.Kind = skVCA then ABuf.Brush.Color := $00302030
-  else if AStrip.Kind in [skBus, skAux] then ABuf.Brush.Color := $00203028
-  else ABuf.Brush.Color := theme.PanelBackground;
-  if ASelected then
-  begin
-    ABuf.Brush.Color := MixColor(ABuf.Brush.Color, theme.Selection, 0.35);
-    ABuf.Pen.Color := theme.Selection;
-  end
-  else ABuf.Pen.Color := theme.Border;
-  ABuf.Pen.Width := IfThen(ASelected, 2, 1);
-  ABuf.Rectangle(ARect);
-  ABuf.Pen.Width := 1;
-
-  { header: kind badge + name, muted name dims }
-  ABuf.Brush.Style := bsSolid;
-  ABuf.Brush.Color := MixKindBadgeColor(AStrip.Kind);
-  ABuf.FillRect(Rect(ARect.Left + 1, ARect.Top + 1, ARect.Right - 1, ARect.Top + 15));
-  ABuf.Brush.Style := bsClear;
-  ABuf.Font.Color := clWhite;
-  ABuf.Font.Style := [fsBold];
-  ABuf.TextOut(ARect.Left + 4, ARect.Top + 1, MixKindBadgeLetter(AStrip.Kind));
-  ABuf.Font.Style := [];
-
-  if AStrip.Muted then ABuf.Font.Color := theme.MeterClip
-  else ABuf.Font.Color := theme.Text;
-  txt := AStrip.Name;
-  while (ABuf.TextWidth(txt) > AWidth - 10) and (Length(txt) > 1) do
-    Delete(txt, Length(txt), 1);
-  ABuf.TextOut(ARect.Left + 4, ARect.Top + 17, txt);
-
-  { M / S indicator chips, lit when active }
-  if AStrip.Muted then ABuf.Brush.Color := theme.MeterClip else ABuf.Brush.Color := theme.Border;
-  ABuf.Brush.Style := bsSolid;
-  ABuf.FillRect(Rect(ARect.Right - 40, ARect.Top + 17, ARect.Right - 22, ARect.Top + 31));
-  ABuf.Brush.Style := bsClear;
-  ABuf.Font.Color := IfThen(AStrip.Muted, clWhite, theme.SecondaryText);
-  ABuf.TextOut(ARect.Right - 37, ARect.Top + 17, 'M');
-
-  if AStrip.Soloed then ABuf.Brush.Color := $0020D0F0 { amber-ish (BGR) } else ABuf.Brush.Color := theme.Border;
-  ABuf.Brush.Style := bsSolid;
-  ABuf.FillRect(Rect(ARect.Right - 20, ARect.Top + 17, ARect.Right - 2, ARect.Top + 31));
-  ABuf.Brush.Style := bsClear;
-  ABuf.Font.Color := IfThen(AStrip.Soloed, clWhite, theme.SecondaryText);
-  ABuf.TextOut(ARect.Right - 17, ARect.Top + 17, 'S');
-
-  { pan notch: a small groove with a tick at the current pan (-1..+1) }
-  panX := ARect.Left + 4 +
-    Round((AStrip.Pan + 1.0) / 2.0 * (AWidth - 14));
-  ABuf.Pen.Color := theme.Grid;
-  ABuf.MoveTo(ARect.Left + 4, ARect.Top + HEADER_H);
-  ABuf.LineTo(ARect.Right - 6, ARect.Top + HEADER_H);
-  ABuf.Pen.Color := theme.Accent;
-  ABuf.MoveTo(panX, ARect.Top + HEADER_H - 3);
-  ABuf.LineTo(panX, ARect.Top + HEADER_H + 3);
-
-  { the fader/meter body, between the header and the footer dot row }
-  bodyTop := ARect.Top + HEADER_H + 6;
-  bodyBottom := ARect.Bottom - FOOTER_H;
-  if bodyBottom < bodyTop + 10 then bodyBottom := bodyTop + 10;
-  faderTop := bodyTop;
-  faderBottom := bodyBottom;
-  meterTop := bodyTop;
-  meterBottom := bodyBottom;
-
-  { fader groove }
-  ABuf.Pen.Color := theme.Grid;
-  ABuf.MoveTo((ARect.Left + ARect.Right) div 2 - 8, faderTop);
-  ABuf.LineTo((ARect.Left + ARect.Right) div 2 - 8, faderBottom);
-
-  { fader cap: -60..+12 dB mapped over the groove, drawn as a small filled
-    rectangle ("cap") rather than a bare line so it reads as a real control }
-  frac := (AStrip.FaderDb + 60.0) / 72.0;
-  if frac < 0 then frac := 0 else if frac > 1 then frac := 1;
-  faderY := Round((faderBottom - faderTop) * (1.0 - frac)) + faderTop;
-  ABuf.Brush.Style := bsSolid;
-  ABuf.Brush.Color := theme.Accent;
-  ABuf.Pen.Color := theme.Text;
-  ABuf.Rectangle(Rect((ARect.Left + ARect.Right) div 2 - 14, faderY - 3,
-    (ARect.Left + ARect.Right) div 2 - 2, faderY + 3));
-
-  ABuf.Brush.Style := bsClear;
-  ABuf.Font.Color := theme.SecondaryText;
-  ABuf.TextOut(ARect.Left + 4, faderBottom + 2,
-    FormatFloat('0.0', AStrip.FaderDb) + ' dB');
-  ABuf.TextOut(ARect.Left + 4, faderBottom + 16,
-    Format('R %.0f  I %.0f', [AStrip.MeterRmsDb, AStrip.MeterLufsIntegrated]));
-
-  { stereo peak meter (L/R), green -> yellow -> red zones, distinct clip cap }
-  frac := (AStrip.MeterPeakDbL + 60.0) / 60.0;
-  if frac < 0 then frac := 0 else if frac > 1 then frac := 1;
-  meterH := Round((meterBottom - meterTop) * frac);
-  frac := (AStrip.MeterPeakDbR + 60.0) / 60.0;
-  if frac < 0 then frac := 0 else if frac > 1 then frac := 1;
-  meterHR := Round((meterBottom - meterTop) * frac);
-
-  if AStrip.MeterPeakDbL >= 0.0 then meterCol := theme.MeterClip
-  else if AStrip.MeterPeakDbL > -6.0 then meterCol := $0020D0F0
-  else meterCol := theme.Meter;
-  ABuf.Brush.Style := bsSolid;
-  ABuf.Brush.Color := $00181818;
-  ABuf.FillRect(Rect(ARect.Right - 16, meterTop, ARect.Right - 4, meterBottom));
-  ABuf.Brush.Color := meterCol;
-  ABuf.FillRect(Rect(ARect.Right - 16, meterBottom - meterH, ARect.Right - 11, meterBottom));
-
-  if AStrip.MeterPeakDbR >= 0.0 then meterCol := theme.MeterClip
-  else if AStrip.MeterPeakDbR > -6.0 then meterCol := $0020D0F0
-  else meterCol := theme.Meter;
-  ABuf.Brush.Color := meterCol;
-  ABuf.FillRect(Rect(ARect.Right - 10, meterBottom - meterHR, ARect.Right - 5, meterBottom));
-
-  { peak-hold caps: a 1px line at the held peak, decaying per
-    UDAW.DSP.Meter.TPeakMeter.HoldDb (see TMixerEngine.ProcessStrip) }
-  ABuf.Pen.Color := theme.Text;
-  frac := (AStrip.MeterHoldDbL + 60.0) / 60.0;
-  if frac < 0 then frac := 0 else if frac > 1 then frac := 1;
-  i := meterBottom - Round((meterBottom - meterTop) * frac);
-  ABuf.MoveTo(ARect.Right - 16, i); ABuf.LineTo(ARect.Right - 11, i);
-  frac := (AStrip.MeterHoldDbR + 60.0) / 60.0;
-  if frac < 0 then frac := 0 else if frac > 1 then frac := 1;
-  i := meterBottom - Round((meterBottom - meterTop) * frac);
-  ABuf.MoveTo(ARect.Right - 10, i); ABuf.LineTo(ARect.Right - 5, i);
-
-  { latching clip LED - a small square in the badge bar (always has room,
-    unlike the name/M/S row which is width-constrained) - click resets it
-    (see pbMixerMouseDown) }
-  SetLength(FMixClipRects, Length(FMixClipRects) + 1);
-  SetLength(FMixClipIds, Length(FMixClipIds) + 1);
-  FMixClipIds[High(FMixClipIds)] := AStrip.Id;
-  FMixClipRects[High(FMixClipRects)] := Rect(ARect.Left + 22, ARect.Top + 3, ARect.Left + 30, ARect.Top + 11);
-  ABuf.Brush.Style := bsSolid;
-  if AStrip.ClipL or AStrip.ClipR then ABuf.Brush.Color := theme.MeterClip
-  else ABuf.Brush.Color := clGray;
-  ABuf.FillRect(FMixClipRects[High(FMixClipRects)]);
-
-  { insert/send dot row: one small dot per insert (accent) and per send
-    (secondary), so the chain's presence and length is visible without
-    opening the strip - a fast "does this channel have anything on it". }
-  dotY := ARect.Bottom - FOOTER_H + 34;
-  dotX := ARect.Left + 4;
-  ABuf.Brush.Style := bsSolid;
-  for i := 0 to AStrip.InsertCount - 1 do
-  begin
-    if dotX > ARect.Right - 8 then Break;
-    ABuf.Brush.Color := theme.Accent;
-    ABuf.FillRect(Rect(dotX, dotY, dotX + 5, dotY + 5));
-    { drag-reorder + click hit-box (a bit larger than the painted dot so it's
-      actually grabbable) - see pbMixerMouseDown/MouseMove/MouseUp }
-    SetLength(FMixInsertDotRects, Length(FMixInsertDotRects) + 1);
-    SetLength(FMixInsertDotStripId, Length(FMixInsertDotStripId) + 1);
-    SetLength(FMixInsertDotIndex, Length(FMixInsertDotIndex) + 1);
-    FMixInsertDotRects[High(FMixInsertDotRects)] := Rect(dotX - 1, dotY - 3, dotX + 6, dotY + 8);
-    FMixInsertDotStripId[High(FMixInsertDotStripId)] := AStrip.Id;
-    FMixInsertDotIndex[High(FMixInsertDotIndex)] := i;
-    Inc(dotX, 7);
-  end;
-  Inc(dotX, 3);
-  for i := 0 to AStrip.SendCount - 1 do
-  begin
-    if dotX > ARect.Right - 8 then Break;
-    ABuf.Brush.Color := theme.SecondaryText;
-    ABuf.FillRect(Rect(dotX, dotY, dotX + 5, dotY + 5));
-    Inc(dotX, 7);
-  end;
-
-  { the effects themselves, by name, one line each under the dot row, so what
-    is on the channel is readable without opening it (bypassed ones dimmed) }
-  ABuf.Brush.Style := bsClear;
-  dotY := dotY + 10;
-  for i := 0 to AStrip.InsertCount - 1 do
-  begin
-    if dotY + 11 > ARect.Bottom - 2 then Break;
-    if (i = 3) and (AStrip.InsertCount > 4) then
+  if FProject = nil then Exit('<none>');
+  m := MixCur;
+  sb := TStringBuilder.Create;
+  try
+    sb.Append(IfThen(FMixViewTracker, 'TRK', 'TL')).Append(pbMixer.ClientWidth).Append('x').Append(pbMixer.ClientHeight)
+      .Append('z').Append(FormatFloat('0.00', FMixZoomFactor)).Append('f').Append(FMixFirst)
+      .Append('s').Append(SelectedMixStripId).Append('e').Append(Ord(m.EqCollapsed));
+    for i := 0 to FProject.Timeline.TrackCount - 1 do
+      sb.Append('|T').Append(FProject.Timeline.GetTrack(i).Id)
+        .Append(FProject.Timeline.GetTrack(i).Name);
+    for i := 0 to m.StripCount - 1 do
     begin
-      ABuf.Font.Color := theme.SecondaryText;
-      ABuf.TextOut(ARect.Left + 4, dotY, Format('+%d more', [AStrip.InsertCount - 3]));
-      Break;
+      s := m.GetStrip(i);
+      sb.Append('|').Append(s.Id).Append(':').Append(s.Name).Append(':').Append(Ord(s.Collapsed))
+        .Append(Ord(s.Kind)).Append(':').Append(s.InputSourceId).Append(':')
+        .Append(s.OutputTargetId).Append(':').Append(Integer(MixStripAccent(s, i)));
+      for j := 0 to s.InsertCount - 1 do
+      begin
+        ins := s.GetInsert(j);
+        sb.Append(',').Append(MixInsertKindDisplay(ins.Kind, ins.Params))
+          .Append(Ord(ins.Bypass));
+      end;
+      for j := 0 to s.SendCount - 1 do
+        sb.Append(';').Append(s.GetSend(j).TargetStripId).Append('@')
+          .Append(FormatFloat('0.0', s.GetSend(j).GainDb));
     end;
-    if AStrip.GetInsert(i).Bypass then ABuf.Font.Color := theme.SecondaryText
-    else ABuf.Font.Color := theme.Text;
-    txt := Format('%d %s', [i + 1, MixInsertKindDisplay(AStrip.GetInsert(i).Kind,
-      AStrip.GetInsert(i).Params)]);
-    while (ABuf.TextWidth(txt) > AWidth - 10) and (Length(txt) > 1) do
-      Delete(txt, Length(txt), 1);
-    ABuf.TextOut(ARect.Left + 4, dotY, txt);
-    Inc(dotY, 11);
+    Result := sb.ToString;
+  finally
+    sb.Free;
   end;
 end;
 
+{ Builds / removes / moves the strip widgets to match the model. Runs from a
+  posted message (WM_MIXSYNC), never from inside a paint. }
+procedure TfrmMain.MixSyncStrips;
+var
+  m: TMixerModel;
+  i, j, n, barW, masterW, areaW, contentW, stripX, sw, h, viewW: Integer;
+  needBar: Boolean;
+  s, t: TMixStrip;
+  c: TGLMixerStrip;
+  existing: TObjectList<TGLMixerStrip>;
+  info: TMixStripInfo;
+  trk: TTimelineTrack;
+  ins: TMixInsert;
+begin
+  FMixSyncPosted := False;
+  existing := TObjectList<TGLMixerStrip>.Create(False);
+  try
+    for i := 0 to pbMixer.ControlCount - 1 do
+      if pbMixer.Controls[i] is TGLMixerStrip then existing.Add(TGLMixerStrip(pbMixer.Controls[i]));
+
+    if FProject = nil then
+    begin
+      for c in existing do c.Free;
+      SetLength(FMixStripRects, 0);
+      SetLength(FMixStripIds, 0);
+      FMixSig := MixStripSignature;
+      Exit;
+    end;
+
+    m := MixCur;
+    n := m.StripCount;
+    { drop widgets whose strip is gone }
+    for j := existing.Count - 1 downto 0 do
+      if m.StripById(existing[j].StripId) = nil then
+      begin
+        existing[j].Free;
+        existing.Delete(j);
+      end;
+
+    viewW := pbMixer.ClientWidth;
+    if FMixZoomFactor <= 0 then FMixZoomFactor := 1.0;
+    barW := Max(100, Round(120 * FMixZoomFactor));
+    masterW := barW;
+    { the stored fold state of the EQ panel (it belongs to the mixer being shown) }
+    if pnlMixEq.Collapsed <> m.EqCollapsed then
+    begin
+      FMixViewApplying := True;
+      try
+        pnlMixEq.Collapsed := m.EqCollapsed;
+      finally
+        FMixViewApplying := False;
+      end;
+    end;
+    if (m.MasterStrip <> nil) and m.MasterStrip.Collapsed then masterW := MIX_COLLAPSED_W;
+    { the strips and the EQ panel make one row, wider than the window when need be; the master stays
+      at the right and a horizontal scroll bar moves the row }
+    contentW := 4;
+    for i := 0 to n - 1 do
+      if m.GetStrip(i).Kind <> skMaster then
+        Inc(contentW, IfThen(m.GetStrip(i).Collapsed, MIX_COLLAPSED_W, barW - 6) + 6);
+    Inc(contentW, pnlMixEq.Width + 4);
+    if m.MasterStrip <> nil then areaW := viewW - masterW - 18
+    else areaW := viewW - 8;
+    needBar := contentW > areaW;
+    h := Max(60, pbMixer.ClientHeight - 8 - IfThen(needBar, sbMixH.Height, 0));
+    FMixFirst := EnsureRange(FMixFirst, 0, Max(0, contentW - areaW));
+    FMixScrollSync := True;
+    try
+      sbMixH.Visible := needBar;
+      if needBar then
+      begin
+        sbMixH.SetBounds(0, pbMixer.ClientHeight - sbMixH.Height, viewW, sbMixH.Height);
+        sbMixH.SmallChange := barW;
+        sbMixH.LargeChange := Max(barW, areaW - barW);
+        sbMixH.Min := 0;
+        sbMixH.Max := contentW;
+        sbMixH.PageSize := areaW;
+        sbMixH.Position := FMixFirst;
+      end;
+    finally
+      FMixScrollSync := False;
+    end;
+    stripX := 4 - FMixFirst;
+
+    SetLength(FMixStripRects, n);
+    SetLength(FMixStripIds, n);
+    for i := 0 to n - 1 do
+    begin
+      s := m.GetStrip(i);
+      c := nil;
+      for j := 0 to existing.Count - 1 do
+        if existing[j].StripId = s.Id then
+        begin
+          c := existing[j];
+          Break;
+        end;
+      if c = nil then
+      begin
+        c := TGLMixerStrip.Create(pbMixer);
+        c.Parent := pbMixer;
+        c.OnSelect := MixStripSelect;
+        c.OnFader := MixStripFader;
+        c.OnPan := MixStripPan;
+        c.OnFlag := MixStripFlag;
+        c.OnInput := MixStripInput;
+        c.OnOutput := MixStripOutput;
+        c.OnAddFx := MixStripAddFx;
+        c.OnAddSend := MixStripAddSend;
+        c.OnEditInsert := MixStripEditInsert;
+        c.OnSendClick := MixStripSendClick;
+        c.OnClipReset := MixStripClipReset;
+        c.OnReorder := MixStripReorder;
+        c.OnCollapse := MixStripCollapse;
+        c.OnMouseWheel := pbMixerMouseWheel;
+        c.InsertMenu := pmMixInsert;
+        c.PopupMenu := pmMixer;
+        c.SetDragHandlers(MixStripDragOver, MixStripDragDrop);
+        existing.Add(c);
+      end;
+
+      c.SetCollapsed(s.Collapsed);
+      if s.Kind = skMaster then
+      begin
+        c.SetBounds(viewW - masterW - 6, 4, masterW, h);
+        c.Visible := True;
+        c.BringToFront;
+      end
+      else
+      begin
+        sw := IfThen(s.Collapsed, MIX_COLLAPSED_W, barW - 6);
+        { a strip is shown whole or not at all while the row is scrolled }
+        if (stripX >= 0) and (stripX + sw <= areaW) then
+        begin
+          c.SetBounds(stripX, 4, sw, h);
+          c.Visible := True;
+        end
+        else c.Visible := False;
+        Inc(stripX, sw + 6);
+      end;
+
+      info := Default(TMixStripInfo);
+      info.Id := s.Id;
+      info.Name := s.Name;
+      info.Sub := MixStripKindDisplay(s.Kind);
+      info.Tint := MixStripAccent(s, i);
+      info.Selected := s.Id = SelectedMixStripId;
+      info.IsMaster := s.Kind = skMaster;
+      info.ShowIn := s.Kind = skAudioTrack;
+      info.ShowOut := not (s.Kind in [skMaster, skVCA]);
+      info.ShowSolo := s.Kind <> skMaster;
+      info.CanArm := s.Kind = skAudioTrack;
+
+      if info.ShowIn then
+      begin
+        SetLength(info.InTexts, 1);
+        SetLength(info.InIds, 1);
+        info.InTexts[0] := 'In: (none)';
+        info.InIds[0] := 0;
+        for j := 0 to FProject.Timeline.TrackCount - 1 do
+        begin
+          trk := FProject.Timeline.GetTrack(j);
+          SetLength(info.InTexts, Length(info.InTexts) + 1);
+          SetLength(info.InIds, Length(info.InIds) + 1);
+          info.InTexts[High(info.InTexts)] := 'In: ' + trk.Name;
+          info.InIds[High(info.InIds)] := trk.Id;
+          if trk.Id = s.InputSourceId then info.InSel := High(info.InTexts);
+        end;
+        if s.InputSourceId = 0 then info.InSel := 0;
+      end;
+
+      if info.ShowOut then
+      begin
+        SetLength(info.OutTexts, 1);
+        SetLength(info.OutIds, 1);
+        info.OutTexts[0] := 'Out: Master';
+        info.OutIds[0] := 0;
+        info.OutSel := 0;
+        for j := 0 to n - 1 do
+        begin
+          t := m.GetStrip(j);
+          if (t.Id = s.Id) or (t.Kind = skMaster) or not t.AcceptsBusInput then Continue;
+          SetLength(info.OutTexts, Length(info.OutTexts) + 1);
+          SetLength(info.OutIds, Length(info.OutIds) + 1);
+          info.OutTexts[High(info.OutTexts)] := 'Out: ' + t.Name;
+          info.OutIds[High(info.OutIds)] := t.Id;
+          if t.Id = s.OutputTargetId then info.OutSel := High(info.OutTexts);
+        end;
+      end;
+
+      SetLength(info.Inserts, s.InsertCount);
+      for j := 0 to s.InsertCount - 1 do
+      begin
+        ins := s.GetInsert(j);
+        info.Inserts[j].Name := MixInsertKindDisplay(ins.Kind, ins.Params);
+        info.Inserts[j].Bypass := ins.Bypass;
+      end;
+      SetLength(info.Sends, s.SendCount);
+      for j := 0 to s.SendCount - 1 do
+      begin
+        t := m.StripById(s.GetSend(j).TargetStripId);
+        info.Sends[j] := Format('%s  %.1f dB', [IfThen(t <> nil, t.Name, '?'), s.GetSend(j).GainDb]);
+      end;
+      c.Configure(info);
+
+      FMixStripIds[i] := s.Id;
+      if c.Visible then FMixStripRects[i] := c.BoundsRect
+      else FMixStripRects[i] := Rect(0, 0, 0, 0);
+    end;
+    FMixSig := MixStripSignature;
+    { master EQ panel: 5 px to the right of the last channel strip (not after the master strip) }
+    pnlMixEq.SetBounds(stripX - 1, 4, pnlMixEq.Width, h);
+    pnlMixEq.Visible := (stripX - 1 < areaW) and (stripX - 1 + pnlMixEq.Width > 0);
+  finally
+    existing.Free;
+  end;
+  MixUpdateStrips;
+end;
+
+procedure TfrmMain.WMMixSync(var Msg: TMessage);
+begin
+  MixSyncStrips;
+end;
+
+procedure TfrmMain.WMMixPick(var Msg: TMessage);
+begin
+  FMixPickPending := False;
+  if FMixPickBusy then Exit;
+  FMixPickBusy := True;
+  try
+    if FMixPickTag < 0 then btnMixAddVSTClick(nil)
+    else
+    begin
+      cboMixInsertKind.ItemIndex := FMixPickTag;
+      btnMixAddEQClick(nil);
+    end;
+  finally
+    FMixPickBusy := False;
+  end;
+end;
+
+{ pushes the moving values (fader, pan, M/S/R, meters) into the strip widgets }
+procedure TfrmMain.MixUpdateStrips;
+var
+  i: Integer;
+  c: TGLMixerStrip;
+  s: TMixStrip;
+  live: TMixStripLive;
+begin
+  if FProject = nil then Exit;
+  for i := 0 to pbMixer.ControlCount - 1 do
+  begin
+    if not (pbMixer.Controls[i] is TGLMixerStrip) then Continue;
+    c := TGLMixerStrip(pbMixer.Controls[i]);
+    s := MixCur.StripById(c.StripId);
+    if s = nil then Continue;
+    c.Selected := s.Id = SelectedMixStripId;
+    live.FaderDb := s.FaderDb;
+    live.Pan := s.Pan;
+    live.Muted := s.Muted;
+    live.Soloed := s.Soloed;
+    live.Armed := s.RecordArmed;
+    live.PeakL := s.MeterPeakDbL;
+    live.PeakR := s.MeterPeakDbR;
+    live.HoldL := s.MeterHoldDbL;
+    live.HoldR := s.MeterHoldDbR;
+    live.Clip := s.ClipL or s.ClipR;
+    c.UpdateLive(live);
+  end;
+end;
+
+{ one refresh of the Mixer view: re-lay out when the model's structure changed,
+  otherwise just move the faders / meters }
+procedure TfrmMain.MixTick;
+begin
+  if MixStripSignature <> FMixSig then
+  begin
+    if not FMixSyncPosted then
+    begin
+      FMixSyncPosted := True;
+      PostMessage(Handle, WM_MIXSYNC, 0, 0);
+    end;
+  end
+  else MixUpdateStrips;
+end;
+
+{ pbMixer itself is only the backdrop and the strips' parent; its paint is
+  where a refresh request (Invalidate) turns into MixTick }
 procedure TfrmMain.pbMixerPaint(Sender: TObject);
 var
-  cv: TCanvas;
-  w, h, n, i, x, barW: Integer;
-  m: TMixerModel;
-  s: TMixStrip;
-  r: TRect;
-  theme: TUDAWTheme;
+  cv: TGLCanvas;
 begin
-  w := pbMixer.Width;
-  h := pbMixer.Height;
-  if (w <= 0) or (h <= 0) then Exit;
-
-  { paint into an off-screen bitmap and blit it in one shot - pbMixer can be
-    invalidated at near-frame rate while meters are live, and drawing this
-    many strips' worth of rectangles/text straight to the on-screen DC
-    flickered badly; this mirrors the Timeline's FTlBuffer fix. }
-  FMixBuffer.SetSize(w, h);
-  cv := FMixBuffer.Canvas;
-  theme := CurrentTheme;
+  if (pbMixer.Width <= 0) or (pbMixer.Height <= 0) then Exit;
+  cv := pbMixer.GL;
   cv.Brush.Style := bsSolid;
-  cv.Brush.Color := theme.Background;
-  cv.FillRect(Rect(0, 0, w, h));
-
-  SetLength(FMixStripRects, 0);
-  SetLength(FMixStripIds, 0);
-  SetLength(FMixClipRects, 0);
-  SetLength(FMixClipIds, 0);
-  SetLength(FMixInsertDotRects, 0);
-  SetLength(FMixInsertDotStripId, 0);
-  SetLength(FMixInsertDotIndex, 0);
-  if FProject = nil then
-  begin
-    pbMixer.Canvas.Draw(0, 0, FMixBuffer);
-    Exit;
-  end;
-  m := FProject.Mixer;
-  n := m.StripCount;
-  if n = 0 then
-  begin
-    pbMixer.Canvas.Draw(0, 0, FMixBuffer);
-    Exit;
-  end;
-  if FMixZoomFactor <= 0 then FMixZoomFactor := 1.0;
-  barW := Round(((w - 8) div n) * FMixZoomFactor);
-  if barW < 60 then barW := 60;
-
-  SetLength(FMixStripRects, n);
-  SetLength(FMixStripIds, n);
-  for i := 0 to n - 1 do
-  begin
-    s := m.GetStrip(i);
-    x := 4 + i * barW;
-    FMixStripIds[i] := s.Id;
-    if x > w - 40 then
-    begin
-      FMixStripRects[i] := Rect(0, 0, 0, 0);
-      Continue;
-    end;
-    DrawMixStrip(cv, x, barW, h, s, s.Id = SelectedMixStripId, r);
-    FMixStripRects[i] := r;
-  end;
-
-  pbMixer.Canvas.Draw(0, 0, FMixBuffer);
+  cv.Brush.Color := CurrentTheme.Background;
+  cv.FillRect(Rect(0, 0, pbMixer.Width, pbMixer.Height));
+  MixTick;
 end;
 
-function MixColor(A, B: TColor; T: Double): TColor;
-var
-  ca, cb: LongInt;
-  ar, ag, ab, br, bg, bb: Byte;
-begin
-  ca := ColorToRGB(A);
-  cb := ColorToRGB(B);
-  ar := ca and $FF; ag := (ca shr 8) and $FF; ab := (ca shr 16) and $FF;
-  br := cb and $FF; bg := (cb shr 8) and $FF; bb := (cb shr 16) and $FF;
-  Result := TColor(Byte(Round(ar + (br - ar) * T)) or
-    (Byte(Round(ag + (bg - ag) * T)) shl 8) or
-    (Byte(Round(ab + (bb - ab) * T)) shl 16));
-end;
 
 function MixInsertKV(const AText, AKey: string): string;
 var
@@ -16608,10 +26916,14 @@ begin
   t := LowerCase(MixInsertKV(AParams, 'type'));
   if SameText(AKind, 'gain') then Result := 'Trim gain'
   else if SameText(AKind, 'parametriceq') then Result := 'Parametric EQ (6-band)'
-  else if SameText(AKind, 'graphiceq') then Result := 'Graphic EQ (10-band)'
+  else if SameText(AKind, 'graphiceq') then Result := 'Graphic EQ (' + IfThen(MixInsertKV(AParams, 'bands') = '', '10', MixInsertKV(AParams, 'bands')) + '-band)'
   else if SameText(AKind, 'compressor') then
   begin
-    if t = 'gate' then Result := 'Noise gate' else Result := 'Compressor';
+    if t = 'gate' then Result := 'Noise gate'
+    else if t = 'ducker' then Result := 'Ducker'
+    else if t = 'deesser' then Result := 'De-esser'
+    else if t = 'expander' then Result := 'Expander'
+    else Result := 'Compressor';
   end
   else if SameText(AKind, 'lookaheadlimiter') then Result := 'Limiter (lookahead brickwall)'
   else if SameText(AKind, 'modulation') then
@@ -16635,302 +26947,502 @@ begin
   else Result := AKind;
 end;
 
-procedure TfrmMain.pbMixerMouseDown(Sender: TObject; Button: TMouseButton;
-  Shift: TShiftState; X, Y: Integer);
-const
-  HEADER_H = 34;
-  FOOTER_H = 100;   { must match DrawMixStrip }
+{ ---- Mixer strip widget callbacks (see UDAW.UI.MixerStrip) ---- }
+
+procedure TfrmMain.MixSelectById(AId: Integer);
 var
-  i, k, centerX, bodyTop, bodyBottom: Integer;
-  s: TMixStrip;
-  faderRect, panRect: TRect;
+  k: Integer;
 begin
-  FMixDragMode := mdmNone;
-  { pbMixer.PopupMenu (pmMixer) auto-shows on WM_CONTEXTMENU, dispatched
-    AFTER this handler and pbMixerMouseUp both return - too late to cancel
-    from either of them once a right-click has landed on an insert dot
-    (see below). Un-nil-ing it here, every mouse-down, guarantees it is back
-    to normal before the NEXT right-click's WM_CONTEXTMENU is dispatched. }
-  pbMixer.PopupMenu := pmMixer;
-  if Button = mbLeft then
-  begin
-    { latching clip LEDs: click resets, never starts a drag }
-    for i := 0 to High(FMixClipRects) do
-      if PtInRect(FMixClipRects[i], Point(X, Y)) then
-      begin
-        if FProject <> nil then
-        begin
-          s := FProject.Mixer.StripById(FMixClipIds[i]);
-          if s <> nil then s.ResetClip;
-        end;
-        pbMixer.Invalidate;
-        Exit;
-      end;
-
-    { insert dots: begin a drag-reorder (see pbMixerMouseUp) }
-    for i := 0 to High(FMixInsertDotRects) do
-      if PtInRect(FMixInsertDotRects[i], Point(X, Y)) then
-      begin
-        FMixDragMode := mdmReorderInsert;
-        FMixDragStripId := FMixInsertDotStripId[i];
-        FMixDragInsertIndex := FMixInsertDotIndex[i];
-        Exit;
-      end;
-  end
-  else if Button = mbRight then
-  begin
-    { right-click an insert dot: remove that single insert, instead of
-      falling through to the generic strip context menu (pmMixer, which only
-      knows about whole strips, not individual inserts) }
-    for i := 0 to High(FMixInsertDotRects) do
-      if PtInRect(FMixInsertDotRects[i], Point(X, Y)) then
-      begin
-        pbMixer.PopupMenu := nil;   { see the comment above: suppress pmMixer for THIS click }
-        if (FProject <> nil) and
-           (MessageDlg('Remove this insert?', mtConfirmation, [mbYes, mbNo], 0) = mrYes) then
-        begin
-          FCmds.Perform(TRemoveMixInsertCommand.Create(FProject,
-            FMixInsertDotStripId[i], FMixInsertDotIndex[i]));
-          RefreshMixerTab;
-        end;
-        Exit;
-      end;
-  end;
-
-  for i := 0 to High(FMixStripRects) do
-  begin
-    if not PtInRect(FMixStripRects[i], Point(X, Y)) then Continue;
-
-    for k := 0 to cboMixStrip.Items.Count - 1 do
-      if Integer(NativeInt(cboMixStrip.Items.Objects[k])) = FMixStripIds[i] then
-      begin
-        cboMixStrip.ItemIndex := k;
-        cboMixStripChange(cboMixStrip);
-        Break;
-      end;
-
-    if (Button <> mbLeft) or (FProject = nil) then Exit;
-    s := FProject.Mixer.StripById(FMixStripIds[i]);
-    if s = nil then Exit;
-
-    { the kind-badge bar at the very top of the strip: drag to reorder }
-    if Y <= FMixStripRects[i].Top + 16 then
+  if (AId = 0) or (AId = SelectedMixStripId) then Exit;
+  for k := 0 to cboMixStrip.Items.Count - 1 do
+    if Integer(NativeInt(cboMixStrip.Items.Objects[k])) = AId then
     begin
-      FMixDragMode := mdmReorderStrip;
-      FMixDragStripId := s.Id;
-      Exit;
+      cboMixStrip.ItemIndex := k;
+      cboMixStripChange(cboMixStrip);
+      Break;
     end;
-
-    { M/S chips: same rects DrawMixStrip paints them at (Top+17..+31), which
-      looked clickable but previously did nothing - toggle on click, exactly
-      like clicking a clip-LED resets it above. }
-    if PtInRect(Rect(FMixStripRects[i].Right - 40, FMixStripRects[i].Top + 17,
-      FMixStripRects[i].Right - 22, FMixStripRects[i].Top + 31), Point(X, Y)) then
-    begin
-      FCmds.Perform(TSetMixStripFlagCommand.Create(FProject, s.Id, mfgMute, not s.Muted));
-      pbMixer.Invalidate;
-      Exit;
-    end;
-    if PtInRect(Rect(FMixStripRects[i].Right - 20, FMixStripRects[i].Top + 17,
-      FMixStripRects[i].Right - 2, FMixStripRects[i].Top + 31), Point(X, Y)) then
-    begin
-      FCmds.Perform(TSetMixStripFlagCommand.Create(FProject, s.Id, mfgSolo, not s.Soloed));
-      pbMixer.Invalidate;
-      Exit;
-    end;
-
-    { pan notch: DrawMixStrip paints its groove at Top+HEADER_H, +-3px tick -
-      widened vertically the same way the fader cap's hit rect is, so it's
-      actually grabbable. This was previously ONLY settable by typing a
-      number into edtMixPan and clicking "Apply strip" - no drag on the strip
-      itself did anything, which is the "balance doesn't change" bug. }
-    panRect := Rect(FMixStripRects[i].Left + 2, FMixStripRects[i].Top + HEADER_H - 5,
-      FMixStripRects[i].Right - 2, FMixStripRects[i].Top + HEADER_H + 5);
-    if PtInRect(panRect, Point(X, Y)) then
-    begin
-      FMixDragMode := mdmPan;
-      FMixDragStripId := s.Id;
-      pbMixerMouseMove(pbMixer, Shift, X, Y);   { apply immediately, not just on the first move }
-      Exit;
-    end;
-
-    { fader column: press-and-drag sets the fader live (see pbMixerMouseMove) -
-      widened past the painted cap so it is actually easy to grab }
-    centerX := (FMixStripRects[i].Left + FMixStripRects[i].Right) div 2;
-    bodyTop := FMixStripRects[i].Top + HEADER_H + 6;
-    bodyBottom := FMixStripRects[i].Bottom - FOOTER_H;
-    if bodyBottom < bodyTop + 10 then bodyBottom := bodyTop + 10;
-    faderRect := Rect(centerX - 20, bodyTop, centerX + 4, bodyBottom);
-    if PtInRect(faderRect, Point(X, Y)) then
-    begin
-      FMixDragMode := mdmFader;
-      FMixDragStripId := s.Id;
-      pbMixerMouseMove(pbMixer, Shift, X, Y);   { apply immediately, not just on the first move }
-    end;
-    Exit;
-  end;
 end;
 
-procedure TfrmMain.pbMixerMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
-const
-  HEADER_H = 34;
-  FOOTER_H = 100;   { must match DrawMixStrip }
+procedure TfrmMain.MixStripSelect(Sender: TGLMixerStrip);
+begin
+  MixSelectById(Sender.StripId);
+end;
+
+{ A real, undo-safe, RT-wired gain control: TSetMixStripFloatCommand feeds
+  TMixerModel.FaderDb, which TMixerProcessor.ProcessStrip reads and ramps
+  click-free every block. Repeated Perform calls during one drag merge into a
+  single undo step via TSetMixStripFloatCommand.AbsorbNext. }
+procedure TfrmMain.MixStripFader(Sender: TGLMixerStrip; AValue: Double);
 var
-  i, bodyTop, bodyBottom: Integer;
-  frac, db, pan: Double;
   s: TMixStrip;
 begin
-  if not (FMixDragMode in [mdmFader, mdmPan]) or (FProject = nil) then Exit;
-  s := FProject.Mixer.StripById(FMixDragStripId);
+  if FProject = nil then Exit;
+  s := MixCur.StripById(Sender.StripId);
   if s = nil then Exit;
-  i := 0;
-  while (i <= High(FMixStripIds)) and (FMixStripIds[i] <> FMixDragStripId) do Inc(i);
-  if i > High(FMixStripIds) then Exit;
+  MixSelectById(s.Id);
+  MixPerform(TSetMixStripFloatCommand.Create(FProject, s.Id, mffFader, AValue));
+  if FTlPlaying and (s.AutomationMode in [amTouch, amLatch, amWrite]) then
+    FCmds.Perform(TAddAutomationPointCommand.Create(FProject, s.Id, apFader,
+      FProject.Timeline.PlayheadSeconds, AValue));
+end;
 
-  if FMixDragMode = mdmFader then
-  begin
-    bodyTop := FMixStripRects[i].Top + HEADER_H + 6;
-    bodyBottom := FMixStripRects[i].Bottom - FOOTER_H;
-    if bodyBottom < bodyTop + 10 then bodyBottom := bodyTop + 10;
-    frac := 1.0 - (Y - bodyTop) / Double(bodyBottom - bodyTop);
-    if frac < 0 then frac := 0 else if frac > 1 then frac := 1;
-    db := frac * 72.0 - 60.0;   { matches DrawMixStrip's fader-cap mapping exactly }
+procedure TfrmMain.MixStripPan(Sender: TGLMixerStrip; AValue: Double);
+var
+  s: TMixStrip;
+begin
+  if FProject = nil then Exit;
+  s := MixCur.StripById(Sender.StripId);
+  if s = nil then Exit;
+  MixSelectById(s.Id);
+  MixPerform(TSetMixStripFloatCommand.Create(FProject, s.Id, mffPan, AValue));
+  if FTlPlaying and (s.AutomationMode in [amTouch, amLatch, amWrite]) then
+    FCmds.Perform(TAddAutomationPointCommand.Create(FProject, s.Id, apPan,
+      FProject.Timeline.PlayheadSeconds, AValue));
+end;
 
-    { A real, undo-safe, RT-wired gain control: TSetMixStripFloatCommand feeds
-      TMixerModel.FaderDb, which TMixerProcessor.ProcessStrip reads and ramps
-      click-free every block (see UDAW.Mixer.Engine) - this is not a slider
-      that merely repaints a number. Repeated Perform calls during one drag
-      merge into a single undo step via TSetMixStripFloatCommand.AbsorbNext. }
-    FCmds.Perform(TSetMixStripFloatCommand.Create(FProject, s.Id, mffFader, db));
-    if FTlPlaying and (s.AutomationMode in [amTouch, amLatch, amWrite]) then
-      FCmds.Perform(TAddAutomationPointCommand.Create(FProject, s.Id, apFader,
-        FProject.Timeline.PlayheadSeconds, db));
-  end
-  else   { mdmPan: horizontal drag along the pan notch, matching DrawMixStrip's
-           panX = Left + 4 + (Pan + 1) / 2 * (Width - 14) mapping, inverted }
-  begin
-    frac := (X - (FMixStripRects[i].Left + 4)) / Double(FMixStripRects[i].Right - 4 -
-      (FMixStripRects[i].Left + 4));
-    if frac < 0 then frac := 0 else if frac > 1 then frac := 1;
-    pan := frac * 2.0 - 1.0;
-
-    { Same real, undo-safe, RT-wired path as the fader above - previously the
-      ONLY way to change pan was typing into edtMixPan and clicking "Apply
-      strip"; nothing on the strip itself was interactive. }
-    FCmds.Perform(TSetMixStripFloatCommand.Create(FProject, s.Id, mffPan, pan));
-    if FTlPlaying and (s.AutomationMode in [amTouch, amLatch, amWrite]) then
-      FCmds.Perform(TAddAutomationPointCommand.Create(FProject, s.Id, apPan,
-        FProject.Timeline.PlayheadSeconds, pan));
+procedure TfrmMain.MixStripFlag(Sender: TGLMixerStrip; AFlag: Integer; AValue: Boolean);
+var
+  fld: TMixFlagField;
+begin
+  if FProject = nil then Exit;
+  MixSelectById(Sender.StripId);
+  case AFlag of
+    0: fld := mfgMute;
+    1: fld := mfgSolo;
+  else
+    fld := mfgArm;
   end;
+  MixPerform(TSetMixStripFlagCommand.Create(FProject, Sender.StripId, fld, AValue));
   pbMixer.Invalidate;
 end;
 
-procedure TfrmMain.pbMixerMouseUp(Sender: TObject; Button: TMouseButton;
-  Shift: TShiftState; X, Y: Integer);
-var
-  i, targetIdx: Integer;
+procedure TfrmMain.MixStripInput(Sender: TGLMixerStrip; AId: Integer);
 begin
-  if FProject = nil then
-  begin
-    FMixDragMode := mdmNone;
-    Exit;
+  if FProject = nil then Exit;
+  MixSelectById(Sender.StripId);
+  try
+    MixPerform(TSetMixStripInputCommand.Create(FProject, Sender.StripId, AId));
+  except
+    on E: EUDAWError do
+      MessageDlg(E.Message, mtWarning, [mbOK], 0);
   end;
-  case FMixDragMode of
-    mdmReorderStrip:
-      begin
-        targetIdx := FProject.Mixer.IndexOfStripId(FMixDragStripId);
-        for i := 0 to High(FMixStripRects) do
-          if (X >= FMixStripRects[i].Left) and (X < FMixStripRects[i].Right) then
-          begin
-            targetIdx := FProject.Mixer.IndexOfStripId(FMixStripIds[i]);
-            Break;
-          end;
-        if targetIdx >= 0 then
-          FCmds.Perform(TMoveMixStripCommand.Create(FProject, FMixDragStripId, targetIdx));
-        RefreshMixerTab;
-      end;
-    mdmReorderInsert:
-      begin
-        for i := 0 to High(FMixInsertDotRects) do
-          if (FMixInsertDotStripId[i] = FMixDragStripId) and
-             PtInRect(FMixInsertDotRects[i], Point(X, Y)) then
-          begin
-            if FMixInsertDotIndex[i] <> FMixDragInsertIndex then
-              FCmds.Perform(TMoveMixInsertCommand.Create(FProject, FMixDragStripId,
-                FMixDragInsertIndex, FMixInsertDotIndex[i]));
-            Break;
-          end;
-        RefreshMixerTab;
-      end;
-  end;
-  FMixDragMode := mdmNone;
+  FMixSig := '';   // re-apply the model, in case the choice was refused
+  RefreshMixerTab;
 end;
 
-{ Double-click an insert dot: open TfrmMixInsertParams on that specific
-  insert's params (see FMixInsertDotRects/FMixInsertDotStripId/
-  FMixInsertDotIndex, populated by the most recent DrawMixStrip). VST2
-  inserts are excluded - TfrmVST2Editor already hosts a real plugin instance
-  for those (btnMixEditVSTClick); this generic editor only understands the
-  plain key=value contract used by UDAW's own DSP node kinds. }
-procedure TfrmMain.pbMixerDblClick(Sender: TObject);
+procedure TfrmMain.MixStripOutput(Sender: TGLMixerStrip; AId: Integer);
+begin
+  if FProject = nil then Exit;
+  MixSelectById(Sender.StripId);
+  try
+    MixPerform(TSetMixStripRouteCommand.Create(FProject, Sender.StripId, AId));
+  except
+    on E: EUDAWError do
+      MessageDlg(E.Message, mtWarning, [mbOK], 0);
+  end;
+  FMixSig := '';
+  RefreshMixerTab;
+end;
+
+procedure TfrmMain.MixStripAddFx(Sender: TGLMixerStrip; const AScreenPt: TPoint);
+begin
+  MixShowPick(pkFx, Sender.StripId, AScreenPt);
+end;
+
+procedure TfrmMain.MixStripAddSend(Sender: TGLMixerStrip; const AScreenPt: TPoint);
+begin
+  MixShowPick(pkSend, Sender.StripId, AScreenPt);
+end;
+
+{ The chooser under + FX / + Send. The effect list is cboMixInsertKind's, so a
+  new insert goes through exactly the same btnMixAddEQClick path (parameter
+  dialog, undoable command) as before; the sub-menus only group it. }
+procedure TfrmMain.MixShowPick(AKind: TMixPickKind; AStripId: Integer; const AScreenPt: TPoint);
+const
+  GROUPS: array[0..6] of record Name: string; Items: string; end = (
+    (Name: 'Gain and EQ';     Items: '0,1,2'),
+    (Name: 'Dynamics';        Items: '3,4,5,6,7,28'),
+    (Name: 'Modulation';      Items: '8,9,10,11,12'),
+    (Name: 'Distortion';      Items: '13,14,15,16,26,27,22'),
+    (Name: 'Space and time';  Items: '17,18,19'),
+    (Name: 'Stereo and pitch'; Items: '20,21,23'),
+    (Name: 'Mastering';       Items: '24,25'));
 var
-  i: Integer;
-  pt: TPoint;
+  s, t: TMixStrip;
+  i, k, idx: Integer;
+  mi, sub: TMenuItem;
+  parts: TArray<string>;
+begin
+  if FProject = nil then Exit;
+  s := MixCur.StripById(AStripId);
+  if s = nil then Exit;
+  GLMenuCloseAll;
+  FreeAndNil(FMixPickMenu);
+  FMixPickMenu := TPopupMenu.Create(Self);
+  FMixPickStrip := AStripId;
+  FMixPickKind := AKind;
+  if AKind = pkFx then
+  begin
+    for k := Low(GROUPS) to High(GROUPS) do
+    begin
+      sub := TMenuItem.Create(FMixPickMenu);
+      sub.Caption := GROUPS[k].Name;
+      parts := GROUPS[k].Items.Split([',']);
+      for i := 0 to High(parts) do
+      begin
+        idx := StrToInt(parts[i]);
+        if idx >= cboMixInsertKind.Items.Count then Continue;
+        mi := TMenuItem.Create(FMixPickMenu);
+        mi.Caption := cboMixInsertKind.Items[idx];
+        mi.Tag := idx;
+        mi.OnClick := MixPickClick;
+        sub.Add(mi);
+      end;
+      FMixPickMenu.Items.Add(sub);
+    end;
+    mi := TMenuItem.Create(FMixPickMenu);
+    mi.Caption := '-';
+    FMixPickMenu.Items.Add(mi);
+    mi := TMenuItem.Create(FMixPickMenu);
+    mi.Caption := 'VST2 plugin file...';
+    mi.Tag := -1;
+    mi.OnClick := MixPickClick;
+    FMixPickMenu.Items.Add(mi);
+  end
+  else
+  begin
+    for i := 0 to MixCur.StripCount - 1 do
+    begin
+      t := MixCur.GetStrip(i);
+      if (t.Id = s.Id) or (t.Kind = skMaster) or not t.AcceptsBusInput then Continue;
+      if s.SendToStrip(t.Id) <> nil then Continue;
+      mi := TMenuItem.Create(FMixPickMenu);
+      mi.Caption := t.Name;
+      mi.Tag := t.Id;
+      mi.OnClick := MixPickClick;
+      FMixPickMenu.Items.Add(mi);
+    end;
+    if FMixPickMenu.Items.Count = 0 then
+    begin
+      mi := TMenuItem.Create(FMixPickMenu);
+      mi.Caption := 'No bus or aux strip to send to';
+      mi.Enabled := False;
+      FMixPickMenu.Items.Add(mi);
+    end;
+  end;
+  GLShowPopup(FMixPickMenu, AScreenPt.X, AScreenPt.Y);
+end;
+
+procedure TfrmMain.MixPickClick(Sender: TObject);
+var
+  tag: Integer;
+begin
+  if FProject = nil then Exit;
+  tag := (Sender as TMenuItem).Tag;
+  MixSelectById(FMixPickStrip);
+  if FMixPickKind = pkFx then
+  begin
+    { the editor (a modal window) opens after the menu's own click has finished, and only once
+      however many times the click is delivered }
+    if FMixPickPending or FMixPickBusy then Exit;
+    FMixPickPending := True;
+    FMixPickTag := tag;
+    PostMessage(Handle, WM_MIXPICK, 0, 0);
+  end
+  else
+  begin
+    try
+      MixPerform(TAddMixSendCommand.Create(FProject, FMixPickStrip, tag, 0.0, smPostFader));
+    except
+      on E: EUDAWError do
+        MessageDlg(E.Message, mtWarning, [mbOK], 0);
+    end;
+    RefreshMixerTab;
+  end;
+end;
+
+{ Opens TfrmMixInsertParams on one insert's params. VST2 inserts are excluded -
+  TfrmVST2Editor already hosts a real plugin instance for those
+  (btnMixEditVSTClick); this generic editor only understands the plain
+  key=value contract used by UDAW's own DSP node kinds. }
+procedure TfrmMain.MixEditInsert(AStripId, AIndex: Integer);
+var
   s: TMixStrip;
   ins: TMixInsert;
   newParams, disp, initialParams: string;
   sc: Integer;
 begin
   if FProject = nil then Exit;
-  pt := pbMixer.ScreenToClient(Mouse.CursorPos);
-  for i := 0 to High(FMixInsertDotRects) do
+  s := MixCur.StripById(AStripId);
+  if s = nil then Exit;
+  if (AIndex < 0) or (AIndex >= s.InsertCount) then Exit;
+  MixSelectById(s.Id);
+  ins := s.GetInsert(AIndex);
+  if SameText(ins.Kind, 'vst2') then
   begin
-    if not PtInRect(FMixInsertDotRects[i], pt) then Continue;
-    s := FProject.Mixer.StripById(FMixInsertDotStripId[i]);
-    if s = nil then Exit;
-    if (FMixInsertDotIndex[i] < 0) or (FMixInsertDotIndex[i] >= s.InsertCount) then Exit;
-    ins := s.GetInsert(FMixInsertDotIndex[i]);
-    if SameText(ins.Kind, 'vst2') then
-    begin
-      MessageDlg('This is a VST plugin insert - use "Edit VST..." to open its ' +
-        'parameter/editor window.', mtInformation, [mbOK], 0);
-      Exit;
-    end;
-    disp := MixInsertKindDisplay(ins.Kind, ins.Params);
-    { see ExtractSidechainParam's comment: the current sidechain source (if
-      any) is surfaced as one more editable "sidechain=<stripId>" row rather
-      than a dedicated control. }
-    initialParams := ins.Params;
-    if ins.SidechainStripId <> 0 then
-    begin
-      if initialParams <> '' then initialParams := initialParams + ';';
-      initialParams := initialParams + 'sidechain=' + IntToStr(ins.SidechainStripId);
-    end;
-    if TfrmMixInsertParams.Edit(Self, ins.Kind, disp, initialParams, newParams) then
-    begin
-      sc := ExtractSidechainParam(newParams);
-      FCmds.Perform(TSetMixInsertParamsCommand.Create(FProject, s.Id,
-        FMixInsertDotIndex[i], newParams));
-      if (sc >= 0) and (sc <> ins.SidechainStripId) then
-        FCmds.Perform(TSetMixInsertSidechainCommand.Create(FProject, s.Id,
-          FMixInsertDotIndex[i], sc));
-      RefreshMixerTab;
-    end;
+    MessageDlg('This is a VST plugin insert - use "Edit VST..." to open its ' +
+      'parameter/editor window.', mtInformation, [mbOK], 0);
     Exit;
   end;
+  disp := MixInsertKindDisplay(ins.Kind, ins.Params);
+  { see ExtractSidechainParam's comment: the current sidechain source (if
+    any) is surfaced as one more editable "sidechain=<stripId>" row rather
+    than a dedicated control. }
+  initialParams := ins.Params;
+  if ins.SidechainStripId <> 0 then
+  begin
+    if initialParams <> '' then initialParams := initialParams + ';';
+    initialParams := initialParams + 'sidechain=' + IntToStr(ins.SidechainStripId);
+  end;
+  if TfrmMixInsertParams.Edit(Self, ins.Kind, disp, initialParams, newParams) then
+  begin
+    sc := ExtractSidechainParam(newParams);
+    MixPerform(TSetMixInsertParamsCommand.Create(FProject, s.Id, AIndex, newParams));
+    if (sc >= 0) and (sc <> ins.SidechainStripId) then
+      MixPerform(TSetMixInsertSidechainCommand.Create(FProject, s.Id, AIndex, sc));
+    RefreshMixerTab;
+  end;
 end;
+
+procedure TfrmMain.MixStripEditInsert(Sender: TGLMixerStrip; AIndex: Integer);
+begin
+  MixEditInsert(Sender.StripId, AIndex);
+end;
+
+procedure TfrmMain.MixStripSendClick(Sender: TGLMixerStrip; AIndex: Integer);
+var
+  s, t: TMixStrip;
+  snd: TMixSend;
+begin
+  if FProject = nil then Exit;
+  s := MixCur.StripById(Sender.StripId);
+  if (s = nil) or (AIndex < 0) or (AIndex >= s.SendCount) then Exit;
+  MixSelectById(s.Id);
+  snd := s.GetSend(AIndex);
+  t := MixCur.StripById(snd.TargetStripId);
+  if MessageDlg(Format('Remove the send to "%s"?', [IfThen(t <> nil, t.Name, '?')]),
+       mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
+  MixPerform(TRemoveMixSendCommand.Create(FProject, s.Id, snd.TargetStripId));
+  RefreshMixerTab;
+end;
+
+procedure TfrmMain.MixStripClipReset(Sender: TGLMixerStrip);
+var
+  s: TMixStrip;
+begin
+  if FProject = nil then Exit;
+  s := MixCur.StripById(Sender.StripId);
+  if s <> nil then s.ResetClip;
+  pbMixer.Invalidate;
+end;
+
+{ A strip header was dragged onto another strip: move it there. }
+procedure TfrmMain.MixStripReorder(Sender: TGLMixerStrip; AOverId: Integer);
+var
+  targetIdx: Integer;
+begin
+  if FProject = nil then Exit;
+  targetIdx := MixCur.IndexOfStripId(AOverId);
+  if targetIdx < 0 then Exit;
+  try
+    MixPerform(TMoveMixStripCommand.Create(FProject, Sender.StripId, targetIdx));
+  except
+    on E: EUDAWError do
+      MessageDlg(E.Message, mtWarning, [mbOK], 0);
+  end;
+  FMixSig := '';
+  RefreshMixerTab;
+end;
+
+{ drops land on a strip's own widgets: translate to pbMixer's coordinates, which
+  is what the (plugin-drop) handlers below work in }
+procedure TfrmMain.MixStripDragOver(Sender, Source: TObject; X, Y: Integer;
+  State: TDragState; var Accept: Boolean);
+var
+  pt: TPoint;
+begin
+  pt := pbMixer.ScreenToClient(TControl(Sender).ClientToScreen(Point(X, Y)));
+  pbMixerDragOver(pbMixer, Source, pt.X, pt.Y, State, Accept);
+end;
+
+procedure TfrmMain.MixStripDragDrop(Sender, Source: TObject; X, Y: Integer);
+var
+  pt: TPoint;
+begin
+  pt := pbMixer.ScreenToClient(TControl(Sender).ClientToScreen(Point(X, Y)));
+  pbMixerDragDrop(pbMixer, Source, pt.X, pt.Y);
+end;
+
+{ the wheel steps the first visible strip when more strips exist than fit }
+procedure TfrmMain.pbMixerMouseWheel(Sender: TObject; Shift: TShiftState;
+  WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+begin
+  Handled := True;
+  if WheelDelta > 0 then Dec(FMixFirst, 120) else Inc(FMixFirst, 120);
+  FMixFirst := Max(0, FMixFirst);
+  FMixSig := '';
+  pbMixer.Invalidate;
+end;
+
+function MixPopupTarget(AMenu: TPopupMenu; out ARow: TMixRow; out AStrip: TGLMixerStrip): Boolean;
+begin
+  ARow := nil;
+  AStrip := nil;
+  if AMenu.PopupComponent is TMixRow then ARow := TMixRow(AMenu.PopupComponent);
+  if (ARow <> nil) and (ARow.Parent is TGLMixerStrip) then AStrip := TGLMixerStrip(ARow.Parent);
+  Result := (ARow <> nil) and (AStrip <> nil);
+end;
+
+procedure TfrmMain.pmMixInsertEditClick(Sender: TObject);
+var
+  row: TMixRow;
+  strip: TGLMixerStrip;
+begin
+  if MixPopupTarget(pmMixInsert, row, strip) then MixEditInsert(strip.StripId, row.Index);
+end;
+
+procedure TfrmMain.pmMixInsertRemoveClick(Sender: TObject);
+var
+  row: TMixRow;
+  strip: TGLMixerStrip;
+begin
+  if (FProject = nil) or not MixPopupTarget(pmMixInsert, row, strip) then Exit;
+  MixSelectById(strip.StripId);
+  MixPerform(TRemoveMixInsertCommand.Create(FProject, strip.StripId, row.Index));
+  RefreshMixerTab;
+end;
+
+procedure TfrmMain.pmMixInsertUpClick(Sender: TObject);
+var
+  row: TMixRow;
+  strip: TGLMixerStrip;
+begin
+  if (FProject = nil) or not MixPopupTarget(pmMixInsert, row, strip) or (row.Index < 1) then Exit;
+  MixSelectById(strip.StripId);
+  MixPerform(TMoveMixInsertCommand.Create(FProject, strip.StripId, row.Index, row.Index - 1));
+  RefreshMixerTab;
+end;
+
+procedure TfrmMain.pmMixInsertDownClick(Sender: TObject);
+var
+  row: TMixRow;
+  strip: TGLMixerStrip;
+  s: TMixStrip;
+begin
+  if (FProject = nil) or not MixPopupTarget(pmMixInsert, row, strip) then Exit;
+  s := MixCur.StripById(strip.StripId);
+  if (s = nil) or (row.Index >= s.InsertCount - 1) then Exit;
+  MixSelectById(strip.StripId);
+  MixPerform(TMoveMixInsertCommand.Create(FProject, strip.StripId, row.Index, row.Index + 1));
+  RefreshMixerTab;
+end;
+
+procedure TfrmMain.ibMixBarClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if AId = 'add' then
+    GLShowPopup(pmMixer, ibMixBar.ClientToScreen(Point(AIndex * ibMixBar.CellWidth,
+      ibMixBar.Height)).X, ibMixBar.ClientToScreen(Point(0, ibMixBar.Height)).Y)
+  else if AId = 'tools' then
+  begin
+    pnlMixTop.Visible := not pnlMixTop.Visible;
+    if pnlMixTop.Visible then ibMixBar.ActiveIndex := AIndex else ibMixBar.ActiveIndex := -1;
+  end
+  else if AId = 'undo' then btnMixUndoClick(nil)
+  else if AId = 'redo' then btnMixRedoClick(nil)
+  else if (AId = 'zoomout') or (AId = 'zoomin') then
+  begin
+    tbMixZoom.Position := EnsureRange(tbMixZoom.Position + IfThen(AId = 'zoomin', 2, -2),
+      tbMixZoom.Min, tbMixZoom.Max);
+    tbMixZoomChange(tbMixZoom);
+  end
+  else if (AId = 'left') or (AId = 'right') then
+  begin
+    if AId = 'left' then Dec(FMixFirst, 120) else Inc(FMixFirst, 120);
+    FMixFirst := Max(0, FMixFirst);
+    FMixSig := '';
+    pbMixer.Invalidate;
+  end;
+end;
+
 
 { Menu Enabled/Caption sync happens here, right before the popup shows - never
   from a per-tick path. tmrUITimer only ever calls pbMixer.Invalidate (a cheap
   repaint of live meters) while tabMixer is active, guarded by
   FMenuLoopActive, exactly mirroring pmTimelinePopup / SyncTimelineMenuState -
   see that pair's header comments for the flicker/stale-menu bug this avoids. }
+{ Mix role presets: one click puts a sensible starting chain of inserts on the
+  selected strip for the job it does (dialogue, voice-over, music, effects,
+  ambience, master).  Every insert is added through the normal undoable
+  command, so each can be tuned, bypassed or removed like any other. }
+procedure TfrmMain.pmMixRoleClick(Sender: TObject);
+type
+  TRoleInsert = record
+    Kind, Params, Name: string;
+  end;
+var
+  chain: array of TRoleInsert;
+  i: Integer;
+
+  procedure Add(const AKind, AParams, AName: string);
+  begin
+    SetLength(chain, Length(chain) + 1);
+    chain[High(chain)].Kind := AKind;
+    chain[High(chain)].Params := AParams;
+    chain[High(chain)].Name := AName;
+  end;
+
+begin
+  if (FProject = nil) or (SelectedMixStripId = 0) then Exit;
+  chain := nil;
+  case TMenuItem(Sender).Tag of
+    1: begin
+         Add('biquad', 'type=highpass;freq=80;q=0.707;gaindb=0', 'Dialogue: rumble filter');
+         Add('compressor', 'type=deesser;thresh=-24;ratio=4;knee=3;attack=1;release=80;makeup=0', 'Dialogue: de-esser');
+         Add('compressor', 'type=compressor;thresh=-22;ratio=3;knee=6;attack=10;release=150;makeup=2', 'Dialogue: compressor');
+         Add('biquad', 'type=peaking;freq=3000;q=1;gaindb=2.5', 'Dialogue: presence');
+       end;
+    2: begin
+         Add('biquad', 'type=highpass;freq=90;q=0.707;gaindb=0', 'Voice-over: rumble filter');
+         Add('compressor', 'type=deesser;thresh=-26;ratio=4;knee=3;attack=1;release=80;makeup=0', 'Voice-over: de-esser');
+         Add('compressor', 'type=compressor;thresh=-24;ratio=4;knee=6;attack=8;release=120;makeup=3', 'Voice-over: compressor');
+         Add('biquad', 'type=peaking;freq=3500;q=1;gaindb=2', 'Voice-over: presence');
+         Add('lookaheadlimiter', 'ceiling=-2;release=100;lookahead=5', 'Voice-over: limiter');
+       end;
+    3: begin
+         Add('compressor', 'type=compressor;thresh=-18;ratio=2;knee=8;attack=30;release=200;makeup=1', 'Music: glue compressor');
+         Add('stereowidth', 'width=1.15', 'Music: stereo width');
+       end;
+    4: begin
+         Add('biquad', 'type=highpass;freq=40;q=0.707;gaindb=0', 'Effects: rumble filter');
+         Add('compressor', 'type=compressor;thresh=-16;ratio=4;knee=4;attack=5;release=80;makeup=2', 'Effects: compressor');
+         Add('transientshaper', 'attack=3;sustain=0', 'Effects: transient shaper');
+       end;
+    5: begin
+         Add('biquad', 'type=highpass;freq=120;q=0.707;gaindb=0', 'Ambience: low cut');
+         Add('biquad', 'type=lowpass;freq=12000;q=0.707;gaindb=0', 'Ambience: high cut');
+         Add('compressor', 'type=compressor;thresh=-24;ratio=2;knee=10;attack=50;release=300;makeup=0', 'Ambience: leveller');
+         Add('stereowidth', 'width=1.4', 'Ambience: stereo width');
+         Add('gain', 'db=-6', 'Ambience: bed level');
+       end;
+    6: begin
+         Add('mastering', '', 'Master: mastering chain');
+         Add('lookaheadlimiter', 'ceiling=-1;release=100;lookahead=5', 'Master: true-peak limiter');
+       end;
+  else
+    Exit;
+  end;
+  for i := 0 to High(chain) do
+    MixPerform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId, chain[i].Kind,
+      chain[i].Params, -1, chain[i].Name));
+  RefreshMixerTab;
+end;
+
 procedure TfrmMain.pmMixerPopup(Sender: TObject);
 var
   s: TMixStrip;
 begin
   if FProject = nil then Exit;
-  s := FProject.Mixer.StripById(SelectedMixStripId);
+  s := MixCur.StripById(SelectedMixStripId);
   pmMixRemove.Enabled := (s <> nil) and (s.Kind <> skMaster);
   pmMixUndo.Enabled := FCmds.CanUndo;
   pmMixRedo.Enabled := FCmds.CanRedo;
@@ -17003,7 +27515,7 @@ var
 begin
   if FProject = nil then Exit;
   fs := TFormatSettings.Invariant;
-  ms := FProject.Mixer.Modulation;
+  ms := MixCur.Modulation;
   ms.Bpm := FProject.TempoBPM;
   case TMenuItem(Sender).Tag of
     1: begin
@@ -17130,7 +27642,151 @@ begin
   memMix.Lines.Insert(0, Format('Modulation: %d modulator(s), %d route(s).', [ms.ModCount, ms.RouteCount]));
 end;
 
-procedure TfrmMain.btnMixAddVSTClick(Sender: TObject);
+{ the default scripting folder: the one chosen under Settings > Working Directories, or Scripts
+  under the config folder when none is set }
+function TfrmMain.ScriptsDir: string;
+begin
+  Result := '';
+  if App = nil then Exit;
+  Result := Trim(App.Config.GetString(CFG_SEC_PATHS, CFG_PATH_SCRIPTS, ''));
+  if Result = '' then
+    Result := IncludeTrailingPathDelimiter(App.Paths.Config) + 'Scripts'
+  else
+    Result := ExcludeTrailingPathDelimiter(Result);
+end;
+
+procedure TfrmMain.mnuScriptFolderClick(Sender: TObject);
+begin
+  if ScriptsDir = '' then Exit;
+  ForceDirectories(ScriptsDir);
+  ShellExecute(0, 'open', PChar(ScriptsDir), nil, nil, SW_SHOWNORMAL);
+end;
+
+{ Runs a Python script against the MCP server (see UDAW.Scripting.Python). The
+  server must be on (Settings > AI > expose UDAW); output streams to the status
+  bar and the AI log, and the Python helper module lands in the Scripts folder. }
+procedure TfrmMain.mnuScriptRunClick(Sender: TObject);
+var
+  host, endpoint, err: string;
+  code: Integer;
+begin
+  if (FMcpServer = nil) or not FMcpServer.IsRunning then
+  begin
+    MessageDlg('Python scripts drive UDAW through its MCP server, which is off.'#13#10#13#10 +
+      'Turn on "expose UDAW" in the AI settings, then run the script again.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  if ScriptsDir = '' then Exit;
+  ForceDirectories(ScriptsDir);
+  dlgOpenPy.InitialDir := ScriptsDir;
+  if not dlgOpenPy.Execute then Exit;
+  { the folder may have been changed in Settings since the bridge was made }
+  if (FPyBridge <> nil) and not FPyBridge.Running and
+     not SameText(FPyBridge.ScriptsDir, ExcludeTrailingPathDelimiter(ScriptsDir)) then
+    FreeAndNil(FPyBridge);
+  if FPyBridge = nil then FPyBridge := TPythonBridge.Create(ScriptsDir);
+  FPyBridge.OnPoll := PyPoll;
+  if FPyBridge.Running then
+  begin
+    FPyBridge.Cancel;
+    Exit;
+  end;
+  host := FMcpServer.BindAddress;
+  if (host = '') or (host = '0.0.0.0') then host := '127.0.0.1';
+  endpoint := Format('http://%s:%d/mcp', [host, FMcpServer.Port]);
+  ShowStatusBusy('Running ' + ExtractFileName(dlgOpenPy.FileName) + ' (Esc or choosing Run again stops it)...');
+  try
+    code := FPyBridge.Run(dlgOpenPy.FileName, endpoint, FMcpServer.AuthToken,
+      procedure(const ALine: string)
+      begin
+        memAiLog.Lines.Add('[py] ' + ALine);
+        stbMain.SimpleText := JobStatusText(ExtractFileName(dlgOpenPy.FileName) + ': ' + ALine);
+      end, err);
+  finally
+    HideStatusProgress;
+  end;
+  if FTlJobCancelled then
+  begin
+    JobRollback;   // whatever the script changed through the project is undone
+    stbMain.SimpleText := 'Script CANCELLED (Esc) - ' + ExtractFileName(dlgOpenPy.FileName) +
+      ' was stopped and its changes were undone.';
+    memAiLog.Lines.Add('[py] ' + stbMain.SimpleText);
+  end
+  else if err <> '' then
+  begin
+    memAiLog.Lines.Add('[py] ' + err);
+    stbMain.SimpleText := err;
+    MessageDlg(err, mtWarning, [mbOK], 0);
+  end
+  else
+  begin
+    stbMain.SimpleText := Format('%s finished (exit code %d)', [ExtractFileName(dlgOpenPy.FileName), code]);
+    memAiLog.Lines.Add(stbMain.SimpleText);
+  end;
+  RefreshTimelineTab;
+  RefreshMixerTab;
+end;
+
+function TfrmMain.PluginCacheFile: string;
+begin
+  if App <> nil then
+    Result := IncludeTrailingPathDelimiter(App.Paths.Config) + 'plugins.cache'
+  else
+    Result := '';
+end;
+
+{ The scanner, created on first use with the cached results of the last scan. }
+function TfrmMain.PluginScanner: TPluginScanner;
+begin
+  if FPluginScan = nil then
+  begin
+    FPluginScan := TPluginScanner.Create;
+    FPluginScan.AddDefaultRoots;
+    try
+      if PluginCacheFile <> '' then FPluginScan.LoadFromFile(PluginCacheFile);
+    except
+      on E: Exception do Logger.Warn('ui', 'Plug-in cache unreadable: ' + E.Message);
+    end;
+  end;
+  Result := FPluginScan;
+end;
+
+{ Walks the VST2 / VST3 folders with a status-bar progress bar and per-plug-in
+  names, then caches the result. Runs inline: plug-ins must be loaded on this
+  thread's COM/message context anyway. }
+procedure TfrmMain.ScanPluginsNow;
+var
+  found, i: Integer;
+  msg: string;
+begin
+  ShowStatusProgress('Scanning for plug-ins...', 1);
+  try
+    found := PluginScanner.Scan(
+      procedure(ADone, ATotal: Integer; const ACurrent: string)
+      begin
+        prgStatus.Max := Max(1, ATotal);
+        UpdateStatusProgress(ADone, 'Scanning plug-ins: ' + ACurrent);
+        Application.ProcessMessages;
+      end);
+    try
+      if PluginCacheFile <> '' then PluginScanner.SaveToFile(PluginCacheFile);
+    except
+      on E: Exception do Logger.Warn('ui', 'Could not save plug-in cache: ' + E.Message);
+    end;
+  finally
+    HideStatusProgress;
+  end;
+  msg := Format('Plug-in scan: %d effect plug-in(s) found, %d skipped (instruments / unusable).',
+    [found, PluginScanner.Skipped]);
+  stbMain.SimpleText := msg;
+  Logger.Info('ui', msg);
+  for i := 0 to PluginScanner.LastErrors.Count - 1 do
+    Logger.Info('ui', 'plug-in skipped: ' + PluginScanner.LastErrors[i]);
+end;
+
+{ Probes AFileName (really loads it) and inserts it on the selected mixer strip.
+  VST2 .dll, VST3 and CLAP; shared by the file dialog and the scanned list. }
+procedure TfrmMain.MixAddPluginFile(const AFileName: string);
 var
   pathB64, loadError, ext, plugName: string;
   paramCount: Integer;
@@ -17138,8 +27794,7 @@ var
   vst3Probe: TVST3Host;
 begin
   if (FProject = nil) or (SelectedMixStripId = 0) then Exit;
-  if not dlgOpenVst.Execute then Exit;
-  ext := LowerCase(ExtractFileExt(dlgOpenVst.FileName));
+  ext := LowerCase(ExtractFileExt(AFileName));
   if (ext = '.clap') or (ext = '.vst3') then
   begin
     { CLAP / VST3: probe by really loading the module, then insert by kind }
@@ -17148,7 +27803,7 @@ begin
       begin
         clapProbe := TCLAPHost.Create;
         try
-          clapProbe.LoadOnly(dlgOpenVst.FileName);
+          clapProbe.LoadOnly(AFileName);
           plugName := clapProbe.EffectName;
         finally
           clapProbe.Free;
@@ -17158,7 +27813,7 @@ begin
       begin
         vst3Probe := TVST3Host.Create;
         try
-          vst3Probe.LoadOnly(dlgOpenVst.FileName);
+          vst3Probe.LoadOnly(AFileName);
           plugName := vst3Probe.EffectName;
         finally
           vst3Probe.Free;
@@ -17167,38 +27822,45 @@ begin
     except
       on E: Exception do
       begin
-        MessageDlg('Not a usable plugin:'#13#10 + dlgOpenVst.FileName + #13#10#13#10 + E.Message,
+        MessageDlg('Not a usable plugin:'#13#10 + AFileName + #13#10#13#10 + E.Message,
           mtError, [mbOK], 0);
         Exit;
       end;
     end;
-    pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(dlgOpenVst.FileName));
-    FCmds.Perform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId,
+    pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(AFileName));
+    MixPerform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId,
       Copy(ext, 2, MaxInt), Format('path=%s;state=', [pathB64]), -1,
-      IfThen(plugName <> '', plugName, ExtractFileName(dlgOpenVst.FileName))));
+      IfThen(plugName <> '', plugName, ExtractFileName(AFileName))));
     RefreshMixerTab;
     Exit;
   end;
 
-  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(dlgOpenVst.FileName));
-  if MixStripHasVst2Insert(FProject.Mixer.StripById(SelectedMixStripId), pathB64) then
+  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(AFileName));
+  if MixStripHasVst2Insert(MixCur.StripById(SelectedMixStripId), pathB64) then
   begin
     MessageDlg('That plugin is already on this strip.', mtInformation, [mbOK], 0);
     Exit;
   end;
 
-  if not ProbeVst2File(dlgOpenVst.FileName, paramCount, loadError) then
+  if not ProbeVst2File(AFileName, paramCount, loadError) then
   begin
-    MessageDlg('Not a usable VST2 plugin:'#13#10 + dlgOpenVst.FileName + #13#10#13#10 + loadError,
+    MessageDlg('Not a usable VST2 plugin:'#13#10 + AFileName + #13#10#13#10 + loadError,
       mtError, [mbOK], 0);
     Exit;
   end;
 
-  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(dlgOpenVst.FileName));
-  FCmds.Perform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId, 'vst2',
+  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(AFileName));
+  MixPerform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId, 'vst2',
     Format('path=%s;state=;paramcount=%d', [pathB64, paramCount]), -1,
-    ExtractFileName(dlgOpenVst.FileName)));
+    ExtractFileName(AFileName)));
   RefreshMixerTab;
+end;
+
+procedure TfrmMain.btnMixAddVSTClick(Sender: TObject);
+begin
+  if (FProject = nil) or (SelectedMixStripId = 0) then Exit;
+  if not dlgOpenVst.Execute then Exit;
+  MixAddPluginFile(dlgOpenVst.FileName);
 end;
 
 function TfrmMain.OpenVST2EditorForInsert(AStripId, AIndex: Integer): Boolean;
@@ -17212,7 +27874,7 @@ var
 begin
   Result := False;
   if FProject = nil then Exit;
-  s := FProject.Mixer.StripById(AStripId);
+  s := MixCur.StripById(AStripId);
   if s = nil then Exit;
   if (AIndex < 0) or (AIndex >= s.InsertCount) then Exit;
   ins := s.GetInsert(AIndex);
@@ -17238,7 +27900,7 @@ begin
     FProject.Channels,
     procedure(ANewState: string)
     begin
-      FCmds.Perform(TSetMixInsertParamsCommand.Create(FProject, capturedStripId, capturedIndex,
+      MixPerform(TSetMixInsertParamsCommand.Create(FProject, capturedStripId, capturedIndex,
         Format('path=%s;state=%s;paramcount=%d',
           [capturedPathB64, ANewState, capturedParamCount])));
       RefreshMixerTab;
@@ -17277,7 +27939,7 @@ var
   i, idx: Integer;
 begin
   if FProject = nil then Exit;
-  s := FProject.Mixer.StripById(SelectedMixStripId);
+  s := MixCur.StripById(SelectedMixStripId);
   if s = nil then Exit;
   idx := -1;
   for i := s.InsertCount - 1 downto 0 do
@@ -17313,8 +27975,302 @@ const
 begin
   if (FProject = nil) or (SelectedMixStripId = 0) or FMixRefreshing then Exit;
   if cboMixAutoMode.ItemIndex in [0..4] then
-    FCmds.Perform(TSetMixStripAutoModeCommand.Create(FProject, SelectedMixStripId,
+    MixPerform(TSetMixStripAutoModeCommand.Create(FProject, SelectedMixStripId,
       MODES[cboMixAutoMode.ItemIndex]));
+end;
+
+{ ---- Master 16-band graphic EQ (pnlMixEq) ----
+  The panel edits one "graphiceq" insert (16 bands) on the Master strip, so it is saved with the
+  project and rendered by the mixer like any other insert. It is created the first time a band
+  leaves 0 dB; while the Timeline plays, band moves are pushed straight into the running mixer. }
+
+const
+  MIXEQ_BANDS = 16;
+
+function TfrmMain.MixEqSlider(AIndex: Integer): TGLEqSlider;
+begin
+  Result := FindComponent(Format('sbMixEq%.2d', [AIndex + 1])) as TGLEqSlider;
+end;
+
+function TfrmMain.MixEqInsertIndex(AMaster: TMixStrip): Integer;
+var
+  i: Integer;
+begin
+  Result := -1;
+  if AMaster = nil then Exit;
+  for i := 0 to AMaster.InsertCount - 1 do
+    if SameText(AMaster.GetInsert(i).Kind, 'graphiceq') and
+       (StrToIntDef(MixInsertKV(AMaster.GetInsert(i).Params, 'bands'), 0) = MIXEQ_BANDS) then
+      Exit(i);
+end;
+
+procedure TfrmMain.MixEqSync;
+var
+  m: TMixStrip;
+  idx, i: Integer;
+  parts: TArray<string>;
+  v: Double;
+begin
+  if FProject = nil then Exit;
+  m := MixCur.MasterStrip;
+  idx := MixEqInsertIndex(m);
+  FMixEqSyncing := True;
+  try
+    parts := nil;
+    if idx >= 0 then parts := MixInsertKV(m.GetInsert(idx).Params, 'gains').Split([',']);
+    for i := 0 to MIXEQ_BANDS - 1 do
+    begin
+      v := 0;
+      if i <= High(parts) then
+        if not TryStrToFloat(Trim(parts[i]), v, TFormatSettings.Invariant) then v := 0;
+      MixEqSlider(i).Position := v;
+    end;
+    chkMixEqOn.Checked := (idx < 0) or not m.GetInsert(idx).Bypass;
+  finally
+    FMixEqSyncing := False;
+  end;
+end;
+
+procedure TfrmMain.MixEqApply(AStructural: Boolean);
+var
+  m: TMixStrip;
+  idx, i: Integer;
+  params: string;
+  flat: Boolean;
+  ins: TMixInsert;
+begin
+  if (FProject = nil) or FMixEqSyncing then Exit;
+  m := MixCur.MasterStrip;
+  if m = nil then Exit;
+  params := '';
+  flat := True;
+  for i := 0 to MIXEQ_BANDS - 1 do
+  begin
+    if params <> '' then params := params + ',';
+    params := params + FloatToStr(MixEqSlider(i).Position, TFormatSettings.Invariant);
+    if MixEqSlider(i).Position <> 0 then flat := False;
+  end;
+  params := Format('bands=%d;gains=%s', [MIXEQ_BANDS, params]);
+  idx := MixEqInsertIndex(m);
+  if idx < 0 then
+  begin
+    if flat then Exit;   // nothing to equalise, so no insert is needed yet
+    MixPerform(TAddMixInsertCommand.Create(FProject, m.Id, 'graphiceq', params, -1,
+      'Master Graphic EQ'));
+    idx := MixEqInsertIndex(m);
+    if idx < 0 then Exit;
+  end
+  else
+    MixPerform(TSetMixInsertParamsCommand.Create(FProject, m.Id, idx, params));
+  ins := m.GetInsert(idx);
+  if ins.Bypass = chkMixEqOn.Checked then
+  begin
+    ins.Bypass := not chkMixEqOn.Checked;
+    m.SetInsert(idx, ins);
+    FProject.Touch;
+  end;
+  if FMixViewTracker then
+  begin
+    if (FTrkPlayer <> nil) and (FTrkPlayer.MixerProcessor <> nil) then
+      FTrkPlayer.MixerProcessor.UpdateGraphicEqLive(m.Id, idx, params, ins.Bypass);
+  end
+  else if FTlMixerProc <> nil then
+    FTlMixerProc.UpdateGraphicEqLive(m.Id, idx, params, ins.Bypass);
+end;
+
+procedure TfrmMain.MixEqSliderChange(Sender: TObject);
+begin
+  MixEqApply(False);
+end;
+
+procedure TfrmMain.MixEqOnChange(Sender: TObject);
+begin
+  MixEqApply(False);
+end;
+
+{ the panel folded or opened: the strips make room for it, or take the room back }
+procedure TfrmMain.MixEqToggle(Sender: TObject);
+begin
+  if FMixViewApplying then Exit;
+  { the fold state belongs to the project, so it comes back when the project is opened }
+  if (FProject <> nil) and (MixCur.EqCollapsed <> pnlMixEq.Collapsed) then
+  begin
+    MixCur.EqCollapsed := pnlMixEq.Collapsed;
+    FProject.Touch;
+  end;
+  MixSyncStrips;
+end;
+
+procedure TfrmMain.sbMixHChange(Sender: TObject);
+begin
+  if FMixScrollSync then Exit;
+  FMixFirst := sbMixH.Position;
+  FMixSig := '';
+  pbMixer.Invalidate;
+end;
+
+{ a strip's fold arrow: the state is stored on the strip (and so saved with the project) }
+procedure TfrmMain.MixStripCollapse(Sender: TGLMixerStrip);
+var
+  s: TMixStrip;
+begin
+  if FProject = nil then Exit;
+  s := MixCur.StripById(Sender.StripId);
+  if s = nil then Exit;
+  s.Collapsed := not s.Collapsed;
+  FProject.Touch;
+  FMixSig := '';
+  MixSyncStrips;
+end;
+
+{ ---- Master EQ presets: one small text file per preset, kept in the Settings > Presets folder ---- }
+
+const
+  MIXEQ_PRESET_EXT = '.eqpreset';
+
+{ the Settings > Presets folder (empty there = the data folder), like the effect editors' presets }
+function TfrmMain.MixEqPresetDir: string;
+begin
+  Result := Trim(edDirPresets.Text);
+  if Result = '' then Result := ExtractFilePath(DataFile('EqPresets.dir'));
+  Result := ExcludeTrailingPathDelimiter(Result);
+end;
+
+{ the file the name in the preset box stands for; False (after telling the user) when the
+  name is empty or there is no preset folder }
+function TfrmMain.MixEqPresetFile(out AFile: string): Boolean;
+var
+  nm: string;
+  i: Integer;
+begin
+  AFile := '';
+  nm := Trim(cboMixEqPreset.Text);
+  for i := 1 to Length(nm) do
+    if CharInSet(nm[i], ['\', '/', ':', '*', '?', '"', '<', '>', '|']) then nm[i] := '_';
+  Result := (nm <> '') and (MixEqPresetDir <> '');
+  if not Result then
+  begin
+    MessageDlg('Type a name for the equaliser preset first.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  AFile := IncludeTrailingPathDelimiter(MixEqPresetDir) + nm + MIXEQ_PRESET_EXT;
+end;
+
+procedure TfrmMain.MixEqRefreshPresets;
+var
+  sr: TSearchRec;
+  keep: string;
+  names: TStringList;
+begin
+  if MixEqPresetDir = '' then Exit;
+  keep := cboMixEqPreset.Text;
+  names := TStringList.Create;
+  try
+    if FindFirst(IncludeTrailingPathDelimiter(MixEqPresetDir) + '*' + MIXEQ_PRESET_EXT, faAnyFile, sr) = 0 then
+    try
+      repeat
+        names.Add(ChangeFileExt(sr.Name, ''));
+      until FindNext(sr) <> 0;
+    finally
+      FindClose(sr);
+    end;
+    names.Sort;
+    cboMixEqPreset.Items.Assign(names);
+  finally
+    names.Free;
+  end;
+  cboMixEqPreset.Text := keep;
+end;
+
+procedure TfrmMain.MixEqSavePreset;
+var
+  fn, gains: string;
+  i: Integer;
+  sl: TStringList;
+begin
+  if not MixEqPresetFile(fn) then Exit;
+  if FileExists(fn) and
+     (MessageDlg('A preset named "' + Trim(cboMixEqPreset.Text) + '" already exists. Replace it?',
+        mtConfirmation, [mbYes, mbNo], 0) <> mrYes) then Exit;
+  gains := '';
+  for i := 0 to MIXEQ_BANDS - 1 do
+  begin
+    if gains <> '' then gains := gains + ',';
+    gains := gains + FloatToStr(MixEqSlider(i).Position, TFormatSettings.Invariant);
+  end;
+  sl := TStringList.Create;
+  try
+    sl.Add('UDAW graphic EQ preset');
+    sl.Add('bands=' + IntToStr(MIXEQ_BANDS));
+    sl.Add('gains=' + gains);
+    ForceDirectories(MixEqPresetDir);
+    sl.SaveToFile(fn, TEncoding.UTF8);
+  finally
+    sl.Free;
+  end;
+  MixEqRefreshPresets;
+end;
+
+procedure TfrmMain.MixEqLoadPreset;
+var
+  fn, gains: string;
+  i: Integer;
+  sl: TStringList;
+  parts: TArray<string>;
+  v: Double;
+begin
+  if not MixEqPresetFile(fn) then Exit;
+  if not FileExists(fn) then
+  begin
+    MessageDlg('There is no equaliser preset called "' + Trim(cboMixEqPreset.Text) + '".',
+      mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  sl := TStringList.Create;
+  try
+    sl.LoadFromFile(fn, TEncoding.UTF8);
+    if StrToIntDef(sl.Values['bands'], 0) <> MIXEQ_BANDS then
+    begin
+      MessageDlg('That file is not a 16-band equaliser preset.', mtWarning, [mbOK], 0);
+      Exit;
+    end;
+    gains := sl.Values['gains'];
+  finally
+    sl.Free;
+  end;
+  parts := gains.Split([',']);
+  FMixEqSyncing := True;
+  try
+    for i := 0 to MIXEQ_BANDS - 1 do
+    begin
+      v := 0;
+      if i <= High(parts) then
+        if not TryStrToFloat(Trim(parts[i]), v, TFormatSettings.Invariant) then v := 0;
+      MixEqSlider(i).Position := v;
+    end;
+  finally
+    FMixEqSyncing := False;
+  end;
+  MixEqApply(False);
+end;
+
+procedure TfrmMain.MixEqPresetClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if AId = 'save' then MixEqSavePreset
+  else if AId = 'load' then MixEqLoadPreset;
+end;
+
+procedure TfrmMain.MixEqFlatClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  FMixEqSyncing := True;
+  try
+    for i := 0 to MIXEQ_BANDS - 1 do MixEqSlider(i).Position := 0;
+  finally
+    FMixEqSyncing := False;
+  end;
+  MixEqApply(False);
 end;
 
 procedure TfrmMain.tbMixZoomChange(Sender: TObject);
@@ -17338,13 +28294,13 @@ begin
     holdMs, fs) then holdMs := MIX_METER_HOLD_MS_DEFAULT;
   if not TryStrToFloat(StringReplace(edtMixMeterDecay.Text, ',', '.', [rfReplaceAll]),
     decayDb, fs) then decayDb := MIX_METER_HOLD_DECAY_DEFAULT;
-  FCmds.Perform(TSetMixMeterConfigCommand.Create(FProject, holdMs, decayDb));
+  MixPerform(TSetMixMeterConfigCommand.Create(FProject, holdMs, decayDb));
   RefreshMixerTab;
 end;
 
 procedure TfrmMain.pbMixAutoPaint(Sender: TObject);
 var
-  cv: TCanvas;
+  cv: TGLCanvas;
   w, h, i, x, y: Integer;
   s: TMixStrip;
   lane: TAutomationLane;
@@ -17357,19 +28313,18 @@ begin
   h := pbMixAuto.Height;
   if (w <= 0) or (h <= 0) then Exit;
   { offscreen-bitmap-then-blit, mirrors pbMixerPaint/FMixBuffer - this box
-    previously drew straight to pbMixAuto.Canvas and was the confirmed
+    previously drew straight to pbMixAuto.GL and was the confirmed
     flicker source inside the Mixer tab (tmrUITimer repaints it constantly
     while a strip is selected). The try/finally guarantees the blit still
     happens on every early Exit below (no lane, no project, no strip). }
-  FMixAutoBuffer.SetSize(w, h);
-  cv := FMixAutoBuffer.Canvas;
+  cv := pbMixAuto.GL;
   try
     theme := CurrentTheme;
     cv.Brush.Style := bsSolid;
     cv.Brush.Color := theme.PanelBackground;
     cv.FillRect(Rect(0, 0, w, h));
     if (FProject = nil) or (SelectedMixStripId = 0) then Exit;
-    s := FProject.Mixer.StripById(SelectedMixStripId);
+    s := MixCur.StripById(SelectedMixStripId);
     if s = nil then Exit;
 
     cv.Brush.Style := bsClear;
@@ -17405,7 +28360,7 @@ begin
     cv.Pen.Color := theme.Accent;
     cv.MoveTo(x, 16); cv.LineTo(x, h);
 
-    lane := FProject.Mixer.Automation.LaneFor(s.Id, FMixAutoParam, False,
+    lane := MixCur.Automation.LaneFor(s.Id, FMixAutoParam, False,
       FMixAutoTarget, FMixAutoSub);
     if (lane = nil) or (lane.PointCount = 0) then Exit;
 
@@ -17427,7 +28382,6 @@ begin
       cv.FillRect(Rect(x - 3, y - 3, x + 3, y + 3));
     end;
   finally
-    pbMixAuto.Canvas.Draw(0, 0, FMixAutoBuffer);
   end;
 end;
 
@@ -17439,7 +28393,7 @@ var
   totalSec, t, v, lo, hi, tol: Double;
 begin
   if (FProject = nil) or (SelectedMixStripId = 0) then Exit;
-  s := FProject.Mixer.StripById(SelectedMixStripId);
+  s := MixCur.StripById(SelectedMixStripId);
   if s = nil then Exit;
   w := pbMixAuto.Width;
   h := pbMixAuto.Height;
@@ -17506,7 +28460,7 @@ var
   m: TTrackerModule;
   i, keep, visSeqSteps, playRow, playOrder: Integer;
   pat: TTrackerPattern;
-  cell: TTrackerCell;
+  patLoop: Boolean;
 begin
   if (FProject = nil) or FTrkRefreshing then Exit;
   FTrkRefreshing := True;
@@ -17556,22 +28510,6 @@ begin
         if FTrkSelChn >= pat.Channels then FTrkSelChn := pat.Channels - 1;
         if FTrkSelRow < 0 then FTrkSelRow := 0;
         if FTrkSelChn < 0 then FTrkSelChn := 0;
-        cell := pat.GetCell(FTrkSelRow, FTrkSelChn);
-        edtTrkNote.Text := NoteName(cell.Note);
-        if cell.Instrument = TRK_INSTR_NONE then edtTrkInstr.Text := ''
-        else edtTrkInstr.Text := IntToStr(cell.Instrument);
-        if cell.Volume > TRK_VOL_MAX then edtTrkVol.Text := ''
-        else edtTrkVol.Text := IntToStr(cell.Volume);
-        if (cell.Effect = tfxNone) and (cell.Param = 0) then
-        begin
-          edtTrkEff.Text := '';
-          edtTrkParam.Text := '';
-        end
-        else
-        begin
-          edtTrkEff.Text := EffectLetter(cell.Effect);
-          edtTrkParam.Text := IntToHex(cell.Param, 2);
-        end;
       end;
 
       mnuTrkDelPattern.Enabled := m.PatternCount > 1;
@@ -17595,6 +28533,11 @@ begin
 
       RefreshTrkInstrTab;
     end;
+    patLoop := FTrkPlaying and (FTrkPlayer <> nil) and (FTrkPlayer.LoopPattern >= 0);
+    ibTrkTransport.LitMask := (Ord(FTrkPlaying and not FTrkPaused and not patLoop) shl 1) or
+      (Ord(FTrkPlaying and not FTrkPaused and patLoop) shl 2) or (Ord(FTrkPaused) shl 3);
+    ibTrkTransport.SetButtonEnabled(3, FTrkPlaying);
+    ibTrkTransport.SetButtonEnabled(4, FTrkPlaying);
     mnuTrkPlay.Enabled := not FTrkPlaying;
     pmTrkPlay.Enabled := not FTrkPlaying;
     mnuTrkStop.Enabled := FTrkPlaying;
@@ -17671,6 +28614,9 @@ begin
   FTrkGridChnScroll := 0;
   FTrkPreview := 'new tracker module';
   Logger.Info('ui', 'Tracker module reset to a fresh, empty one');
+  { the Tracker mixer started over with it: show the fresh strips and the flat master EQ }
+  FMixSig := '';
+  RefreshMixerTab;
   RefreshTrackerTab;
 end;
 
@@ -17678,6 +28624,7 @@ procedure TfrmMain.btnTrkApplyXportClick(Sender: TObject);
 var
   sp, bp: Integer;
 begin
+  if not TrkEditAllowed then Exit;
   sp := StrToIntDef(Trim(edtTrkSpeed.Text), FProject.Tracker.InitialSpeed);
   bp := StrToIntDef(Trim(edtTrkBPM.Text), FProject.Tracker.InitialBPM);
   FCmds.Perform(TSetTrackerTransportCommand.Create(FProject, True, sp));
@@ -17687,12 +28634,14 @@ end;
 
 procedure TfrmMain.btnTrkAddPatternClick(Sender: TObject);
 begin
+  if not TrkEditAllowed then Exit;
   FCmds.Perform(TAddTrackerPatternCommand.Create(FProject, TRK_DEFAULT_ROWS));
   RefreshTrackerTab;
 end;
 
 procedure TfrmMain.btnTrkDelPatternClick(Sender: TObject);
 begin
+  if not TrkEditAllowed then Exit;
   try
     FCmds.Perform(TRemoveTrackerPatternCommand.Create(FProject, SelectedTrackerPattern));
   except
@@ -17701,34 +28650,415 @@ begin
   RefreshTrackerTab;
 end;
 
-procedure TfrmMain.btnTrkSetCellClick(Sender: TObject);
-var
-  cell: TTrackerCell;
-  n: Byte;
-  iv: Integer;
-  eff: TTrackerEffect;
+procedure TfrmMain.btnTrkClearCellClick(Sender: TObject);
 begin
-  cell := TTrackerCell.Empty;
-  if NoteFromName(Trim(edtTrkNote.Text), n) then cell.Note := n;
-  if TryStrToInt(Trim(edtTrkInstr.Text), iv) and (iv > 0) and (iv < 256) then
-    cell.Instrument := Byte(iv);
-  if TryStrToInt(Trim(edtTrkVol.Text), iv) and (iv >= 0) and (iv <= TRK_VOL_MAX) then
-    cell.Volume := Byte(iv);
-  if (Trim(edtTrkEff.Text) <> '') and EffectFromLetter(edtTrkEff.Text[1], eff) then
+  TrkRegionApply('Clear', False);
+end;
+
+{ ---- pattern grid: the marked area (right-drag) and its right-click menu ---- }
+
+{ the marked area's bounds (rows / channels, normalised); with nothing marked it is the cursor
+  cell. True when an area is marked. }
+function TfrmMain.TrkRegion(out R0, C0, R1, C1: Integer): Boolean;
+begin
+  if FTrkRgnOn then
   begin
-    cell.Effect := eff;
-    if TryStrToInt('$' + Trim(edtTrkParam.Text), iv) then cell.Param := Byte(iv);
+    R0 := Min(FTrkRgnR1, FTrkRgnR2);
+    R1 := Max(FTrkRgnR1, FTrkRgnR2);
+    C0 := Min(FTrkRgnC1, FTrkRgnC2);
+    C1 := Max(FTrkRgnC1, FTrkRgnC2);
+  end
+  else
+  begin
+    R0 := FTrkSelRow; R1 := FTrkSelRow;
+    C0 := FTrkSelChn; C1 := FTrkSelChn;
   end;
-  FCmds.Perform(TSetTrackerCellCommand.Create(FProject, SelectedTrackerPattern,
-    FTrkSelRow, FTrkSelChn, cell));
+  Result := FTrkRgnOn;
+end;
+
+procedure TfrmMain.TrkRegionCopy;
+var
+  pat: TTrackerPattern;
+  r0, c0, r1, c1, r, c: Integer;
+begin
+  if FProject = nil then Exit;
+  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  TrkRegion(r0, c0, r1, c1);
+  r1 := Min(r1, pat.Rows - 1);
+  c1 := Min(c1, pat.Channels - 1);
+  FTrkClipRows := r1 - r0 + 1;
+  FTrkClipChn := c1 - c0 + 1;
+  SetLength(FTrkClip, FTrkClipRows * FTrkClipChn);
+  for r := 0 to FTrkClipRows - 1 do
+    for c := 0 to FTrkClipChn - 1 do
+      FTrkClip[r * FTrkClipChn + c] := pat.GetCell(r0 + r, c0 + c);
+  memTrk.Lines.Insert(0, Format('Copied %d x %d cells.', [FTrkClipRows, FTrkClipChn]));
+end;
+
+{ Cut (ACopyFirst) or Delete: empties every cell of the marked area as one undo step }
+procedure TfrmMain.TrkRegionApply(const ALabel: string; ACopyFirst: Boolean);
+var
+  pat: TTrackerPattern;
+  r0, c0, r1, c1, i: Integer;
+  cells: TTrackerCellArray;
+begin
+  if not TrkEditAllowed then Exit;
+  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  if ACopyFirst then TrkRegionCopy;
+  TrkRegion(r0, c0, r1, c1);
+  r1 := Min(r1, pat.Rows - 1);
+  c1 := Min(c1, pat.Channels - 1);
+  SetLength(cells, (r1 - r0 + 1) * (c1 - c0 + 1));
+  for i := 0 to High(cells) do cells[i] := TTrackerCell.Empty;
+  FCmds.Perform(TSetTrackerCellsCommand.Create(FProject, SelectedTrackerPattern, r0, c0,
+    r1 - r0 + 1, c1 - c0 + 1, cells, ALabel));
   RefreshTrackerTab;
 end;
 
-procedure TfrmMain.btnTrkClearCellClick(Sender: TObject);
+procedure TfrmMain.TrkRegionPaste;
+var
+  pat: TTrackerPattern;
+  r0, c0, r1, c1, rows, chns, r, c: Integer;
+  cells: TTrackerCellArray;
 begin
-  FCmds.Perform(TSetTrackerCellCommand.Create(FProject, SelectedTrackerPattern,
-    FTrkSelRow, FTrkSelChn, TTrackerCell.Empty));
+  if Length(FTrkClip) = 0 then Exit;
+  if not TrkEditAllowed then Exit;
+  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  TrkRegion(r0, c0, r1, c1);
+  rows := Min(FTrkClipRows, pat.Rows - r0);
+  chns := Min(FTrkClipChn, pat.Channels - c0);
+  if (rows < 1) or (chns < 1) then Exit;
+  SetLength(cells, rows * chns);
+  for r := 0 to rows - 1 do
+    for c := 0 to chns - 1 do
+      cells[r * chns + c] := FTrkClip[r * FTrkClipChn + c];
+  FCmds.Perform(TSetTrackerCellsCommand.Create(FProject, SelectedTrackerPattern, r0, c0,
+    rows, chns, cells, 'Paste'));
+  { the pasted area is left marked }
+  FTrkRgnOn := True;
+  FTrkRgnR1 := r0; FTrkRgnC1 := c0;
+  FTrkRgnR2 := r0 + rows - 1; FTrkRgnC2 := c0 + chns - 1;
   RefreshTrackerTab;
+end;
+
+procedure TfrmMain.TrkRegionTranspose(ASemitones: Integer);
+var
+  pat: TTrackerPattern;
+  r0, c0, r1, c1, r, c, w: Integer;
+  cells: TTrackerCellArray;
+  cell: TTrackerCell;
+begin
+  if not TrkEditAllowed then Exit;
+  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  TrkRegion(r0, c0, r1, c1);
+  r1 := Min(r1, pat.Rows - 1);
+  c1 := Min(c1, pat.Channels - 1);
+  w := c1 - c0 + 1;
+  SetLength(cells, (r1 - r0 + 1) * w);
+  for r := r0 to r1 do
+    for c := c0 to c1 do
+    begin
+      cell := pat.GetCell(r, c);
+      if (cell.Note >= TRK_NOTE_MIN) and (cell.Note <= TRK_NOTE_MAX) then
+        cell.Note := Byte(EnsureRange(cell.Note + ASemitones, TRK_NOTE_MIN, TRK_NOTE_MAX));
+      cells[(r - r0) * w + (c - c0)] := cell;
+    end;
+  FCmds.Perform(TSetTrackerCellsCommand.Create(FProject, SelectedTrackerPattern, r0, c0,
+    r1 - r0 + 1, w, cells, 'Transpose'));
+  RefreshTrackerTab;
+end;
+
+procedure TfrmMain.pmTrkGridPopup(Sender: TObject);
+var
+  i: Integer;
+begin
+  { after a right-drag that only marked an area the menu stays closed }
+  for i := 0 to pmTrkGrid.Items.Count - 1 do
+    pmTrkGrid.Items[i].Visible := not FTrkNoPopup;
+  pmTrkPaste.Enabled := Length(FTrkClip) > 0;
+  { an area has to be marked to export it }
+  pmTrkGridExportRegion.Enabled := FTrkRgnOn;
+end;
+
+{ ---- Tracker export to the Timeline: the marked area, or the whole current pattern, is played through
+  the Tracker Mixer (strip faders, pans, effects and master EQ) into an audio clip that is placed on
+  the selected audio lane at the playhead ---- }
+
+procedure TfrmMain.pmTrkSeqPopup(Sender: TObject);
+begin
+  pmTrkSeqExportRegion.Enabled := FTrkRgnOn;
+end;
+
+{ the Tracker menu's Export opening: the marked-area export needs an area to be marked }
+procedure TfrmMain.mnuTrkExportClick(Sender: TObject);
+begin
+  mnuTrkExportRegion.Enabled := FTrkRgnOn;
+end;
+
+function TfrmMain.TrkSeqIsSelected(AStep: Integer): Boolean;
+var i: Integer;
+begin
+  for i := 0 to High(FTrkSeqSel) do
+    if FTrkSeqSel[i] = AStep then Exit(True);
+  Result := False;
+end;
+
+{ adds the order step to the Ctrl+click selection, or takes it out again; the list stays ascending }
+procedure TfrmMain.TrkSeqToggleStep(AStep: Integer);
+var i, at: Integer;
+begin
+  for i := 0 to High(FTrkSeqSel) do
+    if FTrkSeqSel[i] = AStep then
+    begin
+      Delete(FTrkSeqSel, i, 1);
+      Exit;
+    end;
+  at := Length(FTrkSeqSel);
+  for i := 0 to High(FTrkSeqSel) do
+    if FTrkSeqSel[i] > AStep then begin at := i; Break; end;
+  Insert(AStep, FTrkSeqSel, at);
+end;
+
+procedure TfrmMain.TrkExportToTimeline(AWholePattern: Boolean);
+const
+  MAX_RENDER_MINUTES = 20;
+var
+  multi: Boolean;
+  pats: TArray<Integer>;
+  firstStep, k: Integer;
+  src: TTrackerModule;
+  scratch: TTrackerModule;
+  pat, sp: TTrackerPattern;
+  patIdx, r0, c0, r1, c1, rows, r, c, o, i, trackId, sampleRate, channels, frameCount: Integer;
+  cell: TTrackerCell;
+  newIdx: Integer;
+  speed, bpm: Integer;
+  player: TTrackerPlayer;
+  planar: TAudioPlanar;
+  renderPath, renderDir, clipName: string;
+  tl: TTimeline;
+  ms: TMediaSource;
+  addCmd: TAddTimelineClipCommand;
+  doneScan: Boolean;
+begin
+  if FProject = nil then Exit;
+  src := FProject.Tracker;
+  patIdx := SelectedTrackerPattern;
+  pat := src.GetPattern(patIdx);
+  if pat = nil then Exit;
+  { Ctrl+click selected steps of the sequence strip: every selected pattern is rendered, in
+    sequence order, into the one clip }
+  SetLength(pats, 0);
+  firstStep := -1;
+  if AWholePattern then
+    for k := 0 to High(FTrkSeqSel) do
+      if (FTrkSeqSel[k] >= 0) and (FTrkSeqSel[k] < src.OrderLength) and
+         (src.GetPattern(src.GetOrder(FTrkSeqSel[k])) <> nil) then
+      begin
+        if firstStep < 0 then firstStep := FTrkSeqSel[k];
+        pats := pats + [src.GetOrder(FTrkSeqSel[k])];
+      end;
+  multi := Length(pats) > 0;
+  if AWholePattern then
+  begin
+    r0 := 0; r1 := pat.Rows - 1;
+    c0 := 0; c1 := pat.Channels - 1;
+  end
+  else
+  begin
+    if not TrkRegion(r0, c0, r1, c1) then
+    begin
+      MessageDlg('Mark an area of the pattern first (right-drag over it).', mtInformation, [mbOK], 0);
+      Exit;
+    end;
+    r1 := Min(r1, pat.Rows - 1);
+    c1 := Min(c1, pat.Channels - 1);
+  end;
+  rows := r1 - r0 + 1;
+  if rows < 1 then Exit;
+  { the live player and the render share the Tracker mixer's effect state: stop the live one first }
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
+
+  sampleRate := FProject.SampleRate;
+  channels := FProject.Channels;
+  if channels < 1 then channels := 2;
+
+  scratch := src.Clone;
+  try
+    { the cut-out becomes the only pattern of the scratch copy; channels outside the area stay empty }
+    if multi then
+    begin
+      { the selected patterns become the scratch copy's whole order list }
+      scratch.SetOrder(0, pats[0]);
+      while scratch.OrderLength > 1 do scratch.DeleteOrder(scratch.OrderLength - 1);
+      for k := 1 to High(pats) do scratch.AppendOrder(pats[k]);
+    end
+    else
+    begin
+      sp := scratch.AddPattern(rows);
+      newIdx := scratch.PatternCount - 1;
+      for r := 0 to rows - 1 do
+        for c := c0 to c1 do
+        begin
+          cell := pat.GetCell(r0 + r, c);
+          sp.SetCell(r, c, cell);
+        end;
+      scratch.SetOrder(0, newIdx);
+      while scratch.OrderLength > 1 do scratch.DeleteOrder(scratch.OrderLength - 1);
+    end;
+
+    { speed and tempo as they stand when the area starts: follow the commands played before it }
+    speed := src.InitialSpeed;
+    bpm := src.InitialBPM;
+    doneScan := False;
+    for o := 0 to src.OrderLength - 1 do
+    begin
+      if doneScan then Break;
+      if multi and (o >= firstStep) then Break;
+      i := src.GetOrder(o);
+      if (src.GetPattern(i) = nil) then Continue;
+      for r := 0 to src.GetPattern(i).Rows - 1 do
+      begin
+        if (i = patIdx) and (r >= r0) then begin doneScan := True; Break; end;
+        for c := 0 to src.GetPattern(i).Channels - 1 do
+        begin
+          cell := src.GetPattern(i).GetCell(r, c);
+          if cell.Effect = tfxSetSpeed then speed := EnsureRange(cell.Param, TRK_MIN_SPEED, TRK_MAX_SPEED)
+          else if cell.Effect = tfxSetBPM then bpm := EnsureRange(cell.Param, TRK_MIN_BPM, TRK_MAX_BPM);
+        end;
+      end;
+    end;
+    scratch.InitialSpeed := speed;
+    scratch.InitialBPM := bpm;
+
+    ShowStatusProgress(IfThen(multi, Format('Rendering %d selected patterns to the Timeline...', [Length(pats)]),
+      IfThen(AWholePattern, 'Rendering the pattern to the Timeline...',
+      'Rendering the marked region to the Timeline...')), 100);
+    player := TTrackerPlayer.Create(scratch);
+    try
+      EnsureTrackerMixerStrips(FProject.TrackerMixer, scratch.Channels, scratch);
+      player.AttachMixer(FProject.TrackerMixer);
+      player.Prepare(sampleRate, 1024, channels);
+      try
+        planar := player.RenderSongToPlanar(sampleRate * 60 * MAX_RENDER_MINUTES, channels, 1024, TrkImportRenderProgress);
+      except
+        on E: Exception do
+        begin
+          MessageDlg('Rendering the tracker export failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+          Exit;
+        end;
+      end;
+      frameCount := 0;
+      if Length(planar) > 0 then frameCount := Length(planar[0]);
+      if frameCount < 1 then
+      begin
+        MessageDlg('The tracker export rendered no audio.', mtInformation, [mbOK], 0);
+        Exit;
+      end;
+      NormalizeTrackerRender(planar, frameCount);
+
+      UpdateStatusProgress(100, 'Writing rendered audio...');
+      renderDir := IncludeTrailingPathDelimiter(CacheFile('render'));
+      ForceDirectories(renderDir);
+      { short enough not to run into the clip's controls: TR03 for a pattern, TR03[8-23] for rows 8-23 of it }
+      if multi then
+      begin
+        if Length(pats) <= 4 then
+        begin
+          clipName := 'TR';
+          for k := 0 to High(pats) do
+            clipName := clipName + IfThen(k > 0, '+', '') + Format('%.2d', [pats[k]]);
+        end
+        else
+          clipName := Format('TR%.2d+%d more', [pats[0], Length(pats) - 1]);
+      end
+      else if AWholePattern then clipName := Format('TR%.2d', [patIdx])
+      else clipName := Format('TR%.2d[%d-%d]', [patIdx, r0, r1]);
+      renderPath := renderDir + clipName + Format(' - %d.wav', [DateTimeToFileDate(Now)]);
+      SaveWavFile(renderPath, planar, channels, sampleRate, frameCount);
+
+      tl := FProject.Timeline;
+      trackId := TlSelectedAudioTrackId;
+      if trackId < 0 then trackId := TlNewAudioTrackId;
+      ms := tl.AddSource(renderPath, sampleRate, channels, frameCount);
+      addCmd := TAddTimelineClipCommand.Create(FProject, trackId, ms.Id, clipName,
+        FTlView.Snap(tl.PlayheadSeconds), 0, frameCount / sampleRate);
+      FCmds.Perform(addCmd);
+      WarmClipWaveform(ms.Id);
+      FTlSelClipId := addCmd.CreatedId;
+      Logger.Info('ui', 'Tracker export to the Timeline: ' + clipName);
+      RefreshTimelineTab;
+    finally
+      player.Free;
+      HideStatusProgress;
+    end;
+  finally
+    scratch.Free;
+  end;
+end;
+
+procedure TfrmMain.pmTrkExportRegionToTimelineClick(Sender: TObject);
+begin
+  TrkExportToTimeline(False);
+end;
+
+procedure TfrmMain.pmTrkExportPatternToTimelineClick(Sender: TObject);
+begin
+  TrkExportToTimeline(True);
+end;
+
+
+procedure TfrmMain.pmTrkCutClick(Sender: TObject);
+begin
+  TrkRegionApply('Cut', True);
+end;
+
+procedure TfrmMain.pmTrkCopyClick(Sender: TObject);
+begin
+  TrkRegionCopy;
+end;
+
+procedure TfrmMain.pmTrkPasteClick(Sender: TObject);
+begin
+  TrkRegionPaste;
+end;
+
+procedure TfrmMain.pmTrkDeleteClick(Sender: TObject);
+begin
+  TrkRegionApply('Delete', False);
+end;
+
+procedure TfrmMain.pmTrkSelectAllClick(Sender: TObject);
+var
+  pat: TTrackerPattern;
+begin
+  if FProject = nil then Exit;
+  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  FTrkRgnOn := True;
+  FTrkRgnR1 := 0; FTrkRgnC1 := 0;
+  FTrkRgnR2 := pat.Rows - 1; FTrkRgnC2 := pat.Channels - 1;
+end;
+
+procedure TfrmMain.pmTrkSelectChannelClick(Sender: TObject);
+var
+  pat: TTrackerPattern;
+begin
+  if FProject = nil then Exit;
+  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  FTrkRgnOn := True;
+  FTrkRgnR1 := 0; FTrkRgnC1 := FTrkSelChn;
+  FTrkRgnR2 := pat.Rows - 1; FTrkRgnC2 := FTrkSelChn;
+end;
+
+procedure TfrmMain.pmTrkTransposeClick(Sender: TObject);
+begin
+  if Sender is TMenuItem then TrkRegionTranspose(TMenuItem(Sender).Tag);
 end;
 
 procedure TfrmMain.btnTrkFillDemoClick(Sender: TObject);
@@ -17739,6 +29069,7 @@ var
   cell: TTrackerCell;
   nb: Byte;
 begin
+  if not TrkEditAllowed then Exit;
   m := FProject.Tracker;
   patIdx := SelectedTrackerPattern;
   { one sine instrument (undoable), then a C-E-G-C arpeggio down channel 0 }
@@ -17757,20 +29088,41 @@ end;
 
 procedure TfrmMain.btnTrkPlayClick(Sender: TObject);
 begin
+  TrkStartPlay(-1);
+end;
+
+{ Play pattern: only the pattern chosen in the pattern list, from its first row, over and over until Stop }
+procedure TfrmMain.TrkPlayPattern;
+begin
+  if FProject = nil then Exit;
+  TrkStartPlay(SelectedTrackerPattern);
+end;
+
+procedure TfrmMain.TrkStartPlay(ALoopPattern: Integer);
+begin
   if (App = nil) or (App.Audio = nil) then Exit;
 
   App.Audio.ClearSource;
   FreeAndNil(FTrkPlayer);
 
   FTrkPlayer := TTrackerPlayer.Create(FProject.Tracker);
+  { every channel plays through its TRK-CHN strip, the strips' inserts and the master }
+  EnsureTrackerMixerStrips(FProject.TrackerMixer, FProject.Tracker.Channels, FProject.Tracker);
+  FTrkPlayer.AttachMixer(FProject.TrackerMixer);
+  FTrkPaused := False;
   FTrkPlayer.LoopSong := True;
+  FTrkPlayer.LoopPattern := ALoopPattern;
   FGraphPlaying := False;
   FWavPlaying := False;
   StopTimelinePlayback;
   App.Audio.SetSource(FTrkPlayer.AsSource);
   FTrkPlaying := True;
-  FTrkPreview := Format('playing through the engine: speed %d, %d BPM (looping)',
-    [FTrkPlayer.Speed, FTrkPlayer.BPM]);
+  if ALoopPattern >= 0 then
+    FTrkPreview := Format('playing pattern %d on its own: speed %d, %d BPM (looping)',
+      [ALoopPattern, FTrkPlayer.Speed, FTrkPlayer.BPM])
+  else
+    FTrkPreview := Format('playing through the engine: speed %d, %d BPM (looping)',
+      [FTrkPlayer.Speed, FTrkPlayer.BPM]);
   { the pattern-grid / sequence-strip readout needs to move smoothly, not
     once every half second - raise tmrUI's rate to near-frame while the
     transport is running (restored in btnTrkStopClick); tmrUITimer calls
@@ -17785,6 +29137,7 @@ begin
   if (App <> nil) and (App.Audio <> nil) then
     App.Audio.ClearSource;
   FTrkPlaying := False;
+  FTrkPaused := False;
   FreeAndNil(FTrkPlayer);
   FTrkPreview := '(stopped)';
   tmrUI.Interval := TRK_UI_IDLE_INTERVAL_MS;
@@ -17793,22 +29146,28 @@ end;
 
 procedure TfrmMain.btnTrkUndoClick(Sender: TObject);
 begin
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
   FCmds.Undo;
+  if FMixViewTracker then RefreshMixerTab;   // an undone New Tracker brings its mixer back too
   RefreshTrackerTab;
 end;
 
 procedure TfrmMain.btnTrkRedoClick(Sender: TObject);
 begin
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
   FCmds.Redo;
+  if FMixViewTracker then RefreshMixerTab;
   RefreshTrackerTab;
 end;
 
 procedure TfrmMain.btnTrkImportModClick(Sender: TObject);
 var
+  imported: Boolean;
   fs: TFileStream;
   data: TBytes;
   info: TModImportInfo;
 begin
+  imported := False;
   if not dlgOpenMod.Execute then Exit;
   if not FileLooksLikeMod(dlgOpenMod.FileName) then
   begin
@@ -17816,6 +29175,8 @@ begin
       + sLineBreak + dlgOpenMod.FileName, mtWarning, [mbOK], 0);
     Exit;
   end;
+  { the player reads FProject.Tracker; ReplaceTracker frees it }
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
   try
     fs := TFileStream.Create(dlgOpenMod.FileName, fmOpenRead or fmShareDenyWrite);
     try
@@ -17831,6 +29192,7 @@ begin
     FTrkPreview := 'imported ' + ExtractFileName(dlgOpenMod.FileName) + sLineBreak
       + info.Summary;
     Logger.Info('ui', 'MOD imported: ' + dlgOpenMod.FileName);
+    imported := True;
   except
     on E: Exception do
       MessageDlg('MOD import failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
@@ -17840,6 +29202,14 @@ begin
   FTrkGridRowScroll := -1;
   FTrkGridChnScroll := 0;
   RefreshTrackerTab;
+  { offer the module on the Timeline: live notation, or rendered to audio }
+  if imported then
+    try
+      ImportTrackerModuleToTimeline(FProject.Tracker, dlgOpenMod.FileName, 'MOD');
+    except
+      on E: Exception do
+        MessageDlg('Adding the module to the Timeline failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+    end;
 end;
 
 procedure TfrmMain.btnTrkExportModClick(Sender: TObject);
@@ -17876,10 +29246,12 @@ end;
 
 procedure TfrmMain.btnTrkImportXmClick(Sender: TObject);
 var
+  imported: Boolean;
   fs: TFileStream;
   data: TBytes;
   info: TXmImportInfo;
 begin
+  imported := False;
   if not dlgOpenXm.Execute then Exit;
   if not FileLooksLikeXm(dlgOpenXm.FileName) then
   begin
@@ -17887,6 +29259,8 @@ begin
       + sLineBreak + dlgOpenXm.FileName, mtWarning, [mbOK], 0);
     Exit;
   end;
+  { the player reads FProject.Tracker; ReplaceTracker frees it }
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
   try
     fs := TFileStream.Create(dlgOpenXm.FileName, fmOpenRead or fmShareDenyWrite);
     try
@@ -17901,6 +29275,7 @@ begin
     FTrkPreview := 'imported ' + ExtractFileName(dlgOpenXm.FileName) + sLineBreak
       + info.Summary;
     Logger.Info('ui', 'XM imported: ' + dlgOpenXm.FileName);
+    imported := True;
   except
     on E: Exception do
       MessageDlg('XM import failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
@@ -17910,6 +29285,14 @@ begin
   FTrkGridRowScroll := -1;
   FTrkGridChnScroll := 0;
   RefreshTrackerTab;
+  { offer the module on the Timeline: live notation, or rendered to audio }
+  if imported then
+    try
+      ImportTrackerModuleToTimeline(FProject.Tracker, dlgOpenXm.FileName, 'XM');
+    except
+      on E: Exception do
+        MessageDlg('Adding the module to the Timeline failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+    end;
 end;
 
 procedure TfrmMain.btnTrkExportXmClick(Sender: TObject);
@@ -17944,12 +29327,21 @@ begin
   RefreshTrackerTab;
 end;
 
+{ Tracker > Import > ScreamTracker / Composer module into the Tracker player }
+procedure TfrmMain.btnTrkImportLegacyClick(Sender: TObject);
+begin
+  if not dlgOpenTrkAny.Execute then Exit;
+  ImportTrackerFileToTimeline(dlgOpenTrkAny.FileName, False);
+end;
+
 procedure TfrmMain.btnTrkImportMptmClick(Sender: TObject);
 var
+  imported: Boolean;
   fs: TFileStream;
   data: TBytes;
   info: TMPTMImportInfo;
 begin
+  imported := False;
   if not dlgOpenMptm.Execute then Exit;
   if not FileLooksLikeMptm(dlgOpenMptm.FileName) then
   begin
@@ -17957,6 +29349,8 @@ begin
       + sLineBreak + dlgOpenMptm.FileName, mtWarning, [mbOK], 0);
     Exit;
   end;
+  { the player reads FProject.Tracker; ReplaceTracker frees it }
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
   try
     fs := TFileStream.Create(dlgOpenMptm.FileName, fmOpenRead or fmShareDenyWrite);
     try
@@ -17971,6 +29365,7 @@ begin
     FTrkPreview := 'imported ' + ExtractFileName(dlgOpenMptm.FileName) + sLineBreak
       + info.Summary;
     Logger.Info('ui', 'MPTM imported: ' + dlgOpenMptm.FileName);
+    imported := True;
   except
     on E: Exception do
       MessageDlg('MPTM import failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
@@ -17980,6 +29375,14 @@ begin
   FTrkGridRowScroll := -1;
   FTrkGridChnScroll := 0;
   RefreshTrackerTab;
+  { offer the module on the Timeline: live notation, or rendered to audio }
+  if imported then
+    try
+      ImportTrackerModuleToTimeline(FProject.Tracker, dlgOpenMptm.FileName, 'MPTM');
+    except
+      on E: Exception do
+        MessageDlg('Adding the module to the Timeline failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+    end;
 end;
 
 procedure TfrmMain.btnTrkExportMptmClick(Sender: TObject);
@@ -18014,36 +29417,248 @@ begin
   RefreshTrackerTab;
 end;
 
+const
+  TRK_ROWH = 18;
+  TRK_COLW = 108;
+  TRK_HDR = 54;
+  TRK_METER_Y = 43;       { top of the horizontal level meter under the header buttons }
+  TRK_METER_H = 7;
+  TRK_METER_SEGS = 28;    { the Timeline header's LED count }
+  TRK_GUT = 46;
+  { first character and length of the five editable fields of a cell:
+    note, instrument, volume, effect letter, effect parameter ("C-4 01 40 F10") }
+  TRK_FLD_OFF: array[0..4] of Integer = (0, 4, 7, 10, 11);
+  TRK_FLD_LEN: array[0..4] of Integer = (3, 2, 2, 1, 2);
+  TRK_BTN_Y1 = 21;
+  TRK_BTN_Y2 = 39;
+
+function TrkMix(A, B: TColor; F: Double): TColor;
+var
+  ca, cb: Integer;
+begin
+  ca := ColorToRGB(A);
+  cb := ColorToRGB(B);
+  F := EnsureRange(F, 0.0, 1.0);
+  Result := TColor(
+    Round((ca and $FF) + ((cb and $FF) - (ca and $FF)) * F) or
+    (Round(((ca shr 8) and $FF) + (((cb shr 8) and $FF) - ((ca shr 8) and $FF)) * F) shl 8) or
+    (Round(((ca shr 16) and $FF) + (((cb shr 16) and $FF) - ((ca shr 16) and $FF)) * F) shl 16));
+end;
+
+{ Which field of a cell a click at AOffsetX pixels from the cell's left edge lands on }
+function TfrmMain.TrkFieldAt(AOffsetX: Integer): Integer;
+var
+  ci: Integer;
+begin
+  ci := Max(0, AOffsetX - 2) div Max(1, FTrkCharW);
+  if ci < 4 then Result := 0
+  else if ci < 7 then Result := 1
+  else if ci < 10 then Result := 2
+  else if ci < 11 then Result := 3
+  else Result := 4;
+end;
+
+function TfrmMain.TrkEditAllowed: Boolean;
+begin
+  Result := (not FTrkPlaying) or FTrkPaused;
+  if not Result then
+  begin
+    FTrkPreview := 'Editing is only available while playback is stopped or paused.';
+    memTrk.Lines.Insert(0, FTrkPreview);
+  end;
+end;
+
+procedure TfrmMain.TrkRevealChannel;
+var
+  vis: Integer;
+begin
+  vis := Max(1, (pbTracker.Width - TRK_GUT) div TRK_COLW);
+  if FTrkSelChn < FTrkGridChnScroll then FTrkGridChnScroll := FTrkSelChn
+  else if FTrkSelChn >= FTrkGridChnScroll + vis then FTrkGridChnScroll := FTrkSelChn - vis + 1;
+  if FTrkGridChnScroll > sbTrkChn.Max then FTrkGridChnScroll := sbTrkChn.Max;
+  if FTrkGridChnScroll < 0 then FTrkGridChnScroll := 0;
+  if sbTrkChn.Position <> FTrkGridChnScroll then sbTrkChn.Position := FTrkGridChnScroll;
+end;
+
 procedure TfrmMain.pbTrackerMouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
-const
-  ROWH = 16;
-  COLW = 96;
-  HDR = 20;
-  GUT = 40;
+var
+  pat: TTrackerPattern;
+  m: TTrackerModule;
+  row, col, x0, rx, r0, c0, r1, c1: Integer;
+begin
+  if FProject = nil then Exit;
+  m := FProject.Tracker;
+  pat := m.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  if pbTracker.CanFocus and not pbTracker.Focused then pbTracker.SetFocus;
+
+  if Y < TRK_HDR then
+  begin
+    { channel header: select the channel, or press its Mute / Effect button }
+    if (Button <> mbLeft) or (X < TRK_GUT) then Exit;
+    col := (X - TRK_GUT) div TRK_COLW + FTrkGridChnScroll;
+    if col >= pat.Channels then Exit;
+    x0 := TRK_GUT + (col - FTrkGridChnScroll) * TRK_COLW;
+    rx := X - x0;
+    FTrkSelChn := col;
+    if (Y >= TRK_BTN_Y1) and (Y <= TRK_BTN_Y2) and (rx >= 4) and (rx <= 26) then
+    begin
+      m.SetChannelMuted(col, not m.ChannelMuted(col));
+      FProject.Touch;
+    end
+    else if (Y >= TRK_BTN_Y1) and (Y <= TRK_BTN_Y2) and (rx >= 30) and (rx <= 52) then
+      TrkChannelFxClick(col, X, Y)
+    else if (Y >= TRK_BTN_Y1) and (Y <= TRK_BTN_Y2) and (rx >= 56) and (rx <= 78) then
+    begin
+      TrkOpenMixerForChannel(col);
+      Exit;
+    end;
+    RefreshTrackerTab;
+    Exit;
+  end;
+
+  row := Trunc((Y - TRK_HDR) / TRK_ROWH + FTrkGridScroll);
+  FTrkNoPopup := False;
+  if Button = mbRight then
+  begin
+    { right button: mark an area by dragging; a click inside the marked area keeps it for the menu }
+    if TrkGridCellAt(X, Y, row, col) then
+    begin
+      r0 := 0; c0 := 0; r1 := 0; c1 := 0;
+      if not (FTrkRgnOn and TrkRegion(r0, c0, r1, c1) and
+              (row >= r0) and (row <= r1) and (col >= c0) and (col <= c1)) then
+      begin
+        FTrkRgnOn := True;
+        FTrkRgnR1 := row; FTrkRgnC1 := col;
+        FTrkRgnR2 := row; FTrkRgnC2 := col;
+        FTrkRgnDrag := True;
+        FTrkRgnMoved := False;
+        FTrkSelRow := row;
+        FTrkSelChn := col;
+      end;
+    end;
+    RefreshTrackerTab;
+    Exit;
+  end;
+  FTrkRgnOn := False;
+  FTrkSelRow := EnsureRange(row, 0, pat.Rows - 1);
+  if X >= TRK_GUT then
+  begin
+    col := (X - TRK_GUT) div TRK_COLW + FTrkGridChnScroll;
+    FTrkSelChn := EnsureRange(col, 0, pat.Channels - 1);
+    x0 := TRK_GUT + (FTrkSelChn - FTrkGridChnScroll) * TRK_COLW;
+    FTrkField := TrkFieldAt(X - x0);
+  end;
+  RefreshTrackerTab;
+end;
+
+{ the grid cell under a point, clamped into the pattern; False when the pattern is missing }
+function TfrmMain.TrkGridCellAt(X, Y: Integer; out ARow, ACol: Integer): Boolean;
 var
   pat: TTrackerPattern;
 begin
+  Result := False;
+  ARow := 0;
+  ACol := 0;
+  if FProject = nil then Exit;
   pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
   if pat = nil then Exit;
-  if (Y < HDR) or (X < GUT) then Exit;
-  FTrkSelRow := (Y - HDR) div ROWH + FTrkGridLastFirstRow;
-  FTrkSelChn := (X - GUT) div COLW + FTrkGridChnScroll;
-  if FTrkSelRow >= pat.Rows then FTrkSelRow := pat.Rows - 1;
-  if FTrkSelChn >= pat.Channels then FTrkSelChn := pat.Channels - 1;
-  RefreshTrackerTab;
+  ARow := EnsureRange(Trunc((Y - TRK_HDR) / TRK_ROWH + FTrkGridScroll), 0, pat.Rows - 1);
+  if X < TRK_GUT then ACol := FTrkGridChnScroll
+  else ACol := (X - TRK_GUT) div TRK_COLW + FTrkGridChnScroll;
+  ACol := EnsureRange(ACol, 0, pat.Channels - 1);
+  Result := True;
+end;
+
+procedure TfrmMain.pbTrackerMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+  X, Y: Integer);
+begin
+  if Button <> mbRight then Exit;
+  FTrkRgnDrag := False;
+  { a drag only marks the area; the menu opens on a plain right click }
+  FTrkNoPopup := FTrkRgnMoved;
+  FTrkRgnMoved := False;
+end;
+
+procedure TfrmMain.pbTrackerMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
+var
+  pat: TTrackerPattern;
+  r, c, rx: Integer;
+  s: string;
+begin
+  FTrkHovGoalRow := -1;
+  FTrkHovGoalCol := -1;
+  { hover hints for the icon buttons in each channel header (Mute / Effects / Mixer) }
+  s := '';
+  if (FProject <> nil) and (Y >= TRK_BTN_Y1) and (Y <= TRK_BTN_Y2) and (X >= TRK_GUT) then
+  begin
+    pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+    c := (X - TRK_GUT) div TRK_COLW + FTrkGridChnScroll;
+    if (pat <> nil) and (c < pat.Channels) then
+    begin
+      rx := (X - TRK_GUT) mod TRK_COLW;
+      if (rx >= 4) and (rx <= 26) then
+      begin
+        if FProject.Tracker.ChannelMuted(c) then
+          s := Format('Unmute channel %d: let it play again', [c + 1])
+        else
+          s := Format('Mute channel %d: silence it without changing the pattern', [c + 1]);
+      end
+      else if (rx >= 30) and (rx <= 52) then
+        s := Format('Channel %d effects: add or edit effects on this channel', [c + 1])
+      else if (rx >= 56) and (rx <= 78) then
+        s := Format('Open the Mixer on channel %d''s strip', [c + 1]);
+    end;
+  end;
+  if pbTracker.Hint <> s then
+  begin
+    pbTracker.Hint := s;
+    pbTracker.ShowHint := s <> '';
+    Application.CancelHint;
+  end;
+  if FTrkRgnDrag and (ssRight in Shift) and TrkGridCellAt(X, Y, r, c) then
+  begin
+    if (r <> FTrkRgnR2) or (c <> FTrkRgnC2) then FTrkRgnMoved := True;
+    FTrkRgnR2 := r;
+    FTrkRgnC2 := c;
+  end;
+  if (FProject <> nil) and (Y >= TRK_HDR) and (X >= TRK_GUT) then
+  begin
+    pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+    if pat <> nil then
+    begin
+      FTrkHovGoalRow := Trunc((Y - TRK_HDR) / TRK_ROWH + FTrkGridScroll);
+      FTrkHovGoalCol := (X - TRK_GUT) div TRK_COLW + FTrkGridChnScroll;
+      if (FTrkHovGoalRow >= pat.Rows) or (FTrkHovGoalCol >= pat.Channels) then
+      begin
+        FTrkHovGoalRow := -1;
+        FTrkHovGoalCol := -1;
+      end;
+    end;
+  end;
+end;
+
+procedure TfrmMain.pbTrackerMouseLeave(Sender: TObject);
+begin
+  if pbTracker.Hint <> '' then
+  begin
+    pbTracker.Hint := '';
+    pbTracker.ShowHint := False;
+    Application.CancelHint;
+  end;
+  FTrkHovGoalRow := -1;
+  FTrkHovGoalCol := -1;
 end;
 
 { Mouse wheel over the pattern grid scrolls the row view manually (each
   notch = 3 rows), overriding auto-follow-selection/playback until the user
-  switches pattern or picks a fresh cell - see FTrkGridRowScroll. Shift+wheel
+  switches pattern or moves the cursor - see FTrkGridRowScroll. Shift+wheel
   scrolls the channel columns instead, mirroring pbTimelineMouseWheel's
   Shift-for-horizontal convention. }
 procedure TfrmMain.pbTrackerMouseWheel(Sender: TObject; Shift: TShiftState;
   WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
 const
-  ROWH = 16;
-  HDR = 20;
   ROWS_PER_NOTCH = 3;
 var
   pat: TTrackerPattern;
@@ -18062,7 +29677,7 @@ begin
     Handled := True;
     Exit;
   end;
-  visRows := Max(1, (pbTracker.Height - HDR) div ROWH);
+  visRows := Max(1, (pbTracker.Height - TRK_HDR) div TRK_ROWH);
   maxFirstRow := Max(0, pat.Rows - visRows);
   if FTrkGridRowScroll < 0 then
     FTrkGridRowScroll := EnsureRange(FTrkSelRow - visRows div 2, 0, maxFirstRow);
@@ -18072,6 +29687,52 @@ begin
     FTrkGridRowScroll := Min(maxFirstRow, FTrkGridRowScroll + ROWS_PER_NOTCH);
   pbTracker.Invalidate;
   Handled := True;
+end;
+
+{ Glides every animated part of the pattern grid toward where it belongs: the
+  cell cursor, its field marker, the row scroll, the playing-row bar and the
+  hover highlight (the same easing the menus use for their highlight), and
+  keeps the glow pulsing. Does nothing unless the grid is on screen. }
+procedure TfrmMain.tmrTrkAnimTimer(Sender: TObject);
+
+  procedure Approach(var AValue: Double; AGoal, ARate: Double);
+  begin
+    if Abs(AGoal - AValue) < 0.004 then AValue := AGoal
+    else AValue := AValue + (AGoal - AValue) * ARate;
+  end;
+
+var
+  fi, goalRow: Integer;
+begin
+  if (FProject = nil) or not pbTracker.Visible or not TabIs(tabTracker) or
+     (pgcTrk.ActivePage <> tsTrkModule) then Exit;
+  FTrkPhase := FTrkPhase + 0.09;
+  Approach(FTrkAnimRow, FTrkSelRow, 0.35);
+  Approach(FTrkAnimCol, FTrkSelChn, 0.35);
+  fi := EnsureRange(FTrkField, 0, 4);
+  Approach(FTrkAnimFx, FTrkCharW * TRK_FLD_OFF[fi], 0.4);
+  Approach(FTrkAnimFw, FTrkCharW * TRK_FLD_LEN[fi], 0.4);
+  Approach(FTrkGridScroll, FTrkGoalFirstRow, 0.28);
+  if FTrkPlaying and (FTrkPlayer <> nil) then
+  begin
+    goalRow := FTrkPlayer.CurrentRow;
+    if Abs(goalRow - FTrkPlayGlide) > 8 then FTrkPlayGlide := goalRow
+    else Approach(FTrkPlayGlide, goalRow, 0.5);
+  end;
+  if FTrkHovGoalRow >= 0 then
+  begin
+    if FTrkHovAlpha < 0.05 then
+    begin
+      FTrkHovRow := FTrkHovGoalRow;
+      FTrkHovCol := FTrkHovGoalCol;
+    end;
+    Approach(FTrkHovRow, FTrkHovGoalRow, 0.45);
+    Approach(FTrkHovCol, FTrkHovGoalCol, 0.45);
+    Approach(FTrkHovAlpha, 1, 0.3);
+  end
+  else
+    Approach(FTrkHovAlpha, 0, 0.25);
+  pbTracker.Invalidate;
 end;
 
 procedure TfrmMain.sbTrkChnChange(Sender: TObject);
@@ -18100,9 +29761,32 @@ begin
   finally
     cboTrkInstrSel.Items.EndUpdate;
   end;
+  { the same list on the Module page, beside the BPM }
+  cboTrkInstr.Items.BeginUpdate;
+  try
+    cboTrkInstr.Items.Clear;
+    for i := 1 to m.InstrumentCount do
+      cboTrkInstr.Items.Add(Format('%2d  %s', [i, m.GetInstrument(i).Name]));
+  finally
+    cboTrkInstr.Items.EndUpdate;
+  end;
   if FTrkInstrIndex > m.InstrumentCount then FTrkInstrIndex := m.InstrumentCount;
   if (FTrkInstrIndex < 1) and (m.InstrumentCount > 0) then FTrkInstrIndex := 1;
   cboTrkInstrSel.ItemIndex := FTrkInstrIndex - 1;
+  cboTrkInstrSelChange(nil);
+end;
+
+{ picking an instrument beside the BPM selects it everywhere: it is the instrument newly entered
+  notes get, and the one shown on the Instruments page }
+procedure TfrmMain.cboTrkInstrPickChange(Sender: TObject);
+begin
+  if FTrkInstrSync then Exit;
+  FTrkInstrSync := True;
+  try
+    cboTrkInstrSel.ItemIndex := cboTrkInstr.ItemIndex;
+  finally
+    FTrkInstrSync := False;
+  end;
   cboTrkInstrSelChange(nil);
 end;
 
@@ -18111,14 +29795,24 @@ var
   instr: TTrackerInstrument;
 begin
   FTrkInstrIndex := cboTrkInstrSel.ItemIndex + 1;
+  if not FTrkInstrSync then
+  begin
+    FTrkInstrSync := True;
+    try
+      cboTrkInstr.ItemIndex := cboTrkInstrSel.ItemIndex;
+    finally
+      FTrkInstrSync := False;
+    end;
+  end;
   if FProject = nil then Exit;
   instr := FProject.Tracker.GetInstrument(FTrkInstrIndex);
   if instr = nil then
     lblTrkInstrInfo.Caption := '(no instrument selected)'
   else
     lblTrkInstrInfo.Caption := instr.Describe;
-  btnTrkInstrAddTimeline.Enabled := (instr <> nil) and (instr.FrameCount > 0);
-  btnTrkInstrSaveWav.Enabled := btnTrkInstrAddTimeline.Enabled;
+  ibTrkInstr.SetButtonEnabled(0, (instr <> nil) and (instr.FrameCount > 0));
+  ibTrkInstr.SetButtonEnabled(1, (instr <> nil) and (instr.FrameCount > 0));
+  ibTrkInstr.SetButtonEnabled(2, (instr <> nil) and (instr.FrameCount > 0));
   pbTrkInstrWave.Invalidate;
 end;
 
@@ -18285,6 +29979,75 @@ end;
   Supported SFX (WAV) tab; FLAC is integer-only so a float choice becomes
   24-bit there. WAV gets smpl (loop/root note) + LIST/INFO (all applied
   settings) chunks; PCM/FLAC get a <file>.txt sidecar with the same text. }
+{ the Instruments page icon bar: add to Timeline / export sample }
+procedure TfrmMain.ibTrkInstrClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if AId = 'add' then btnTrkInstrAddTimelineClick(nil)
+  else if AId = 'export' then btnTrkInstrSaveWavClick(nil)
+  else if AId = 'wavedit' then TrkInstrEditWav;
+end;
+
+procedure TfrmMain.pbTrkInstrWaveDblClick(Sender: TObject);
+begin
+  TrkInstrEditWav;
+end;
+
+{ Opens the selected instrument's sound in the WAV editor. The sound goes to the cache as a WAV;
+  on OK the edited WAV replaces the instrument's sample (loop points are kept, clamped to the new
+  length), on Cancel the instrument is untouched. }
+procedure TfrmMain.TrkInstrEditWav;
+var
+  instr: TTrackerInstrument;
+  planar, edited: TAudioPlanar;
+  mono: TAudioSampleArray;
+  cacheDir, srcWav, newPath: string;
+  ch, rate, i, c, n, oldLen, ls, le: Integer;
+begin
+  if FProject = nil then Exit;
+  instr := FProject.Tracker.GetInstrument(FTrkInstrIndex);
+  if (instr = nil) or (instr.FrameCount = 0) then Exit;
+  cacheDir := IncludeTrailingPathDelimiter(App.Paths.Cache) + 'instrument-edit' + PathDelim;
+  srcWav := cacheDir + Format('instr%.2d-%s.wav', [FTrkInstrIndex, FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
+  try
+    ForceDirectories(cacheDir);
+    SetLength(planar, 1);
+    planar[0] := Copy(instr.Data);
+    SaveWavFile(srcWav, planar, 1, instr.SampleRate, instr.FrameCount, wsfFloat32);
+    planar := nil;
+    if not TfrmInstrumentEditor.EditFile(Self, Format('%.2d  %s', [FTrkInstrIndex, instr.Name]), srcWav,
+         $0060C0A0, cacheDir, newPath) then
+      Exit;
+    edited := LoadWavFile(newPath, ch, rate);
+    if (ch < 1) or (Length(edited) = 0) or (Length(edited[0]) = 0) then Exit;
+    n := Length(edited[0]);
+    SetLength(mono, n);
+    for i := 0 to n - 1 do
+    begin
+      mono[i] := edited[0][i];
+      for c := 1 to ch - 1 do mono[i] := mono[i] + edited[c][i];
+      if ch > 1 then mono[i] := mono[i] / ch;
+    end;
+    oldLen := instr.FrameCount;
+    ls := instr.LoopStart;
+    le := instr.LoopEnd;
+    instr.SetData(mono, rate);
+    if oldLen = n then
+    begin
+      instr.LoopStart := ls;
+      instr.LoopEnd := le;
+    end;
+    FProject.Touch;
+    cboTrkInstrSelChange(nil);
+    lblTrkInstrInfo.Caption := 'edited in the WAV editor  --  ' + instr.Describe;
+    Logger.Info('ui', 'Tracker instrument edited in the WAV editor: ' + instr.Name);
+  except
+    on E: Exception do
+      MessageDlg('WAV editor failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+  end;
+  DeleteFile(srcWav);
+  if newPath <> '' then DeleteFile(newPath);
+end;
+
 procedure TfrmMain.btnTrkInstrSaveWavClick(Sender: TObject);
 var
   instr: TTrackerInstrument;
@@ -18405,18 +30168,16 @@ procedure TfrmMain.pbTrkInstrWavePaint(Sender: TObject);
 const
   MARGIN = 8;
 var
-  cv: TCanvas;
+  cv: TGLCanvas;
   w, h, midY, i, x0, x1, px: Integer;
   instr: TTrackerInstrument;
   lo, hi, v: Single;
   framesPerPx: Double;
 begin
-  if FTrkInstrWaveBuffer = nil then Exit;
   w := pbTrkInstrWave.Width;
   h := pbTrkInstrWave.Height;
   if (w <= 0) or (h <= 0) then Exit;
-  FTrkInstrWaveBuffer.SetSize(w, h);
-  cv := FTrkInstrWaveBuffer.Canvas;
+  cv := pbTrkInstrWave.GL;
   cv.Brush.Style := bsSolid;
   cv.Brush.Color := $00181818;
   cv.FillRect(Rect(0, 0, w, h));
@@ -18454,36 +30215,89 @@ begin
       cv.LineTo(MARGIN + px, midY - Round(lo * (h div 2 - MARGIN)));
     end;
   end;
-  pbTrkInstrWave.Canvas.Draw(0, 0, FTrkInstrWaveBuffer);
 end;
 
 procedure TfrmMain.pbTrackerPaint(Sender: TObject);
-const
-  ROWH = 16;
-  COLW = 96;
-  HDR = 20;
-  GUT = 40;
 var
-  cv: TCanvas;
-  w, h, r, c, y, x, firstRow, visRows, firstChn, lastChn: Integer;
+  cv: TGLCanvas;
+  th: TUDAWTheme;
+  m: TTrackerModule;
   pat: TTrackerPattern;
   cell: TTrackerCell;
-  txt: string;
-  playingHere: Boolean;
-  playRow: Integer;
+  fx: TTrackerChannelFx;
+  w, h, r, c, y, x, ty, visRows, firstChn, lastChn, cw, k, rFirst, rLast, goalFirst, playRow, xs, ys, fxx: Integer;
+  scroll, pulse, lv: Double;
+  playingHere, muted, selChn: Boolean;
+  col, ledCol, base: TColor;
+  s: string;
+  rc: TRect;
+  mi, mLit: Integer;
+  mFrac, mSegW: Double;
+  rgR0, rgC0, rgR1, rgC1: Integer;
+
+  function T(ARole: TTrkColorRole): TColor;
+  begin
+    Result := th.Trk[Ord(ARole)];
+  end;
+
+  procedure Txt(AX, AY: Integer; const AText: string; AColor: TColor);
+  begin
+    cv.Font.Color := AColor;
+    cv.TextOut(AX, AY, AText);
+  end;
+
+  { a raised, glossy header button }
+  procedure Btn(const R: TRect; AActive: Boolean; AColor: TColor);
+  var
+    b: TColor;
+  begin
+    if AActive then b := TrkMix(T(tcHeader), AColor, 0.55) else b := TrkMix(T(tcHeader), clBlack, 0.25);
+    cv.Alpha := 1;
+    cv.GradientRect(R, TrkMix(b, clWhite, 0.24), TrkMix(b, clBlack, 0.22));
+    cv.Brush.Color := clWhite;
+    cv.Alpha := 0.40;
+    cv.FillRect(Rect(R.Left + 1, R.Top, R.Right - 1, R.Top + 1));
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.70;
+    cv.FillRect(Rect(R.Left, R.Bottom - 1, R.Right, R.Bottom));
+    cv.FillRect(Rect(R.Right - 1, R.Top + 1, R.Right, R.Bottom));
+    cv.Alpha := 1;
+  end;
+
+  function CellField(const ACell: TTrackerCell; AField: Integer; out AColor: TColor): string;
+  begin
+    case AField of
+      0: begin
+           Result := NoteName(ACell.Note);
+           if ACell.Note = TRK_NOTE_NONE then AColor := T(tcEmpty)
+           else if ACell.Note = TRK_NOTE_OFF then AColor := T(tcNoteOff)
+           else if ACell.Note = TRK_NOTE_CUT then AColor := T(tcNoteCut)
+           else AColor := T(tcNote);
+         end;
+      1: if ACell.Instrument = TRK_INSTR_NONE then begin Result := '..'; AColor := T(tcEmpty); end
+         else begin Result := IntToHex(ACell.Instrument, 2); AColor := T(tcInstrument); end;
+      2: if ACell.Volume > TRK_VOL_MAX then begin Result := '..'; AColor := T(tcEmpty); end
+         else begin Result := IntToHex(ACell.Volume, 2); AColor := T(tcVolume); end;
+      3: if ACell.Effect = tfxNone then begin Result := '.'; AColor := T(tcEmpty); end
+         else begin Result := EffectLetter(ACell.Effect); AColor := T(tcEffect); end;
+    else
+      if (ACell.Effect = tfxNone) and (ACell.Param = 0) then begin Result := '..'; AColor := T(tcEmpty); end
+      else begin Result := IntToHex(ACell.Param, 2); AColor := T(tcParam); end;
+    end;
+  end;
+
 begin
-  if FTrkPatternBuffer = nil then Exit;
   w := pbTracker.Width;
   h := pbTracker.Height;
   if (w <= 0) or (h <= 0) then Exit;
-  FTrkPatternBuffer.SetSize(w, h);
-  cv := FTrkPatternBuffer.Canvas;
-  try
+  th := CurrentTheme;
+  cv := pbTracker.GL;
+  cv.Alpha := 1;
   cv.Brush.Style := bsSolid;
-  cv.Brush.Color := $00181818;
-  cv.FillRect(Rect(0, 0, w, h));
+  cv.GradientRect(Rect(0, 0, w, h), T(tcGridTop), T(tcGridBottom));
   if FProject = nil then Exit;
-  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  m := FProject.Tracker;
+  pat := m.GetPattern(SelectedTrackerPattern);
   if pat = nil then Exit;
 
   playingHere := FTrkPlaying and (FTrkPlayer <> nil) and
@@ -18493,81 +30307,925 @@ begin
 
   cv.Font.Name := 'Consolas';
   cv.Font.Size := 9;
+  cw := cv.TextWidth('0');
+  if cw < 5 then cw := 7;
+  FTrkCharW := cw;
 
-  visRows := (h - HDR) div ROWH;
-  { manual mouse-wheel scroll (FTrkGridRowScroll >= 0) sticks until the user
-    switches pattern or clicks a cell; playback always overrides it so the
-    moving playhead stays visible; otherwise fall back to centering on the
-    selected row. }
-  if playingHere then
-    firstRow := playRow - visRows div 2
-  else if FTrkGridRowScroll >= 0 then
-    firstRow := FTrkGridRowScroll
-  else
-    firstRow := FTrkSelRow - visRows div 2;
-  if firstRow < 0 then firstRow := 0;
-  if firstRow + visRows > pat.Rows then firstRow := Max(0, pat.Rows - visRows);
-  FTrkGridLastFirstRow := firstRow;
+  { the row the view wants at its top: follows playback, else the wheel, else the cursor }
+  visRows := Max(1, (h - TRK_HDR) div TRK_ROWH);
+  if playingHere then goalFirst := playRow - visRows div 2
+  else if FTrkGridRowScroll >= 0 then goalFirst := FTrkGridRowScroll
+  else goalFirst := FTrkSelRow - visRows div 2;
+  if goalFirst + visRows > pat.Rows then goalFirst := pat.Rows - visRows;
+  if goalFirst < 0 then goalFirst := 0;
+  FTrkGoalFirstRow := goalFirst;
+  if not FTrkAnimInit then
+  begin
+    FTrkAnimInit := True;
+    FTrkGridScroll := goalFirst;
+    FTrkAnimRow := FTrkSelRow;
+    FTrkAnimCol := FTrkSelChn;
+    FTrkPlayGlide := Max(0, playRow);
+  end;
+  scroll := FTrkGridScroll;
+  FTrkGridLastScroll := scroll;
+  FTrkGridLastFirstRow := Trunc(scroll);
 
   firstChn := Min(FTrkGridChnScroll, Max(0, pat.Channels - 1));
-  lastChn := Min(pat.Channels - 1, firstChn + (w - GUT) div COLW);
+  lastChn := Min(pat.Channels - 1, firstChn + (w - TRK_GUT) div TRK_COLW);
+  rFirst := Max(0, Trunc(scroll));
+  rLast := Min(pat.Rows - 1, Trunc(scroll) + visRows + 1);
+  pulse := 0.5 + 0.5 * FastSin(FTrkPhase);
 
-  cv.Brush.Style := bsClear;
-  cv.Font.Color := $00909090;
-  for c := firstChn to lastChn do
-    cv.TextOut(GUT + (c - firstChn) * COLW, 2, Format('Ch %d', [c + 1]));
+  cv.PushClip(Rect(0, TRK_HDR, w, h));
 
-  for r := firstRow to Min(pat.Rows - 1, firstRow + visRows) do
+  { row bands: every 4th row (beat) and 16th (bar) lifted, each with a lit top edge and a dark foot }
+  for r := rFirst to rLast do
   begin
-    y := HDR + (r - firstRow) * ROWH;
-    if (r mod 4) = 0 then
+    y := TRK_HDR + Round((r - scroll) * TRK_ROWH);
+    if (r mod 16) = 0 then
     begin
-      cv.Brush.Style := bsSolid;
-      cv.Brush.Color := $00222228;
-      cv.FillRect(Rect(0, y, w, y + ROWH));
-      cv.Brush.Style := bsClear;
-    end;
-    cv.Font.Color := $00707070;
-    cv.TextOut(4, y, IntToHex(r, 2));
-
-    if r = playRow then
+      cv.Alpha := 0.30;
+      cv.GradientRect(Rect(TRK_GUT, y, w, y + TRK_ROWH), T(tcBarRow), T(tcBeatRow));
+    end
+    else if (r mod 4) = 0 then
     begin
-      cv.Brush.Style := bsSolid;
-      cv.Brush.Color := $00204020;
-      cv.FillRect(Rect(0, y, w, y + ROWH));
-      cv.Brush.Style := bsClear;
+      cv.Alpha := 0.16;
+      cv.GradientRect(Rect(TRK_GUT, y, w, y + TRK_ROWH), T(tcBeatRow), TrkMix(T(tcBeatRow), clBlack, 0.5));
     end;
+    cv.Brush.Color := clWhite;
+    cv.Alpha := 0.04;
+    cv.FillRect(Rect(TRK_GUT, y, w, y + 1));
+    cv.Brush.Color := T(tcLines);
+    cv.Alpha := 0.55;
+    cv.FillRect(Rect(TRK_GUT, y + TRK_ROWH - 1, w, y + TRK_ROWH));
+  end;
 
+  { channel columns: a groove between them, a tint that follows each channel's own level }
+  for c := firstChn to lastChn do
+  begin
+    x := TRK_GUT + (c - firstChn) * TRK_COLW;
+    lv := 0;
+    if FTrkPlaying and (FTrkPlayer <> nil) and not FTrkPaused then lv := FTrkPlayer.ChannelLevel(c);
+    if lv > 0.02 then
+    begin
+      cv.Alpha := Min(0.20, lv * 0.28);
+      cv.GradientRect(Rect(x, TRK_HDR, x + TRK_COLW, h), T(tcPlaying), TrkMix(T(tcPlaying), clBlack, 0.6));
+    end;
+    if m.ChannelMuted(c) then
+    begin
+      cv.Brush.Color := clBlack;
+      cv.Alpha := 0.32;
+      cv.FillRect(Rect(x, TRK_HDR, x + TRK_COLW, h));
+    end;
+    cv.Brush.Color := T(tcLines);
+    cv.Alpha := 0.75;
+    cv.FillRect(Rect(x + TRK_COLW - 2, TRK_HDR, x + TRK_COLW - 1, h));
+    cv.Brush.Color := clWhite;
+    cv.Alpha := 0.07;
+    cv.FillRect(Rect(x + TRK_COLW - 1, TRK_HDR, x + TRK_COLW, h));
+  end;
+  cv.Alpha := 1;
+
+  { the playing row: a glowing bar that glides from row to row }
+  if playingHere then
+  begin
+    y := TRK_HDR + Round((FTrkPlayGlide - scroll) * TRK_ROWH);
+    cv.Brush.Color := T(tcPlaying);
+    for k := 3 downto 1 do
+    begin
+      cv.Alpha := 0.045 * (4 - k) * (0.6 + 0.4 * pulse);
+      cv.FillRect(Rect(TRK_GUT, y - k * 3, w, y + TRK_ROWH + k * 3));
+    end;
+    cv.Alpha := 0.36 + 0.12 * pulse;
+    cv.GradientRect(Rect(TRK_GUT, y, w, y + TRK_ROWH), TrkMix(T(tcPlaying), clWhite, 0.25), T(tcPlaying));
+    cv.Alpha := 0.9;
+    cv.Brush.Color := TrkMix(T(tcPlaying), clWhite, 0.55);
+    cv.FillRect(Rect(TRK_GUT, y, w, y + 1));
+    cv.Brush.Color := T(tcPlaying);
+    cv.FillRect(Rect(TRK_GUT, y + TRK_ROWH - 1, w, y + TRK_ROWH));
+    cv.Alpha := 1;
+  end;
+
+  { the area marked with the right mouse button }
+  if TrkRegion(rgR0, rgC0, rgR1, rgC1) and FTrkRgnOn then
+  begin
+    xs := TRK_GUT + (rgC0 - firstChn) * TRK_COLW;
+    ys := TRK_HDR + Round((rgR0 - scroll) * TRK_ROWH);
+    cv.Brush.Color := T(tcCursor);
+    cv.Alpha := 0.22;
+    cv.FillRect(Rect(xs, ys, xs + (rgC1 - rgC0 + 1) * TRK_COLW - 2, ys + (rgR1 - rgR0 + 1) * TRK_ROWH));
+    cv.Alpha := 0.9;
+    cv.FillRect(Rect(xs, ys, xs + (rgC1 - rgC0 + 1) * TRK_COLW - 2, ys + 1));
+    cv.FillRect(Rect(xs, ys + (rgR1 - rgR0 + 1) * TRK_ROWH - 1, xs + (rgC1 - rgC0 + 1) * TRK_COLW - 2,
+      ys + (rgR1 - rgR0 + 1) * TRK_ROWH));
+    cv.FillRect(Rect(xs, ys, xs + 1, ys + (rgR1 - rgR0 + 1) * TRK_ROWH));
+    cv.FillRect(Rect(xs + (rgC1 - rgC0 + 1) * TRK_COLW - 3, ys, xs + (rgC1 - rgC0 + 1) * TRK_COLW - 2,
+      ys + (rgR1 - rgR0 + 1) * TRK_ROWH));
+    cv.Alpha := 1;
+  end;
+
+  { hover: a soft highlight that follows the mouse }
+  if FTrkHovAlpha > 0.02 then
+  begin
+    xs := TRK_GUT + Round((FTrkHovCol - firstChn) * TRK_COLW);
+    ys := TRK_HDR + Round((FTrkHovRow - scroll) * TRK_ROWH);
+    cv.Brush.Color := T(tcHover);
+    cv.Alpha := 0.10 * FTrkHovAlpha;
+    cv.RoundRect(xs, ys, xs + TRK_COLW - 2, ys + TRK_ROWH, 6, 6);
+    cv.Alpha := 0.20 * FTrkHovAlpha;
+    cv.FillRect(Rect(xs + 3, ys, xs + TRK_COLW - 5, ys + 1));
+    cv.Alpha := 1;
+  end;
+
+  { the cursor: a lit glass pill that glides between cells, with a marker on the field being edited }
+  xs := TRK_GUT + Round((FTrkAnimCol - firstChn) * TRK_COLW);
+  ys := TRK_HDR + Round((FTrkAnimRow - scroll) * TRK_ROWH);
+  if (FTrkAnimCol > firstChn - 1.5) and (FTrkAnimCol < lastChn + 1.5) then
+  begin
+    cv.Brush.Color := T(tcCursor);
+    for k := 3 downto 1 do
+    begin
+      cv.Alpha := (0.03 + 0.05 * pulse) * (4 - k) / 2;
+      cv.RoundRect(xs - k * 2, ys - k, xs + TRK_COLW - 2 + k * 2, ys + TRK_ROWH + k, 9, 9);
+    end;
+    cv.Alpha := 0.60;
+    cv.GradientRect(Rect(xs, ys, xs + TRK_COLW - 2, ys + TRK_ROWH),
+      TrkMix(T(tcCursor), clWhite, 0.28), TrkMix(T(tcCursor), clBlack, 0.38));
+    cv.Alpha := 0.55;
+    cv.Brush.Color := clWhite;
+    cv.FillRect(Rect(xs + 1, ys, xs + TRK_COLW - 3, ys + 1));
+    cv.Brush.Color := T(tcCursor);
+    cv.Alpha := 0.95;
+    cv.FillRect(Rect(xs, ys, xs + 1, ys + TRK_ROWH));
+    cv.FillRect(Rect(xs + TRK_COLW - 3, ys, xs + TRK_COLW - 2, ys + TRK_ROWH));
+    cv.Brush.Color := T(tcCursorField);
+    cv.Alpha := 0.50 + 0.20 * pulse;
+    fxx := xs + 2 + Round(FTrkAnimFx);
+    cv.RoundRect(fxx - 1, ys + 1, fxx + Round(FTrkAnimFw) + 1, ys + TRK_ROWH - 1, 5, 5);
+    cv.Alpha := 1;
+    cv.FillRect(Rect(fxx, ys + TRK_ROWH - 3, fxx + Round(FTrkAnimFw), ys + TRK_ROWH - 1));
+  end;
+  cv.Alpha := 1;
+
+  { the row-number gutter }
+  cv.GradientRect(Rect(0, TRK_HDR, TRK_GUT, h), TrkMix(T(tcGutter), clWhite, 0.06), TrkMix(T(tcGutter), clBlack, 0.3));
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.14;
+  cv.FillRect(Rect(TRK_GUT - 2, TRK_HDR, TRK_GUT - 1, h));
+  cv.Brush.Color := clBlack;
+  cv.Alpha := 0.6;
+  cv.FillRect(Rect(TRK_GUT - 1, TRK_HDR, TRK_GUT, h));
+  cv.Alpha := 1;
+  cv.Brush.Style := bsClear;
+
+  { cell text, colour coded by field; a muted channel is dimmed }
+  ty := (TRK_ROWH - cv.TextHeight('0')) div 2;
+  for r := rFirst to rLast do
+  begin
+    y := TRK_HDR + Round((r - scroll) * TRK_ROWH);
+    if (r = FTrkSelRow) or (r = playRow) then col := T(tcHeaderText) else col := T(tcRowNumber);
+    Txt(TRK_GUT - 6 - cv.TextWidth(IntToHex(r, 2)), y + ty, IntToHex(r, 2), col);
     for c := firstChn to lastChn do
     begin
-      x := GUT + (c - firstChn) * COLW;
-      if (r = FTrkSelRow) and (c = FTrkSelChn) then
-      begin
-        cv.Brush.Style := bsSolid;
-        cv.Brush.Color := $00404830;
-        cv.FillRect(Rect(x - 2, y, x + COLW - 4, y + ROWH));
-        cv.Brush.Style := bsClear;
-      end;
+      x := TRK_GUT + (c - firstChn) * TRK_COLW + 2;
       cell := pat.GetCell(r, c);
-      if cell.IsEmpty then
-        txt := '... .. .. ...'
-      else
+      muted := m.ChannelMuted(c);
+      for k := 0 to 4 do
       begin
-        txt := NoteName(cell.Note) + ' ';
-        if cell.Instrument = TRK_INSTR_NONE then txt := txt + '.. '
-        else txt := txt + IntToHex(cell.Instrument, 2) + ' ';
-        if cell.Volume > TRK_VOL_MAX then txt := txt + '.. '
-        else txt := txt + IntToHex(cell.Volume, 2) + ' ';
-        if (cell.Effect = tfxNone) and (cell.Param = 0) then txt := txt + '...'
-        else txt := txt + EffectLetter(cell.Effect) + IntToHex(cell.Param, 2);
+        s := CellField(cell, k, col);
+        if muted then col := TrkMix(col, T(tcGridBottom), 0.6);
+        Txt(x + cw * TRK_FLD_OFF[k], y + ty, s, col);
       end;
-      if cell.IsEmpty then cv.Font.Color := $00505050 else cv.Font.Color := $00D8D8D8;
-      cv.TextOut(x, y, txt);
     end;
   end;
-  finally
-    pbTracker.Canvas.Draw(0, 0, FTrkPatternBuffer);
+  cv.PopClip;
+
+  { the channel headers: raised plates holding the channel number, Mute, Effect and a level LED }
+  cv.Brush.Style := bsSolid;
+  cv.Alpha := 1;
+  cv.GradientRect(Rect(0, 0, TRK_GUT, TRK_HDR), TrkMix(T(tcHeader), clWhite, 0.12), TrkMix(T(tcHeader), clBlack, 0.4));
+  cv.Brush.Style := bsClear;
+  Txt(6, 4, 'Oct', T(tcRowNumber));
+  Txt(6, 20, IntToStr(FTrkOctave), T(tcHeaderText));
+  cv.Brush.Style := bsSolid;
+  for c := firstChn to lastChn do
+  begin
+    x := TRK_GUT + (c - firstChn) * TRK_COLW;
+    selChn := c = FTrkSelChn;
+    muted := m.ChannelMuted(c);
+    fx := TrkChannelFxOf(c);
+    cv.Alpha := 1;
+    cv.GradientRect(Rect(x, 0, x + TRK_COLW - 1, TRK_HDR),
+      TrkMix(T(tcHeader), clWhite, IfThen(selChn, 0.30, 0.15)), TrkMix(T(tcHeader), clBlack, 0.38));
+    cv.Brush.Color := clWhite;
+    cv.Alpha := 0.45;
+    cv.FillRect(Rect(x, 0, x + TRK_COLW - 1, 1));
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.8;
+    cv.FillRect(Rect(x + TRK_COLW - 1, 0, x + TRK_COLW, TRK_HDR));
+    cv.FillRect(Rect(x, TRK_HDR - 1, x + TRK_COLW, TRK_HDR));
+    if selChn then
+    begin
+      cv.Brush.Color := T(tcCursor);
+      cv.Alpha := 0.9;
+      cv.FillRect(Rect(x, TRK_HDR - 3, x + TRK_COLW - 1, TRK_HDR - 1));
+    end;
+    cv.Alpha := 1;
+    cv.Brush.Style := bsClear;
+    if muted then col := TrkMix(T(tcHeaderText), T(tcMuted), 0.5) else col := T(tcHeaderText);
+    Txt(x + 6, 3, Format('Ch %d', [c + 1]), col);
+    if fx.Kind <> '' then
+    begin
+      cv.Font.Size := 8;
+      Txt(x + 54, 4, Copy(fx.Name, 1, 8), T(tcFxActive));
+      cv.Font.Size := 9;
+    end;
+    cv.Brush.Style := bsSolid;
+
+    { Mute: a speaker, struck through while the channel is muted }
+    rc := Rect(x + 4, TRK_BTN_Y1, x + 26, TRK_BTN_Y2);
+    Btn(rc, muted, T(tcMuted));
+    if muted then col := TrkMix(T(tcMuted), clWhite, 0.45) else col := T(tcHeaderText);
+    TGLIconBar.DrawIcon(cv, 'mute', rc, col);
+    if muted then
+    begin
+      cv.Pen.Color := col;
+      cv.Pen.Width := 2;
+      cv.MoveTo(rc.Left + 4, rc.Top + 3);
+      cv.LineTo(rc.Right - 4, rc.Bottom - 3);
+      cv.Pen.Width := 1;
+    end;
+
+    { Effect: lit while the channel has one }
+    rc := Rect(x + 30, TRK_BTN_Y1, x + 52, TRK_BTN_Y2);
+    Btn(rc, fx.Kind <> '', T(tcFxActive));
+    if fx.Kind <> '' then col := TrkMix(T(tcFxActive), clWhite, 0.4) else col := T(tcHeaderText);
+    TGLIconBar.DrawIcon(cv, 'fx', rc, col);
+
+    { Mixer: opens the Mixer on this channel's strip }
+    rc := Rect(x + 56, TRK_BTN_Y1, x + 78, TRK_BTN_Y2);
+    Btn(rc, False, T(tcFxActive));
+    TGLIconBar.DrawIcon(cv, 'mixer', rc, T(tcHeaderText));
+
+    { level meter under the buttons, like the Timeline header's: -60..0 dB over 28 segments,
+      green, then amber, then red; instant rise, steady fall; dim when unlit }
+    lv := 0;
+    if FTrkPlaying and (FTrkPlayer <> nil) and not FTrkPaused then lv := FTrkPlayer.ChannelLevel(c);
+    if Length(FTrkMeter) < pat.Channels then SetLength(FTrkMeter, pat.Channels);
+    if lv > 0.000001 then mFrac := EnsureRange((20 * FastLog10(lv) + 60) / 60, 0, 1) else mFrac := 0;
+    if mFrac >= FTrkMeter[c] then FTrkMeter[c] := mFrac
+    else FTrkMeter[c] := Max(mFrac, FTrkMeter[c] - 0.07);
+    mLit := Round(FTrkMeter[c] * TRK_METER_SEGS);
+    mSegW := (TRK_COLW - 12) / TRK_METER_SEGS;
+    base := TrkMix(T(tcHeader), clBlack, 0.7);
+    cv.Pen.Style := psClear;
+    cv.Alpha := 1;
+    for mi := 0 to TRK_METER_SEGS - 1 do
+    begin
+      if mi < TRK_METER_SEGS * 0.62 then ledCol := T(tcLedNormal)
+      else if mi < TRK_METER_SEGS * 0.86 then ledCol := T(tcLedHot)
+      else ledCol := T(tcLedPeak);
+      if mi < mLit then cv.Brush.Color := ledCol
+      else cv.Brush.Color := TrkMix(base, ledCol, 0.16);
+      cv.FillRect(Rect(x + 4 + Round(mi * mSegW), TRK_METER_Y,
+        x + 4 + Round((mi + 1) * mSegW) - 1, TRK_METER_Y + TRK_METER_H));
+    end;
+    cv.Pen.Style := psSolid;
   end;
+  cv.Alpha := 1;
+end;
+
+{ ---- Pattern grid: keyboard editing. Arrows / Tab / Home / End / PgUp / PgDn move the
+       cursor (always); notes, hex digits, effect letters and Delete edit the field under
+       the cursor, and only while playback is stopped or paused. Piano keys: Z S X D C V G
+       B H N J M are C..B of the current octave, Q 2 W 3 E R 5 T 6 Y 7 U the octave above;
+       F1 / F2 change the octave, ` is note-off, \ is note-cut. ---- }
+
+function TrkPianoSemitone(AKey: Word): Integer;
+begin
+  case AKey of
+    Ord('Z'): Result := 0;
+    Ord('S'): Result := 1;
+    Ord('X'): Result := 2;
+    Ord('D'): Result := 3;
+    Ord('C'): Result := 4;
+    Ord('V'): Result := 5;
+    Ord('G'): Result := 6;
+    Ord('B'): Result := 7;
+    Ord('H'): Result := 8;
+    Ord('N'): Result := 9;
+    Ord('J'): Result := 10;
+    Ord('M'): Result := 11;
+    Ord('Q'): Result := 12;
+    Ord('2'): Result := 13;
+    Ord('W'): Result := 14;
+    Ord('3'): Result := 15;
+    Ord('E'): Result := 16;
+    Ord('R'): Result := 17;
+    Ord('5'): Result := 18;
+    Ord('T'): Result := 19;
+    Ord('6'): Result := 20;
+    Ord('Y'): Result := 21;
+    Ord('7'): Result := 22;
+    Ord('U'): Result := 23;
+  else
+    Result := -1;
+  end;
+end;
+
+{ 0..15 for a hex digit key (top row or numeric pad), else -1 }
+function TrkHexDigit(AKey: Word): Integer;
+begin
+  if (AKey >= Ord('0')) and (AKey <= Ord('9')) then Result := AKey - Ord('0')
+  else if (AKey >= VK_NUMPAD0) and (AKey <= VK_NUMPAD9) then Result := AKey - VK_NUMPAD0
+  else if (AKey >= Ord('A')) and (AKey <= Ord('F')) then Result := 10 + AKey - Ord('A')
+  else Result := -1;
+end;
+
+procedure TfrmMain.TrkFreeAudition;
+begin
+  FreeAndNil(FTrkAudPlayer);
+  FreeAndNil(FTrkAudModule);
+end;
+
+{ Plays ACell once so the user hears the instrument at the note just typed. A scratch copy of
+  the module holds a single short pattern with just that cell, so the real song is untouched.
+  Skipped while the tracker or the Timeline is playing, since they own the output. }
+procedure TfrmMain.TrkAuditionNote(const ACell: TTrackerCell);
+const
+  AUDITION_ROWS = 16;
+var
+  pat: TTrackerPattern;
+  idx, i: Integer;
+begin
+  if (App = nil) or (App.Audio = nil) or (FProject = nil) then Exit;
+  if (FTrkPlaying and not FTrkPaused) or FTlPlaying then Exit;
+  if FProject.Tracker.GetInstrument(ACell.Instrument) = nil then Exit;
+  App.Audio.ClearSource;
+  TrkFreeAudition;
+  FTrkAudModule := FProject.Tracker.Clone;
+  { heard once: a looped sample would otherwise ring on until the next note }
+  for i := 1 to FTrkAudModule.InstrumentCount do
+    FTrkAudModule.GetInstrument(i).LoopMode := tlmOff;
+  pat := FTrkAudModule.AddPattern(AUDITION_ROWS);
+  idx := FTrkAudModule.PatternCount - 1;
+  pat.SetCell(0, 0, ACell);
+  FTrkAudModule.SetOrder(0, idx);
+  while FTrkAudModule.OrderLength > 1 do FTrkAudModule.DeleteOrder(FTrkAudModule.OrderLength - 1);
+  FTrkAudPlayer := TTrackerPlayer.Create(FTrkAudModule);
+  FTrkAudPlayer.LoopSong := False;
+  App.Audio.SetSource(FTrkAudPlayer.AsSource);
+end;
+
+{ One MIDI event from the keyboard while MIDI record is on. A note-on is written into the first
+  free channel (from the cursor's channel on) of the playing row, or of the cursor row when
+  stopped, where a chord's notes share the row; the velocity becomes the volume column and the
+  instrument is the one chosen for entry. While the module plays, releasing the key writes a
+  note-off on the row it was released on, if that cell is free. }
+procedure TfrmMain.TrkMidiRecord(const AMsg: TMidiMessage; ATimestampMs: Cardinal);
+var
+  pat: TTrackerPattern;
+  patIdx, row, ch, c, n, i: Integer;
+  cell: TTrackerCell;
+  playing, chord: Boolean;
+begin
+  if FProject = nil then Exit;
+  if not (AMsg.StatusHi in [$80, $90]) then Exit;
+  if Length(FTrkMidiNoteChn) = 0 then
+  begin
+    SetLength(FTrkMidiNoteChn, 128);
+    for i := 0 to 127 do FTrkMidiNoteChn[i] := -1;
+  end;
+  playing := FTrkPlaying and not FTrkPaused and (FTrkPlayer <> nil);
+  if playing then
+  begin
+    patIdx := FTrkPlayer.CurrentPatternIndex;
+    row := FTrkPlayer.CurrentRow;
+  end
+  else
+  begin
+    patIdx := SelectedTrackerPattern;
+    row := FTrkSelRow;
+  end;
+  pat := FProject.Tracker.GetPattern(patIdx);
+  if (pat = nil) or (row < 0) or (row >= pat.Rows) then Exit;
+
+  if AMsg.IsNoteOn then
+  begin
+    n := AMsg.NoteNumber - 11;   // tracker C-4 (49) is MIDI 60
+    if (n < TRK_NOTE_MIN) or (n > TRK_NOTE_MAX) then Exit;
+    { notes arriving together are one chord: they stay on the row the first one used }
+    chord := (not playing) and (ATimestampMs - FTrkMidiLastMs < 60);
+    if chord then row := FTrkMidiLastRow;
+    ch := -1;
+    for i := 0 to pat.Channels - 1 do
+    begin
+      c := (FTrkSelChn + i) mod pat.Channels;
+      if pat.GetCell(row, c).Note = TRK_NOTE_NONE then
+      begin
+        ch := c;
+        Break;
+      end;
+    end;
+    if ch < 0 then Exit;
+    cell := pat.GetCell(row, ch);
+    cell.Note := Byte(n);
+    if (FTrkInstrIndex > 0) and (FTrkInstrIndex <= FProject.Tracker.InstrumentCount) then
+      cell.Instrument := Byte(FTrkInstrIndex);
+    cell.Volume := Byte(Max(1, AMsg.Velocity * TRK_VOL_MAX div 127));
+    FCmds.Perform(TSetTrackerCellCommand.Create(FProject, patIdx, row, ch, cell));
+    FTrkMidiNoteChn[AMsg.NoteNumber] := ch;
+    FTrkMidiLastMs := ATimestampMs;
+    FTrkMidiLastRow := row;
+    if not playing then
+    begin
+      if cell.Instrument > 0 then TrkAuditionNote(cell);
+      if not chord then FTrkSelRow := Min(pat.Rows - 1, row + 1);
+      FTrkGridRowScroll := -1;
+      RefreshTrackerTab;
+    end;
+  end
+  else if playing then
+  begin
+    ch := FTrkMidiNoteChn[AMsg.NoteNumber];
+    if ch < 0 then Exit;
+    FTrkMidiNoteChn[AMsg.NoteNumber] := -1;
+    cell := pat.GetCell(row, ch);
+    if cell.IsEmpty then
+    begin
+      cell.Note := TRK_NOTE_OFF;
+      FCmds.Perform(TSetTrackerCellCommand.Create(FProject, patIdx, row, ch, cell));
+    end;
+  end;
+end;
+
+function TfrmMain.TrkGridKey(var Key: Word; Shift: TShiftState): Boolean;
+var
+  pat: TTrackerPattern;
+  cell: TTrackerCell;
+  semi, d, v: Integer;
+  eff: TTrackerEffect;
+  edited, advance, isDelete, shiftLetter: Boolean;
+begin
+  Result := False;
+  if FProject = nil then Exit;
+  if Shift = [ssCtrl] then
+  begin
+    { Ctrl+C / X / V / A: copy, cut, paste and select the pattern - the same as the right-click menu }
+    case Key of
+      Ord('C'): begin TrkRegionCopy; Key := 0; Exit(True); end;
+      Ord('X'): begin TrkRegionApply('Cut', True); Key := 0; Exit(True); end;
+      Ord('V'): begin TrkRegionPaste; Key := 0; Exit(True); end;
+      Ord('A'): begin pmTrkSelectAllClick(nil); Key := 0; Exit(True); end;
+    end;
+    { Ctrl+Left / Ctrl+Right: previous / next channel }
+    if (Key <> VK_LEFT) and (Key <> VK_RIGHT) then Exit;
+    pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+    if pat = nil then Exit;
+    if Key = VK_LEFT then FTrkSelChn := Max(0, FTrkSelChn - 1)
+    else FTrkSelChn := Min(pat.Channels - 1, FTrkSelChn + 1);
+    FTrkField := 0;
+    Key := 0;
+    FTrkGridRowScroll := -1;
+    TrkRevealChannel;
+    RefreshTrackerTab;
+    Exit(True);
+  end;
+  { Shift + letter in the effect column types the lower-case effects (g h k t l d p b) }
+  shiftLetter := (Shift = [ssShift]) and (FTrkField = 3) and (Key >= Ord('A')) and (Key <= Ord('Z'));
+  if (Shift <> []) and not shiftLetter then Exit;
+  pat := FProject.Tracker.GetPattern(SelectedTrackerPattern);
+  if pat = nil then Exit;
+  Result := True;
+
+  { ---- movement ---- }
+  case Key of
+    VK_UP: FTrkSelRow := Max(0, FTrkSelRow - 1);
+    VK_DOWN: FTrkSelRow := Min(pat.Rows - 1, FTrkSelRow + 1);
+    VK_PRIOR: FTrkSelRow := Max(0, FTrkSelRow - 16);
+    VK_NEXT: FTrkSelRow := Min(pat.Rows - 1, FTrkSelRow + 16);
+    VK_HOME: FTrkSelRow := 0;
+    VK_END: FTrkSelRow := pat.Rows - 1;
+    VK_LEFT:
+      if FTrkField > 0 then Dec(FTrkField)
+      else if FTrkSelChn > 0 then begin Dec(FTrkSelChn); FTrkField := 4; end;
+    VK_RIGHT:
+      if FTrkField < 4 then Inc(FTrkField)
+      else if FTrkSelChn < pat.Channels - 1 then begin Inc(FTrkSelChn); FTrkField := 0; end;
+    VK_TAB:
+      begin
+        FTrkSelChn := (FTrkSelChn + 1) mod pat.Channels;
+        FTrkField := 0;
+      end;
+    VK_F1: FTrkOctave := Max(0, FTrkOctave - 1);
+    VK_F2: FTrkOctave := Min(8, FTrkOctave + 1);
+  else
+    Result := False;
+  end;
+  if Result then
+  begin
+    FTrkGridRowScroll := -1;
+    TrkRevealChannel;
+    Key := 0;
+    RefreshTrackerTab;
+    Exit;
+  end;
+
+  { ---- editing ---- }
+  isDelete := (Key = VK_DELETE) or (Key = VK_BACK);
+  d := TrkHexDigit(Key);
+  semi := -1;
+  if FTrkField = 0 then semi := TrkPianoSemitone(Key);
+  eff := tfxNone;
+  if not (isDelete or (Key = VK_RETURN) or (semi >= 0) or (Key = VK_OEM_3) or (Key = VK_OEM_5) or
+          ((FTrkField in [1, 2, 4]) and (d >= 0)) or
+          ((FTrkField = 3) and (Key >= Ord('A')) and (Key <= Ord('Z')) and
+           EffectFromLetter(IfThen(shiftLetter, Chr(Key + 32), Chr(Key))[1], eff))) then
+    Exit;   // not a key the grid uses - leave it to the rest of the application
+  Result := True;
+  Key := 0;
+  if isDelete and FTrkRgnOn then
+  begin
+    TrkRegionApply('Delete', False);   // an area is marked: Delete empties all of it
+    Exit;
+  end;
+  if not TrkEditAllowed then Exit;
+
+  cell := pat.GetCell(FTrkSelRow, FTrkSelChn);
+  edited := True;
+  advance := False;
+  case FTrkField of
+    0:
+      if isDelete then cell.Note := TRK_NOTE_NONE
+      else if semi >= 0 then
+      begin
+        cell.Note := Byte(EnsureRange(FTrkOctave * 12 + semi + 1, TRK_NOTE_MIN, TRK_NOTE_MAX));
+        { the instrument chosen beside the BPM is the one every entered note uses }
+        if (FTrkInstrIndex > 0) and (FTrkInstrIndex <= FProject.Tracker.InstrumentCount) then
+          cell.Instrument := Byte(FTrkInstrIndex);
+        advance := True;
+      end
+      else edited := False;
+    1:
+      if isDelete then cell.Instrument := TRK_INSTR_NONE
+      else if d >= 0 then cell.Instrument := Byte(((cell.Instrument shl 4) or d) and $FF)
+      else edited := False;
+    2:
+      if isDelete then cell.Volume := TRK_VOL_NONE
+      else if d >= 0 then
+      begin
+        v := cell.Volume;
+        if v > TRK_VOL_MAX then v := 0;
+        cell.Volume := Byte(Min(TRK_VOL_MAX, ((v shl 4) or d) and $FF));
+      end
+      else edited := False;
+    3:
+      if isDelete then cell.Effect := tfxNone
+      else if eff <> tfxNone then cell.Effect := eff
+      else edited := False;
+    4:
+      if isDelete then cell.Param := 0
+      else if d >= 0 then cell.Param := Byte(((cell.Param shl 4) or d) and $FF)
+      else edited := False;
+  end;
+  if not edited then
+  begin
+    { Enter just steps down a row }
+    FTrkSelRow := Min(pat.Rows - 1, FTrkSelRow + 1);
+    RefreshTrackerTab;
+    Exit;
+  end;
+  FCmds.Perform(TSetTrackerCellCommand.Create(FProject, SelectedTrackerPattern,
+    FTrkSelRow, FTrkSelChn, cell));
+  { hear the note just entered, at its own pitch on its own instrument }
+  if (FTrkField = 0) and (semi >= 0) and (cell.Instrument > 0) then TrkAuditionNote(cell);
+  if advance then FTrkSelRow := Min(pat.Rows - 1, FTrkSelRow + 1);
+  FTrkGridRowScroll := -1;
+  RefreshTrackerTab;
+end;
+
+{ ---- Tracker transport: back to the beginning / play / pause / stop / last pattern / record ---- }
+
+procedure TfrmMain.ibTrkTransportClick(Sender: TObject; AIndex: Integer; const AId: string);
+begin
+  if AId = 'tostart' then TrkGoStart
+  else if AId = 'play' then TrkPlayOrResume
+  else if AId = 'playpat' then TrkPlayPattern
+  else if AId = 'pause' then TrkPause
+  else if AId = 'stop' then btnTrkStopClick(nil)
+  else if AId = 'toend' then TrkGoLastPattern
+  else if AId = 'record' then ShowDockPage(tabRecording)
+  else if AId = 'totimeline' then TrkSendToTimeline;
+end;
+
+procedure TfrmMain.TrkPlayOrResume;
+begin
+  if FTrkPlaying and FTrkPaused and (FTrkPlayer <> nil) then
+  begin
+    if (App = nil) or (App.Audio = nil) then Exit;
+    App.Audio.SetSource(FTrkPlayer.AsSource);
+    FTrkPaused := False;
+    FTrkPreview := 'playing';
+    RefreshTrackerTab;
+  end
+  else if not FTrkPlaying then
+    btnTrkPlayClick(nil);
+end;
+
+procedure TfrmMain.TrkPause;
+begin
+  if not FTrkPlaying then Exit;
+  if FTrkPaused then
+  begin
+    TrkPlayOrResume;
+    Exit;
+  end;
+  if (App <> nil) and (App.Audio <> nil) then App.Audio.ClearSource;
+  FTrkPaused := True;
+  FTrkPreview := 'paused';
+  RefreshTrackerTab;
+end;
+
+procedure TfrmMain.TrkGoStart;
+var
+  m: TTrackerModule;
+begin
+  if FProject = nil then Exit;
+  m := FProject.Tracker;
+  if FTrkPlayer <> nil then FTrkPlayer.JumpToOrder(0);
+  FTrkSeqScroll := 0;
+  FTrkGridRowScroll := -1;
+  FTrkSelRow := 0;
+  if (m.OrderLength > 0) and (m.GetOrder(0) < cboTrkPattern.Items.Count) then
+    cboTrkPattern.ItemIndex := m.GetOrder(0);
+  RefreshTrackerTab;
+end;
+
+{ The project's tracker module was replaced (a project opened, or a new one started): the module
+  itself is read from the project file's tracker section, so everything that shows it starts over
+  from it - the pattern list, the instrument lists, the cursor, the scroll positions. }
+procedure TfrmMain.TrkProjectChanged;
+begin
+  FTrkSelRow := 0;
+  FTrkSelChn := 0;
+  FTrkField := 0;
+  FTrkSeqScroll := 0;
+  FTrkGridRowScroll := -1;
+  FTrkGridChnScroll := 0;
+  FTrkInstrIndex := 1;
+  FTrkAnimInit := False;
+  FTrkPaused := False;
+  FTrkPreview := '(project loaded)';
+  cboTrkPattern.ItemIndex := 0;
+  RefreshTrackerTab(True);
+end;
+
+{ Adds the module currently loaded in the Tracker to the Timeline, asking the same question as
+  an import from the menu (live notation clip / one-off audio clip / keep it in the Tracker). The
+  loaded module is written to a module file in the cache folder first, because a live clip plays
+  from a module file; the audio-clip choice renders the loaded module directly. }
+procedure TfrmMain.TrkSendToTimeline;
+var
+  nm, path: string;
+  i: Integer;
+begin
+  if FProject = nil then Exit;
+  if FProject.Tracker.PatternCount = 0 then
+  begin
+    MessageDlg('The Tracker has no patterns to add.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  { playback is stopped before the module is used, as with an import }
+  if FTrkPlaying or (FTrkPlayer <> nil) then btnTrkStopClick(nil);
+  nm := Trim(FProject.Tracker.Name);
+  for i := 1 to Length(nm) do
+    if CharInSet(nm[i], ['\', '/', ':', '*', '?', '"', '<', '>', '|']) then nm[i] := '_';
+  if nm = '' then nm := 'tracker';
+  path := IncludeTrailingPathDelimiter(CacheFile('render')) + nm + Format('-%d.mptm', [DateTimeToFileDate(Now)]);
+  try
+    ForceDirectories(ExtractFilePath(path));
+    SaveMptmFile(path, FProject.Tracker);
+  except
+    on E: Exception do
+    begin
+      MessageDlg('The tracker module could not be prepared for the Timeline:' + sLineBreak + E.Message,
+        mtError, [mbOK], 0);
+      Exit;
+    end;
+  end;
+  ImportTrackerModuleToTimeline(FProject.Tracker, path, 'tracker');
+end;
+
+{ the module's last pattern: shown in the grid, and the sequence strip is moved to the last
+  step that plays it (the transport jumps there too while it is running) }
+procedure TfrmMain.TrkGoLastPattern;
+var
+  m: TTrackerModule;
+  patIdx, step, i: Integer;
+begin
+  if FProject = nil then Exit;
+  m := FProject.Tracker;
+  patIdx := m.PatternCount - 1;
+  if patIdx < 0 then Exit;
+  step := -1;
+  for i := m.OrderLength - 1 downto 0 do
+    if m.GetOrder(i) = patIdx then begin step := i; Break; end;
+  if (step >= 0) and (FTrkPlayer <> nil) then FTrkPlayer.JumpToOrder(step);
+  if step >= 0 then FTrkSeqScroll := step;
+  FTrkGridRowScroll := -1;
+  FTrkSelRow := 0;
+  if patIdx < cboTrkPattern.Items.Count then cboTrkPattern.ItemIndex := patIdx;
+  RefreshTrackerTab;
+end;
+
+{ ---- Whole-channel effect ---- }
+
+{ the mixer strip of tracker channel AChannel (0-based) }
+function TfrmMain.TrkChannelStrip(AChannel: Integer): TMixStrip;
+var
+  i: Integer;
+begin
+  Result := nil;
+  if FProject = nil then Exit;
+  for i := 0 to FProject.TrackerMixer.StripCount - 1 do
+    if (FProject.TrackerMixer.GetStrip(i).Kind = skInput) and
+       (FProject.TrackerMixer.GetStrip(i).InputSourceId = AChannel + 1) then
+      Exit(FProject.TrackerMixer.GetStrip(i));
+end;
+
+{ A channel's effect is the first insert of its TRK-CHN mixer strip - the header's Effect button and
+  the strip show the same thing. }
+function TfrmMain.TrkChannelFxOf(AChannel: Integer): TTrackerChannelFx;
+var
+  s: TMixStrip;
+begin
+  Result := FProject.Tracker.GetChannelFx(AChannel);
+  s := TrkChannelStrip(AChannel);
+  if (s <> nil) and (s.InsertCount > 0) then
+  begin
+    Result.Kind := s.GetInsert(0).Kind;
+    Result.Params := s.GetInsert(0).Params;
+    Result.Name := MixInsertKindDisplay(Result.Kind, Result.Params);
+  end;
+end;
+
+procedure TfrmMain.TrkApplyChannelFx(AChannel: Integer; const AKind, AParams, AName: string);
+var
+  s: TMixStrip;
+  nk: TNodeKind;
+
+  procedure Perform(ACmd: TDAWCommand);
+  begin
+    if ACmd is TMixerCommand then TMixerCommand(ACmd).TrackerSide := True;
+    FCmds.Perform(ACmd);
+  end;
+
+begin
+  EnsureTrackerMixerStrips(FProject.TrackerMixer, FProject.Tracker.Channels, FProject.Tracker);
+  s := TrkChannelStrip(AChannel);
+  if s = nil then Exit;
+  if (AKind <> '') and (not NodeKindFromId(AKind, nk) or not MixerInsertKindAllowed(nk)) then
+  begin
+    MessageDlg('That effect cannot be used on a mixer strip.', mtWarning, [mbOK], 0);
+    Exit;
+  end;
+  try
+    if AKind = '' then
+    begin
+      if s.InsertCount > 0 then Perform(TRemoveMixInsertCommand.Create(FProject, s.Id, 0));
+    end
+    else if (s.InsertCount > 0) and SameText(s.GetInsert(0).Kind, AKind) then
+      Perform(TSetMixInsertParamsCommand.Create(FProject, s.Id, 0, AParams))
+    else
+    begin
+      if s.InsertCount > 0 then Perform(TRemoveMixInsertCommand.Create(FProject, s.Id, 0));
+      Perform(TAddMixInsertCommand.Create(FProject, s.Id, AKind, AParams, 0, AName));
+    end;
+  except
+    on E: EUDAWError do MessageDlg(E.Message, mtWarning, [mbOK], 0);
+  end;
+  { a paused tracker picks the new effect up straight away }
+  if FTrkPlayer <> nil then FTrkPlayer.RefreshMixer;
+  RefreshTrackerTab;
+  pbMixer.Invalidate;
+end;
+
+{ The Effect button of a channel header: with no effect yet it offers the effects to pick from;
+  with one it offers Edit / Replace / Remove. }
+{ The Mixer button of a channel header: opens the Mixer in its Tracker view with this channel's strip selected }
+procedure TfrmMain.TrkOpenMixerForChannel(AChannel: Integer);
+var
+  s: TMixStrip;
+begin
+  if FProject = nil then Exit;
+  EnsureTrackerMixerStrips(FProject.TrackerMixer, FProject.Tracker.Channels, FProject.Tracker);
+  s := TrkChannelStrip(AChannel);
+  ShowDockPage(tabMixer);
+  if cboMixView.ItemIndex <> 1 then
+  begin
+    cboMixView.ItemIndex := 1;
+    cboMixViewChange(cboMixView);
+  end
+  else
+    RefreshMixerTab;
+  if s <> nil then
+  begin
+    MixSelectById(s.Id);
+    MixScrollStripIntoView(s.Id);
+  end;
+end;
+
+{ Scrolls the mixer's row of strips so that strip AId is shown whole (the row is a pixel scroll, FMixFirst,
+  laid out as in RefreshMixerTab) }
+procedure TfrmMain.MixScrollStripIntoView(AId: Integer);
+var
+  m: TMixerModel;
+  i, x, sw, barW, masterW, areaW, viewW: Integer;
+  s: TMixStrip;
+  found: Boolean;
+begin
+  if FProject = nil then Exit;
+  viewW := pbMixer.ClientWidth;
+  if viewW <= 0 then Exit;
+  m := MixCur;
+  if FMixZoomFactor <= 0 then FMixZoomFactor := 1.0;
+  barW := Max(100, Round(120 * FMixZoomFactor));
+  masterW := barW;
+  if (m.MasterStrip <> nil) and m.MasterStrip.Collapsed then masterW := MIX_COLLAPSED_W;
+  if m.MasterStrip <> nil then areaW := viewW - masterW - 18 else areaW := viewW - 8;
+  x := 4;
+  sw := 0;
+  found := False;
+  for i := 0 to m.StripCount - 1 do
+  begin
+    s := m.GetStrip(i);
+    if s.Kind = skMaster then Continue;
+    sw := IfThen(s.Collapsed, MIX_COLLAPSED_W, barW - 6);
+    if s.Id = AId then
+    begin
+      found := True;
+      Break;
+    end;
+    Inc(x, sw + 6);
+  end;
+  if not found then Exit;
+  if x < FMixFirst + 4 then FMixFirst := Max(0, x - 4)
+  else if x + sw > FMixFirst + areaW then FMixFirst := x + sw - areaW + 4
+  else Exit;
+  RefreshMixerTab;
+  pbMixer.Invalidate;
+end;
+
+procedure TfrmMain.TrkChannelFxClick(AChannel, AX, AY: Integer);
+var
+  pt: TPoint;
+begin
+  if (FProject = nil) or not TrkEditAllowed then Exit;
+  FTrkFxChn := AChannel;
+  if TrkChannelFxOf(AChannel).Kind = '' then
+  begin
+    pmTrkChanFxReplaceClick(nil);
+    Exit;
+  end;
+  pt := pbTracker.ClientToScreen(Point(AX, AY));
+  FMenuLoopActive := True;
+  try
+    GLShowPopup(pmTrkChanFx, pt.X, pt.Y);
+  finally
+    FMenuLoopActive := False;
+  end;
+end;
+
+procedure TfrmMain.pmTrkChanFxEditClick(Sender: TObject);
+var
+  fx: TTrackerChannelFx;
+  txt: string;
+begin
+  if (FProject = nil) or not TrkEditAllowed then Exit;
+  fx := TrkChannelFxOf(FTrkFxChn);
+  if fx.Kind = '' then Exit;
+  if not TfrmEffectEditor.Edit(Self, fx.Name, fx.Kind, fx.Params, txt) then Exit;
+  TrkApplyChannelFx(FTrkFxChn, fx.Kind, Trim(txt), fx.Name);
+end;
+
+procedure TfrmMain.pmTrkChanFxReplaceClick(Sender: TObject);
+var
+  kind, params, name, txt: string;
+begin
+  if (FProject = nil) or not TrkEditAllowed then Exit;
+  if not TfrmTrkFxPick.Pick(Self, kind, params, name) then Exit;
+  txt := params;
+  { open the effect's own editor on it straight away, so the settings can be set before it is applied }
+  if TfrmEffectEditor.HasSettings(kind, params) then
+    if not TfrmEffectEditor.Edit(Self, name, kind, params, txt) then Exit;
+  TrkApplyChannelFx(FTrkFxChn, kind, Trim(txt), name);
+end;
+
+procedure TfrmMain.pmTrkChanFxRemoveClick(Sender: TObject);
+begin
+  if (FProject = nil) or not TrkEditAllowed then Exit;
+  TrkApplyChannelFx(FTrkFxChn, '', '', '');
 end;
 
 { ---- Sequence strip: one cell per order step ("step N -> pattern P"),
@@ -18585,22 +31243,23 @@ procedure TfrmMain.pbTrkSequencePaint(Sender: TObject);
 const
   STEPH = 24;
 var
-  cv: TCanvas;
+  cv: TGLCanvas;
   w, h, i, x, stepW, visCount: Integer;
   m: TTrackerModule;
   patIdx: Integer;
   isPlayingStep, isShownPattern: Boolean;
+  th: TUDAWTheme;
+  stepCol: TColor;
 begin
-  if FTrkSequenceBuffer = nil then Exit;
   w := pbTrkSequence.Width;
   h := pbTrkSequence.Height;
   if (w <= 0) or (h <= 0) then Exit;
-  FTrkSequenceBuffer.SetSize(w, h);
-  cv := FTrkSequenceBuffer.Canvas;
+  cv := pbTrkSequence.GL;
   try
+  th := CurrentTheme;
+  cv.Alpha := 1;
   cv.Brush.Style := bsSolid;
-  cv.Brush.Color := $00181818;
-  cv.FillRect(Rect(0, 0, w, h));
+  cv.GradientRect(Rect(0, 0, w, h), th.Trk[Ord(tcGridTop)], th.Trk[Ord(tcGridBottom)]);
   if FProject = nil then Exit;
   m := FProject.Tracker;
   if m.OrderLength = 0 then Exit;
@@ -18618,19 +31277,35 @@ begin
     isShownPattern := (not FTrkPlaying) and (patIdx = SelectedTrackerPattern);
 
     cv.Brush.Style := bsSolid;
-    if isPlayingStep then cv.Brush.Color := $0040C040
-    else if isShownPattern then cv.Brush.Color := $00405858
-    else if (i mod 2) = 0 then cv.Brush.Color := $00222228
-    else cv.Brush.Color := $001C1C20;
-    cv.FillRect(Rect(x, 0, x + stepW - 2, h));
+    if isPlayingStep then stepCol := th.Trk[Ord(tcSeqPlaying)]
+    else if isShownPattern then stepCol := th.Trk[Ord(tcSeqCurrent)]
+    else if (i mod 2) = 0 then stepCol := th.Trk[Ord(tcSeqStep)]
+    else stepCol := TrkMix(th.Trk[Ord(tcSeqStep)], clBlack, 0.25);
+    cv.GradientRect(Rect(x, 0, x + stepW - 2, h), TrkMix(stepCol, clWhite, 0.22), TrkMix(stepCol, clBlack, 0.25));
+    cv.Brush.Color := clWhite;
+    cv.Alpha := 0.35;
+    cv.FillRect(Rect(x, 0, x + stepW - 2, 1));
+    cv.Alpha := 1;
+    if TrkSeqIsSelected(i) then
+    begin
+      { Ctrl+click selection: a lit wash and an accent frame }
+      cv.Brush.Color := clWhite;
+      cv.Alpha := 0.22;
+      cv.FillRect(Rect(x, 0, x + stepW - 2, h));
+      cv.Alpha := 1;
+      cv.Brush.Color := th.Trk[Ord(tcSeqPlaying)];
+      cv.FillRect(Rect(x, 0, x + stepW - 2, 2));
+      cv.FillRect(Rect(x, h - 2, x + stepW - 2, h));
+      cv.FillRect(Rect(x, 0, x + 2, h));
+      cv.FillRect(Rect(x + stepW - 4, 0, x + stepW - 2, h));
+    end;
     cv.Brush.Style := bsClear;
 
-    if isPlayingStep then cv.Font.Color := $00102010 else cv.Font.Color := $00C0C0C0;
+    if isPlayingStep then cv.Font.Color := TrkMix(stepCol, clBlack, 0.8) else cv.Font.Color := th.Trk[Ord(tcHeaderText)];
     cv.TextOut(x + 4, 1, Format('%.2d', [i]));
     cv.TextOut(x + 4, 12, Format('pat %d', [patIdx]));
   end;
   finally
-    pbTrkSequence.Canvas.Draw(0, 0, FTrkSequenceBuffer);
   end;
 end;
 
@@ -18638,7 +31313,7 @@ procedure TfrmMain.pbTrkSequenceMouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
   m: TTrackerModule;
-  step, patIdx: Integer;
+  step, patIdx, seedStep: Integer;
 begin
   if FProject = nil then Exit;
   m := FProject.Tracker;
@@ -18646,6 +31321,23 @@ begin
 
   step := FTrkSeqScroll + (X div TrkSeqStepWidth);
   if (step < 0) or (step >= m.OrderLength) then Exit;
+
+  { Ctrl+click builds a multi-selection of steps (the shown pattern's step joins it first) that
+    Export Pattern to Timeline renders together; nothing else changes }
+  if (ssCtrl in Shift) and (Button = mbLeft) then
+  begin
+    if (Length(FTrkSeqSel) = 0) and not FTrkPlaying then
+      for seedStep := 0 to m.OrderLength - 1 do
+        if m.GetOrder(seedStep) = SelectedTrackerPattern then
+        begin
+          TrkSeqToggleStep(seedStep);
+          Break;
+        end;
+    TrkSeqToggleStep(step);
+    pbTrkSequence.Invalidate;
+    Exit;
+  end;
+  if Button = mbLeft then SetLength(FTrkSeqSel, 0);
   patIdx := m.GetOrder(step);
 
   if FTrkPlaying and (FTrkPlayer <> nil) then
@@ -18658,6 +31350,33 @@ begin
       cboTrkPattern.ItemIndex := patIdx;
     FTrkSelRow := 0;
   end;
+  RefreshTrackerTab;
+end;
+
+{ double-click a sequence slot: change which pattern that step plays (undoable) }
+procedure TfrmMain.pbTrkSequenceDblClick(Sender: TObject);
+var
+  m: TTrackerModule;
+  pt: TPoint;
+  step, newPat: Integer;
+  txt: string;
+begin
+  if (FProject = nil) or not TrkEditAllowed then Exit;
+  m := FProject.Tracker;
+  pt := pbTrkSequence.ScreenToClient(Mouse.CursorPos);
+  step := FTrkSeqScroll + (pt.X div TrkSeqStepWidth);
+  if (step < 0) or (step >= m.OrderLength) then Exit;
+  txt := IntToStr(m.GetOrder(step));
+  if not InputQuery('Sequence slot ' + Format('%.2d', [step]),
+    Format('Pattern number to play here (0 - %d):', [m.PatternCount - 1]), txt) then Exit;
+  if not TryStrToInt(Trim(txt), newPat) or (newPat < 0) or (newPat >= m.PatternCount) then
+  begin
+    MessageDlg(Format('Enter a pattern number from 0 to %d.', [m.PatternCount - 1]), mtWarning, [mbOK], 0);
+    Exit;
+  end;
+  if newPat = m.GetOrder(step) then Exit;
+  FCmds.Perform(TEditTrackerOrderCommand.Create(FProject, toeSet, step, newPat));
+  if (newPat < cboTrkPattern.Items.Count) and not FTrkPlaying then cboTrkPattern.ItemIndex := newPat;
   RefreshTrackerTab;
 end;
 
@@ -18801,12 +31520,12 @@ end;
 
 procedure TfrmMain.btnApplyLevelClick(Sender: TObject);
 begin
-  if (App <> nil) and (cboLevel.ItemIndex >= 0) then
+  if (App <> nil) and (cboSetLogLevel.ItemIndex >= 0) then
   begin
-    Logger.SetMinLevel(App.ParseLogLevel(cboLevel.Text, llInfo));
-    App.Config.SetString('logging', 'level', cboLevel.Text);
+    Logger.SetMinLevel(App.ParseLogLevel(cboSetLogLevel.Text, llInfo));
+    App.Config.SetString('logging', 'level', cboSetLogLevel.Text);
     App.Config.Save;
-    Logger.Info('ui', 'log level set to ' + cboLevel.Text);
+    Logger.Info('ui', 'log level set to ' + cboSetLogLevel.Text);
   end;
 end;
 
@@ -18825,13 +31544,6 @@ begin
   Logger.Error('ui', 'manual ERROR test entry');
 end;
 
-procedure TfrmMain.btnClearLogViewClick(Sender: TObject);
-begin
-  lvLog.Items.Clear;
-  FLogShown := 0;
-  if App <> nil then
-    App.MemoryLog.Clear;
-end;
 
 procedure TfrmMain.btnRunSelfTestClick(Sender: TObject);
 var
@@ -19065,7 +31777,7 @@ begin
   EnsurePlanar(pcm, 2, sr);   // 1 s stereo
   for ch := 0 to 1 do
     for i := 0 to sr - 1 do
-      pcm[ch][i] := 0.5 * Sin(2 * Pi * (330.0 + ch * 110.0) * i / sr);
+      pcm[ch][i] := 0.5 * FastSin(2 * Pi * (330.0 + ch * 110.0) * i / sr);
   try
     if Mp4EncodeAudioToFile(pcm, sr, Mp4FmtFromCombo(cboMp4Fmt.ItemIndex), dlgSaveMp4.FileName) then
       memMp4.Lines.Text := Format('exported %s (%s, %d Hz stereo, 1.0 s)',
@@ -19091,7 +31803,7 @@ begin
   EnsurePlanar(pcm, 2, sr);
   for ch := 0 to 1 do
     for i := 0 to sr - 1 do
-      pcm[ch][i] := 0.5 * Sin(2 * Pi * (440.0 + ch * 220.0) * i / sr);
+      pcm[ch][i] := 0.5 * FastSin(2 * Pi * (440.0 + ch * 220.0) * i / sr);
   try
     if not Mp4EncodeAudio(pcm, sr, Mp4FmtFromCombo(cboMp4Fmt.ItemIndex), bytes) then
     begin memMp4.Lines.Text := 'encode failed'; Exit; end;
@@ -19306,31 +32018,273 @@ const
   MIDI_PR_LO_NOTE = 36;
   MIDI_PR_HI_NOTE = 96;
 
-function TfrmMain.MidiRowHeight: Integer;
+{ The piano roll's geometry: a keyboard down the left edge, a bar ruler and the
+  chord lane along the top, the note grid, and the velocity lane under it. }
+const
+  PR_KEY_W = 62;
+  PR_RULER_H = 24;
+  PR_CHORD_H = 28;
+  PR_VEL_H = 76;
+
+function TfrmMain.PrGridTop: Integer;
 begin
-  Result := Max(1, pbPianoRoll.Height div (MIDI_PR_HI_NOTE - MIDI_PR_LO_NOTE));
+  Result := PR_RULER_H + PR_CHORD_H;
 end;
 
-function TfrmMain.MidiNoteAtY(AY: Integer): Integer;
+function TfrmMain.PrGridBottom: Integer;
 begin
-  Result := MIDI_PR_HI_NOTE - 1 - (AY div MidiRowHeight);
+  Result := Max(PrGridTop + 60, pbPianoRoll.Height - PR_VEL_H);
 end;
 
-function TfrmMain.MidiTickAtX(AX: Integer): Int64;
+function TfrmMain.PrSpanTicks: Int64;
 var
   seq: TMidiSequence;
-  span: Int64;
-  pxPerTick: Double;
 begin
   Result := 0;
   seq := CurrentMidiSeq;
   if seq = nil then Exit;
-  span := Max(seq.DurationTicks, seq.TicksPerBar(0) * 4);
-  if span <= 0 then span := seq.PPQ * 16;
-  pxPerTick := pbPianoRoll.Width / span;
+  Result := Max(seq.DurationTicks, seq.TicksPerBar(0) * 8);
+  if Result <= 0 then Result := seq.PPQ * 32;
+end;
+
+{ timeline seconds = this clip's start (where the Timeline places it) + the clip's own time }
+function TfrmMain.PrChordOffsetSec: Double;
+var
+  tl: TTimeline;
+  i, j, id: Integer;
+  c: TTimelineClip;
+begin
+  Result := 0;
+  if (FProject = nil) or (FMidiClipIndex < 0) then Exit;
+  id := FProject.Midi.IdOfIndex(FMidiClipIndex);
+  tl := FProject.Timeline;
+  for i := 0 to tl.TrackCount - 1 do
+    for j := 0 to tl.GetTrack(i).ClipCount - 1 do
+    begin
+      c := tl.GetTrack(i).GetClip(j);
+      if c.IsMidiClip and (c.MidiClipId = id) then
+        Exit(c.StartSeconds - c.SourceOffsetSeconds);
+    end;
+end;
+
+function TfrmMain.PrZoom: Double;
+begin
+  if FMidiZoomX < 1 then Result := 1 else Result := FMidiZoomX;
+end;
+
+function TfrmMain.PrPxPerTick: Double;
+var
+  span: Int64;
+begin
+  span := PrSpanTicks;
+  if span <= 0 then Exit(1);
+  Result := (pbPianoRoll.Width - PR_KEY_W) / span * PrZoom;
+end;
+
+{ where the music being played is, in this clip's ticks: the clip's own playback, or the Timeline's
+  playhead while the Timeline plays. False when nothing is playing. }
+function TfrmMain.PrPlayTick(out ATick: Int64): Boolean;
+var
+  seq: TMidiSequence;
+  sec: Double;
+begin
+  Result := False;
+  ATick := 0;
+  seq := CurrentMidiSeq;
+  if (seq = nil) or (FProject = nil) then Exit;
+  if (FMidiEngineRef <> nil) and FMidiEngineRef.Playing then
+    sec := FMidiEngineRef.PositionSeconds
+  else if FTlPlaying then
+    sec := FProject.Timeline.PlayheadSeconds - PrChordOffsetSec
+  else
+    Exit;
+  if sec < 0 then Exit;
+  ATick := seq.SecondsToTick(sec);
+  Result := True;
+end;
+
+function TfrmMain.PrTickToX(ATick: Int64): Integer;
+begin
+  Result := PR_KEY_W + Round((ATick - FMidiViewStart) * PrPxPerTick);
+end;
+
+{ keep the zoomed window inside the clip }
+procedure TfrmMain.PrClampView;
+var
+  visible: Int64;
+begin
+  if FMidiZoomX < 1 then FMidiZoomX := 1;
+  if FMidiZoomX > 64 then FMidiZoomX := 64;
+  visible := Round(PrSpanTicks / PrZoom);
+  if FMidiViewStart > PrSpanTicks - visible then FMidiViewStart := PrSpanTicks - visible;
+  if FMidiViewStart < 0 then FMidiViewStart := 0;
+  { the horizontal scrollbar mirrors the zoomed window: range = clip span, page = visible span }
+  FMidiHBusy := True;
+  try
+    sbMidiH.Min := 0;
+    sbMidiH.Max := Integer(Max(1, PrSpanTicks));
+    sbMidiH.PageSize := Integer(Max(1, Min(visible, PrSpanTicks)));
+    sbMidiH.Position := Integer(FMidiViewStart);
+  finally
+    FMidiHBusy := False;
+  end;
+end;
+
+procedure TfrmMain.sbMidiHChange(Sender: TObject);
+begin
+  if FMidiHBusy then Exit;
+  FMidiViewStart := sbMidiH.Position;
+  PrClampView;
+  pbPianoRoll.Invalidate;
+end;
+
+{ 36..96 by default, widened by whole octaves so every note of the clip (all
+  tracks) is on screen - drums and basses sit below C2, leads above C7 }
+procedure TfrmMain.PrFitNoteRange;
+var
+  seq: TMidiSequence;
+  t, i, lo, hi: Integer;
+  trk: TMidiTrackSeq;
+begin
+  lo := MIDI_PR_LO_NOTE;
+  hi := MIDI_PR_HI_NOTE;
+  seq := CurrentMidiSeq;
+  if seq <> nil then
+    for t := 0 to seq.TrackCount - 1 do
+    begin
+      trk := seq.GetTrack(t);
+      for i := 0 to trk.NoteCount - 1 do
+      begin
+        if trk.Notes[i].Note < lo then lo := (trk.Notes[i].Note div 12) * 12;
+        if trk.Notes[i].Note >= hi then hi := (trk.Notes[i].Note div 12 + 1) * 12;
+      end;
+    end;
+  FMidiLo := Max(0, lo);
+  FMidiHi := Min(128, hi);
+end;
+
+const
+  PR_MIN_ROW_H = 12;   { a note row is never thinner than this; a taller range scrolls }
+
+{ the whole note range of the clip; the vertical scroll bar moves a window over it }
+function TfrmMain.PrFullLo: Integer;
+begin
+  if FMidiHi <= FMidiLo then Result := MIDI_PR_LO_NOTE else Result := FMidiLo;
+end;
+
+function TfrmMain.PrFullHi: Integer;
+begin
+  if FMidiHi <= FMidiLo then Result := MIDI_PR_HI_NOTE else Result := FMidiHi;
+end;
+
+function TfrmMain.PrVisRows: Integer;
+begin
+  Result := Max(1, Min(PrFullHi - PrFullLo, (PrGridBottom - PrGridTop) div PR_MIN_ROW_H));
+end;
+
+{ keeps the note window inside the range and mirrors it on the vertical scroll bar
+  (position 0 = the highest notes) }
+procedure TfrmMain.PrClampV;
+var
+  total, rows: Integer;
+begin
+  total := PrFullHi - PrFullLo;
+  rows := PrVisRows;
+  if FMidiVHi <= 0 then FMidiVHi := 60 + rows div 2;
+  if FMidiVHi < PrFullLo + rows then FMidiVHi := PrFullLo + rows;
+  if FMidiVHi > PrFullHi then FMidiVHi := PrFullHi;
+  FMidiVBusy := True;
+  try
+    sbMidiV.Enabled := rows < total;
+    sbMidiV.Min := 0;
+    sbMidiV.Max := Max(1, total - 1);
+    sbMidiV.PageSize := rows;
+    sbMidiV.Position := PrFullHi - FMidiVHi;
+  finally
+    FMidiVBusy := False;
+  end;
+end;
+
+procedure TfrmMain.sbMidiVChange(Sender: TObject);
+begin
+  if FMidiVBusy then Exit;
+  FMidiVHi := PrFullHi - sbMidiV.Position;
+  PrClampV;
+  pbPianoRoll.Invalidate;
+end;
+
+function TfrmMain.PrLoNote: Integer;
+begin
+  Result := PrHiNote - PrVisRows;
+end;
+
+function TfrmMain.PrHiNote: Integer;
+begin
+  if FMidiVHi <= 0 then PrClampV;
+  Result := Max(FMidiVHi, PrFullLo + PrVisRows);
+  if Result > PrFullHi then Result := PrFullHi;
+end;
+
+function TfrmMain.MidiRowHeight: Integer;
+begin
+  Result := Max(PR_MIN_ROW_H, (PrGridBottom - PrGridTop) div (PrHiNote - PrLoNote));
+end;
+
+function TfrmMain.MidiNoteAtY(AY: Integer): Integer;
+begin
+  Result := PrHiNote - 1 - ((AY - PrGridTop) div MidiRowHeight);
+end;
+
+function TfrmMain.MidiTickAtX(AX: Integer): Int64;
+var
+  pxPerTick: Double;
+begin
+  Result := 0;
+  pxPerTick := PrPxPerTick;
   if pxPerTick <= 0 then Exit;
-  Result := Round(AX / pxPerTick);
+  Result := FMidiViewStart + Round((AX - PR_KEY_W) / pxPerTick);
   if Result < 0 then Result := 0;
+end;
+
+{ Wheel zooms the time axis about the pointer; Shift+wheel pans. }
+procedure TfrmMain.pbPianoRollMouseWheel(Sender: TObject; Shift: TShiftState;
+  WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+var
+  anchor: Int64;
+  frac: Double;
+begin
+  Handled := True;
+  if CurrentMidiSeq = nil then Exit;
+  if ssCtrl in Shift then
+  begin
+    FMidiVHi := PrHiNote + Sign(WheelDelta) * 3;
+    PrClampV;
+    pbPianoRoll.Invalidate;
+    Exit;
+  end;
+  if ssShift in Shift then
+    FMidiViewStart := FMidiViewStart - Round(WheelDelta / 120 * PrSpanTicks / PrZoom / 8)
+  else
+  begin
+    if MousePos.X < PR_KEY_W then frac := 0
+    else frac := (MousePos.X - PR_KEY_W) / Max(1, pbPianoRoll.Width - PR_KEY_W);
+    anchor := FMidiViewStart + Round(frac * PrSpanTicks / PrZoom);
+    if WheelDelta > 0 then FMidiZoomX := PrZoom * 1.25
+    else FMidiZoomX := PrZoom / 1.25;
+    if FMidiZoomX < 1 then FMidiZoomX := 1;
+    if FMidiZoomX > 64 then FMidiZoomX := 64;
+    FMidiViewStart := anchor - Round(frac * PrSpanTicks / PrZoom);
+  end;
+  PrClampView;
+  pbPianoRoll.Invalidate;
+end;
+
+procedure TfrmMain.cboMidiTrackChange(Sender: TObject);
+begin
+  if FMidiRefreshing then Exit;
+  if cboMidiTrack.ItemIndex >= 0 then FMidiTrackIndex := cboMidiTrack.ItemIndex;
+  FMidiSelectedNoteId := -1;
+  RefreshMidiTab;
 end;
 
 function TfrmMain.MidiFindNoteAt(AX, AY: Integer; out ATrk: TMidiTrackSeq;
@@ -19343,6 +32297,7 @@ begin
   Result := False;
   ATrk := nil;
   if CurrentMidiSeq = nil then Exit;
+  if (AX < PR_KEY_W) or (AY < PrGridTop) or (AY >= PrGridBottom) then Exit;
   ATrk := CurrentMidiSeq.GetTrack(FMidiTrackIndex);
   if ATrk = nil then Exit;
   tick := MidiTickAtX(AX);
@@ -19364,20 +32319,427 @@ function TfrmMain.MidiHitTestNoteEdge(const ANote: TMidiNote; AX: Integer): Inte
 const
   EDGE_PX = 6;
 var
-  seq: TMidiSequence;
-  span: Int64;
-  pxPerTick, x0, x1: Double;
+  x0, x1: Integer;
 begin
   Result := -1;
-  seq := CurrentMidiSeq;
-  if seq = nil then Exit;
-  span := Max(seq.DurationTicks, seq.TicksPerBar(0) * 4);
-  if span <= 0 then span := seq.PPQ * 16;
-  pxPerTick := pbPianoRoll.Width / span;
-  x0 := ANote.StartTick * pxPerTick;
-  x1 := ANote.EndTick * pxPerTick;
+  if PrSpanTicks <= 0 then Exit;
+  x0 := PrTickToX(ANote.StartTick);
+  x1 := PrTickToX(ANote.EndTick);
   if Abs(AX - x1) <= EDGE_PX then Exit(1);
   if Abs(AX - x0) <= EDGE_PX then Exit(0);
+end;
+
+{ the chord under a click in the piano roll's chord lane, nil when none }
+function TfrmMain.PrChordAtX(AX: Integer): TTimelineChord;
+var
+  seq: TMidiSequence;
+  sec: Double;
+begin
+  Result := nil;
+  seq := CurrentMidiSeq;
+  if (seq = nil) or (FProject = nil) or (AX < PR_KEY_W) then Exit;
+  sec := PrChordOffsetSec + seq.TickToSeconds(MidiTickAtX(AX));
+  Result := FProject.Timeline.ChordAt(sec);
+end;
+
+{ Chords > Detect: names the chord of every bar of the clip from the notes sounding
+  in it (every track), and writes them into the Chords lane over the clip }
+procedure TfrmMain.btnMidiDetectChordsClick(Sender: TObject);
+const
+  NAMES: array[0..11] of string = ('C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B');
+  QUALS: array[0..7] of record Sym: string; Pcs: array[0..3] of Integer; N: Integer; end = (
+    (Sym: '';     Pcs: (0, 4, 7, -1);  N: 3),
+    (Sym: 'm';    Pcs: (0, 3, 7, -1);  N: 3),
+    (Sym: '7';    Pcs: (0, 4, 7, 10);  N: 4),
+    (Sym: 'maj7'; Pcs: (0, 4, 7, 11);  N: 4),
+    (Sym: 'm7';   Pcs: (0, 3, 7, 10);  N: 4),
+    (Sym: 'dim';  Pcs: (0, 3, 6, -1);  N: 3),
+    (Sym: 'sus4'; Pcs: (0, 5, 7, -1);  N: 3),
+    (Sym: 'sus2'; Pcs: (0, 2, 7, -1);  N: 3));
+var
+  seq: TMidiSequence;
+  tl: TTimeline;
+  tr, k, bar, bars, r, q, p, hit, extra, bestRoot, bestQual, bestScore, score, bassPc, lowest, found: Integer;
+  barTicks, b0, b1, ov: Int64;
+  w: array[0..11] of Double;
+  trk: TMidiTrackSeq;
+  nt: TMidiNote;
+  off, s0, s1: Double;
+  old, snap, nm: string;
+  total: Double;
+  inTpl: Boolean;
+begin
+  seq := CurrentMidiSeq;
+  if (seq = nil) or (FProject = nil) then
+  begin
+    MessageDlg('Add or import a MIDI clip first.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  tl := FProject.Timeline;
+  off := PrChordOffsetSec;
+  barTicks := Max(Int64(1), seq.TicksPerBar(0));
+  bars := Max(1, Integer((seq.DurationTicks + barTicks - 1) div barTicks));
+  old := tl.ChordsSnapshot;
+  found := 0;
+  { clear the lane over the clip first, then write the detected chords }
+  s0 := off;
+  s1 := off + seq.TickToSeconds(bars * barTicks);
+  for k := tl.ChordCount - 1 downto 0 do
+    if (tl.GetChord(k).StartSeconds >= s0 - 0.001) and (tl.GetChord(k).StartSeconds < s1) then
+      tl.RemoveChord(tl.GetChord(k).Id);
+  for bar := 0 to bars - 1 do
+  begin
+    b0 := bar * barTicks;
+    b1 := b0 + barTicks;
+    for p := 0 to 11 do w[p] := 0;
+    lowest := 127;
+    for tr := 0 to seq.TrackCount - 1 do
+    begin
+      trk := seq.GetTrack(tr);
+      for k := 0 to trk.NoteCount - 1 do
+      begin
+        nt := trk.Notes[k];
+        ov := Min(nt.EndTick, b1) - Max(nt.StartTick, b0);
+        if ov <= 0 then Continue;
+        w[nt.Note mod 12] := w[nt.Note mod 12] + ov;
+        lowest := Min(lowest, nt.Note);
+      end;
+    end;
+    total := 0;
+    for p := 0 to 11 do total := total + w[p];
+    if total <= 0 then Continue;
+    bassPc := lowest mod 12;
+    bestScore := -1000;
+    bestRoot := 0;
+    bestQual := 0;
+    for r := 0 to 11 do
+      for q := 0 to High(QUALS) do
+      begin
+        hit := 0;
+        for p := 0 to QUALS[q].N - 1 do
+          if w[(r + QUALS[q].Pcs[p]) mod 12] > total * 0.08 then Inc(hit);
+        extra := 0;
+        for p := 0 to 11 do
+          if (w[p] > total * 0.08) then
+          begin
+            inTpl := False;
+            for k := 0 to QUALS[q].N - 1 do
+              if (r + QUALS[q].Pcs[k]) mod 12 = p then inTpl := True;
+            if not inTpl then Inc(extra);
+          end;
+        score := hit * 10 - extra * 7 - Ord(QUALS[q].N = 4) * 1;
+        if r = bassPc then Inc(score, 3);
+        if (hit = QUALS[q].N) and (score > bestScore) then
+        begin
+          bestScore := score;
+          bestRoot := r;
+          bestQual := q;
+        end;
+      end;
+    if bestScore < 0 then Continue;
+    nm := NAMES[bestRoot] + QUALS[bestQual].Sym;
+    tl.AddChord(nm, off + seq.TickToSeconds(b0), seq.TickToSeconds(b1) - seq.TickToSeconds(b0));
+    Inc(found);
+  end;
+  snap := tl.ChordsSnapshot;
+  tl.RestoreChords(old);
+  if found = 0 then
+  begin
+    MessageDlg('No chords could be named from the notes in this clip.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  TlChordsCommit(Format('Detect %d chord(s)', [found]), snap);
+  FChordsVisible := True;
+  RefreshTimelineTab;   // the chords lane appears and its button lights
+  pbPianoRoll.Invalidate;
+end;
+
+procedure TfrmMain.chkMidiChordsClick(Sender: TObject);
+begin
+  pbPianoRoll.Invalidate;
+end;
+
+procedure TfrmMain.pbPianoRollPaint(Sender: TObject);
+var
+  c: TGLCanvas;
+  th: TUDAWTheme;
+  w, h, loNote, hiNote, noteRange, i, gT, gB, bar, kw: Integer;
+  seq: TMidiSequence;
+  trk: TMidiTrackSeq;
+  span, barTicks, t: Int64;
+  x0, x1, y0, rowH, bx, vh: Integer;
+  n: TMidiNote;
+  pxPerTick, off: Double;
+  chd: TTimelineChord;
+  chCol: TColor;
+  white, black: TColor;
+  note: Integer;
+  k, tix: Integer;
+  otr: TMidiTrackSeq;
+begin
+  c := pbPianoRoll.GL;
+  th := CurrentTheme;
+  w := pbPianoRoll.Width;
+  h := pbPianoRoll.Height;
+  c.Brush.Style := bsSolid;
+  c.Pen.Style := psClear;
+  c.Brush.Color := th.Background;
+  c.FillRect(Rect(0, 0, w, h));
+
+  PrFitNoteRange;
+  PrClampView;
+  PrClampV;
+  loNote := PrLoNote; hiNote := PrHiNote;
+  noteRange := hiNote - loNote;
+  rowH := MidiRowHeight;
+  gT := PrGridTop;
+  gB := PrGridBottom;
+  white := TlMix(th.PanelBackground, clWhite, 0.78);
+  black := TlMix(th.PanelBackground, th.Background, 0.4);
+
+  { key rows (black keys darker); rows outside the scale get an extra dim wash when
+    "Highlight scale" is on }
+  for i := 0 to noteRange - 1 do
+  begin
+    note := hiNote - 1 - i;
+    y0 := gT + i * rowH;
+    if y0 >= gB then Break;
+    if MidiNoteIsBlack(note) then c.Brush.Color := TlMix(th.Background, th.PanelBackground, 0.12)
+    else c.Brush.Color := TlMix(th.Background, th.PanelBackground, 0.42);
+    c.FillRect(Rect(PR_KEY_W, y0, w, Min(gB, y0 + rowH)));
+    if not MidiNoteInScale(note) then
+    begin
+      c.Alpha := 0.5;
+      c.Brush.Color := th.Background;
+      c.FillRect(Rect(PR_KEY_W, y0, w, Min(gB, y0 + rowH)));
+      c.Alpha := 1;
+    end;
+    { octave line under every C }
+    if note mod 12 = 0 then
+    begin
+      c.Pen.Style := psSolid;
+      c.Pen.Color := th.Border;
+      c.MoveTo(PR_KEY_W, y0 + rowH - 1);
+      c.LineTo(w, y0 + rowH - 1);
+      c.Pen.Style := psClear;
+    end;
+  end;
+
+  { keyboard }
+  c.Font.Size := 7;
+  for i := 0 to noteRange - 1 do
+  begin
+    note := hiNote - 1 - i;
+    y0 := gT + i * rowH;
+    if y0 >= gB then Break;
+    if MidiNoteIsBlack(note) then
+    begin
+      c.Brush.Color := white;
+      c.FillRect(Rect(0, y0, PR_KEY_W, Min(gB, y0 + rowH)));
+      kw := PR_KEY_W * 6 div 10;
+      c.Brush.Color := black;
+      c.FillRect(Rect(0, y0, kw, Min(gB, y0 + rowH)));
+    end
+    else
+    begin
+      c.Brush.Color := white;
+      c.FillRect(Rect(0, y0, PR_KEY_W, Min(gB, y0 + rowH)));
+      c.Pen.Style := psSolid;
+      c.Pen.Color := TlMix(white, th.Background, 0.35);
+      c.MoveTo(0, y0 + rowH - 1);
+      c.LineTo(PR_KEY_W, y0 + rowH - 1);
+      c.Pen.Style := psClear;
+    end;
+    if note mod 12 = 0 then
+    begin
+      c.Brush.Style := bsClear;
+      c.Font.Color := th.Background;
+      c.TextOut(PR_KEY_W - 22, y0 + (rowH - c.TextHeight('C')) div 2, 'C' + IntToStr(note div 12 - 1));
+      c.Brush.Style := bsSolid;
+    end;
+  end;
+
+  seq := CurrentMidiSeq;
+  if seq = nil then
+  begin
+    c.Brush.Style := bsClear;
+    c.Font.Size := 9;
+    c.Font.Color := th.SecondaryText;
+    c.TextOut(PR_KEY_W + 16, gT + 16, 'No MIDI clip yet - add one from the MIDI menu, or import a .mid file.');
+    Exit;
+  end;
+  trk := seq.GetTrack(FMidiTrackIndex);
+
+  span := PrSpanTicks;
+  pxPerTick := PrPxPerTick;
+  off := PrChordOffsetSec;
+
+  { ruler: bar numbers and beat ticks }
+  c.Brush.Color := TlMix(th.PanelBackground, th.Background, 0.3);
+  c.FillRect(Rect(PR_KEY_W, 0, w, PR_RULER_H));
+  barTicks := seq.TicksPerBar(0);
+  c.Pen.Style := psSolid;
+  t := 0;
+  bar := 1;
+  while (barTicks > 0) and (t <= span) do
+  begin
+    bx := PrTickToX(t);
+    if bx > w then Break;
+    if (bx < PR_KEY_W) and (PrTickToX(t + barTicks) < PR_KEY_W) then
+    begin
+      Inc(t, barTicks);
+      Inc(bar);
+      Continue;
+    end;
+    if bx < PR_KEY_W then bx := PR_KEY_W;
+    c.Pen.Color := th.Grid;
+    c.MoveTo(bx, 0);
+    c.LineTo(bx, gB);
+    c.Brush.Style := bsClear;
+    c.Font.Size := 8;
+    c.Font.Color := th.Text;
+    c.TextOut(bx + 4, 6, IntToStr(bar));
+    { beat lines }
+    for k := 1 to Max(1, Integer(barTicks div Max(1, seq.PPQ))) - 1 do
+    begin
+      x0 := PrTickToX(t + k * seq.PPQ);
+      if x0 < PR_KEY_W then Continue;
+      c.Pen.Color := TlMix(th.Grid, th.Background, 0.55);
+      c.MoveTo(x0, PR_RULER_H);
+      c.LineTo(x0, gB);
+      c.MoveTo(x0, PR_RULER_H - 5);
+      c.LineTo(x0, PR_RULER_H);
+    end;
+    Inc(t, barTicks);
+    Inc(bar);
+  end;
+  c.Pen.Style := psClear;
+
+  { chord lane }
+  c.Brush.Style := bsSolid;
+  c.Brush.Color := TlMix(th.PanelBackground, th.Background, 0.15);
+  c.FillRect(Rect(0, PR_RULER_H, w, gT));
+  c.Brush.Style := bsClear;
+  c.Font.Size := 8;
+  c.Font.Color := th.SecondaryText;
+  if (FProject <> nil) and (FProject.Timeline.ChordCount = 0) then
+    c.TextOut(PR_KEY_W + 8, PR_RULER_H + 7, 'Chords: double-click to add one, or Detect to name them from the notes');
+  c.TextOut(8, PR_RULER_H + 7, 'Chords');
+  if FProject <> nil then
+    for i := 0 to FProject.Timeline.ChordCount - 1 do
+    begin
+      chd := FProject.Timeline.GetChord(i);
+      x0 := PrTickToX(seq.SecondsToTick(chd.StartSeconds - off));
+      x1 := PrTickToX(seq.SecondsToTick(chd.EndSeconds - off));
+      if (x1 < PR_KEY_W) or (x0 > w) then Continue;
+      x0 := Max(x0, PR_KEY_W);
+      chCol := TlChordColor(chd.Name);
+      c.Brush.Style := bsSolid;
+      c.Brush.Color := TlMix(th.Background, chCol, 0.7);
+      c.Pen.Style := psSolid;
+      c.Pen.Color := chCol;
+      c.RoundRect(x0, PR_RULER_H + 3, Max(x1 - 1, x0 + 6), gT - 3, 6, 6);
+      c.Pen.Style := psClear;
+      c.Brush.Style := bsClear;
+      c.Font.Color := clBlack;
+      c.TextRect(Rect(x0 + 2, PR_RULER_H + 3, Max(x1 - 1, x0 + 6), gT - 3), x0 + 6, PR_RULER_H + 7, chd.Name);
+    end;
+
+  if trk = nil then Exit;
+
+  { Ctrl+drag highlighted range }
+  if FMidiRangeActive then
+  begin
+    c.Alpha := 0.35;
+    c.Brush.Style := bsSolid;
+    c.Brush.Color := th.Selection;
+    c.FillRect(Rect(Max(PR_KEY_W, PrTickToX(FMidiRangeStart)), gT,
+      Max(PR_KEY_W, PrTickToX(FMidiRangeEnd)), gB));
+    c.Alpha := 1;
+  end;
+
+  { notes: every track of the clip; the track being edited is full colour,
+    the others are shown dimmed behind it }
+  c.Brush.Style := bsSolid;
+  for tix := 0 to seq.TrackCount - 1 do
+  begin
+    if tix = FMidiTrackIndex then Continue;
+    otr := seq.GetTrack(tix);
+    c.Alpha := 0.4;
+    for i := 0 to otr.NoteCount - 1 do
+    begin
+      n := otr.Notes[i];
+      if (n.Note < loNote) or (n.Note >= hiNote) then Continue;
+      x0 := Max(PR_KEY_W, PrTickToX(n.StartTick));
+      x1 := PrTickToX(n.EndTick);
+      if (x1 <= PR_KEY_W) or (x0 > w) then Continue;
+      if x1 <= x0 then x1 := x0 + 2;
+      y0 := gT + (hiNote - 1 - n.Note) * rowH;
+      if y0 + rowH > gB then Continue;
+      c.Brush.Color := TlMix(th.MidiNote, clWhite, 0.15);
+      c.Pen.Style := psClear;
+      c.FillRect(Rect(x0, y0 + 1, x1, y0 + rowH));
+    end;
+    c.Alpha := 1;
+  end;
+  for i := 0 to trk.NoteCount - 1 do
+  begin
+    n := trk.Notes[i];
+    if (n.Note < loNote) or (n.Note >= hiNote) then Continue;
+    x0 := PrTickToX(n.StartTick);
+    x1 := PrTickToX(n.EndTick);
+    if (x1 <= PR_KEY_W) or (x0 > w) then Continue;
+    x0 := Max(x0, PR_KEY_W);
+    if x1 <= x0 then x1 := x0 + 3;
+    y0 := gT + (hiNote - 1 - n.Note) * rowH;
+    if y0 + rowH > gB then Continue;
+    if (n.Id = FMidiSelectedNoteId) or n.Selected then c.Brush.Color := th.Accent
+    else c.Brush.Color := TlMix(th.MidiNote, clWhite, 0.15);
+    c.Pen.Style := psSolid;
+    c.Pen.Color := TlMix(c.Brush.Color, clBlack, 0.45);
+    c.RoundRect(x0, y0 + 1, x1, y0 + rowH, 3, 3);
+    c.Pen.Style := psClear;
+  end;
+
+  { the play position, a line down the whole grid while the clip (or the Timeline) is playing }
+  if PrPlayTick(t) then
+  begin
+    x0 := PrTickToX(t);
+    if (x0 >= PR_KEY_W) and (x0 <= w) then
+    begin
+      c.Brush.Style := bsSolid;
+      c.Brush.Color := th.Accent;
+      c.Alpha := 0.9;
+      c.FillRect(Rect(x0 - 1, gT, x0 + 1, gB));
+      c.Alpha := 1;
+      c.Polygon([Point(x0 - 5, gT), Point(x0 + 5, gT), Point(x0, gT + 7)]);
+    end;
+  end;
+
+  { velocity lane }
+  c.Brush.Style := bsSolid;
+  c.Brush.Color := TlMix(th.PanelBackground, th.Background, 0.25);
+  c.FillRect(Rect(0, gB, w, h));
+  c.Pen.Style := psSolid;
+  c.Pen.Color := th.Border;
+  c.MoveTo(0, gB);
+  c.LineTo(w, gB);
+  c.Pen.Style := psClear;
+  c.Brush.Style := bsClear;
+  c.Font.Size := 7;
+  c.Font.Color := th.SecondaryText;
+  c.TextOut(8, gB + 8, 'VEL');
+  vh := h - gB - 10;
+  c.Brush.Style := bsSolid;
+  for i := 0 to trk.NoteCount - 1 do
+  begin
+    n := trk.Notes[i];
+    x0 := PrTickToX(n.StartTick);
+    if (x0 < PR_KEY_W) or (x0 > w) then Continue;
+    c.Brush.Color := TlMix(th.MidiNote, clWhite, 0.15);
+    c.FillRect(Rect(x0, h - 4 - Round(vh * n.Velocity / 127), x0 + 3, h - 4));
+  end;
+  c.Font.Size := 9;
 end;
 
 { FMidiScaleType indexes cboMidiScaleType's items - see RefreshMidiTab. Used
@@ -19426,6 +32788,17 @@ begin
     cboMidiClip.ItemIndex := FMidiClipIndex;
 
     seq := CurrentMidiSeq;
+    cboMidiTrack.Items.BeginUpdate;
+    try
+      cboMidiTrack.Items.Clear;
+      if seq <> nil then
+        for i := 0 to seq.TrackCount - 1 do
+          cboMidiTrack.Items.Add(Format('%d: %s (%d notes)', [i, seq.GetTrack(i).Name, seq.GetTrack(i).NoteCount]));
+    finally
+      cboMidiTrack.Items.EndUpdate;
+    end;
+    if (seq <> nil) and (FMidiTrackIndex >= seq.TrackCount) then FMidiTrackIndex := 0;
+    cboMidiTrack.ItemIndex := FMidiTrackIndex;
     if seq = nil then
       memMidi.Lines.Text :=
         'No MIDI clip yet.  "Add clip" creates one (PPQ 480, 4/4, 120 BPM).'#13#10 +
@@ -19439,87 +32812,6 @@ begin
     pbPianoRoll.Invalidate;
   finally
     FMidiRefreshing := False;
-  end;
-end;
-
-procedure TfrmMain.pbPianoRollPaint(Sender: TObject);
-var
-  c: TCanvas;
-  w, h, loNote, hiNote, noteRange, i: Integer;
-  seq: TMidiSequence;
-  trk: TMidiTrackSeq;
-  span, barTicks, t: Int64;
-  x0, x1, y0, rowH, bx: Integer;
-  n: TMidiNote;
-  pxPerTick: Double;
-begin
-  c := pbPianoRoll.Canvas;
-  w := pbPianoRoll.Width;
-  h := pbPianoRoll.Height;
-  c.Brush.Color := clWhite;
-  c.FillRect(Rect(0, 0, w, h));
-
-  loNote := MIDI_PR_LO_NOTE; hiNote := MIDI_PR_HI_NOTE;
-  noteRange := hiNote - loNote;
-  rowH := Max(1, h div noteRange);
-
-  { horizontal key rows (grey for black keys); rows outside the selected
-    scale get an extra dim wash when "Highlight scale" is on, so the usable
-    notes stand out at a glance - MidiNoteInScale returns True for every row
-    when the feature is off, so this is a no-op in that case }
-  for i := 0 to noteRange - 1 do
-  begin
-    if MidiNoteIsBlack(hiNote - 1 - i) then c.Brush.Color := $00F0F0F0
-    else c.Brush.Color := clWhite;
-    c.FillRect(Rect(0, i * rowH, w, (i + 1) * rowH));
-    if not MidiNoteInScale(hiNote - 1 - i) then
-    begin
-      c.Brush.Color := $00E8E8E8;
-      c.FillRect(Rect(0, i * rowH, w, (i + 1) * rowH));
-    end;
-  end;
-
-  seq := CurrentMidiSeq;
-  if seq = nil then Exit;
-  trk := seq.GetTrack(FMidiTrackIndex);
-  if trk = nil then Exit;
-
-  span := Max(seq.DurationTicks, seq.TicksPerBar(0) * 4);
-  if span <= 0 then span := seq.PPQ * 16;
-  pxPerTick := w / span;
-
-  { bar lines }
-  c.Pen.Color := $00D8D8D8;
-  barTicks := seq.TicksPerBar(0);
-  t := 0;
-  while (barTicks > 0) and (t <= span) do
-  begin
-    bx := Round(t * pxPerTick);
-    c.MoveTo(bx, 0); c.LineTo(bx, h);
-    Inc(t, barTicks);
-  end;
-
-  { Ctrl+drag highlighted range }
-  if FMidiRangeActive then
-  begin
-    c.Brush.Color := $00F5D9B8;
-    c.FillRect(Rect(Round(FMidiRangeStart * pxPerTick), 0,
-      Round(FMidiRangeEnd * pxPerTick), h));
-  end;
-
-  { notes }
-  for i := 0 to trk.NoteCount - 1 do
-  begin
-    n := trk.Notes[i];
-    if (n.Note < loNote) or (n.Note >= hiNote) then Continue;
-    x0 := Round(n.StartTick * pxPerTick);
-    x1 := Round(n.EndTick * pxPerTick);
-    if x1 <= x0 then x1 := x0 + 2;
-    y0 := (hiNote - 1 - n.Note) * rowH;
-    if (n.Id = FMidiSelectedNoteId) or n.Selected then c.Brush.Color := $000080FF
-    else c.Brush.Color := $00C08040;
-    c.Pen.Color := clBlack;
-    c.Rectangle(x0, y0, x1, y0 + rowH);
   end;
 end;
 
@@ -19539,10 +32831,34 @@ var
   n: TMidiNote;
   tick, len, gridLen: Int64;
   note, vv, edge: Integer;
+  chd: TTimelineChord;
 begin
   seq := CurrentMidiSeq;
   if seq = nil then Exit;
   FMidiDragMode := mdmMidiNone;
+
+  { the chord lane: double-click adds / renames, right-click deletes }
+  if (X >= PR_KEY_W) and (Y >= PR_RULER_H) and (Y < PrGridTop) then
+  begin
+    chd := PrChordAtX(X);
+    if Button = mbRight then
+    begin
+      if chd <> nil then TlChordDelete(chd.Id);
+    end
+    else if (Button = mbLeft) and (ssDouble in Shift) then
+    begin
+      if chd <> nil then TlChordRename(chd.Id)
+      else
+      begin
+        tick := MidiTickAtX(X);
+        tick := tick - (tick mod Max(Int64(1), seq.TicksPerBar(0)));
+        TlChordAdd(PrChordOffsetSec + seq.TickToSeconds(tick));
+      end;
+    end;
+    pbPianoRoll.Invalidate;
+    Exit;
+  end;
+  if (X < PR_KEY_W) or (Y < PrGridTop) or (Y >= PrGridBottom) then Exit;
 
   if Button = mbRight then
   begin
@@ -19703,6 +33019,8 @@ begin
   if FMidiRefreshing then Exit;
   FMidiClipIndex := cboMidiClip.ItemIndex;
   FMidiTrackIndex := 0;
+  FMidiZoomX := 1;
+  FMidiViewStart := 0;
   RefreshMidiTab;
 end;
 
@@ -19794,6 +33112,7 @@ begin
   FWavPlaying := False;
   StopTimelinePlayback;
   App.Audio.SetSource(FMidiEngine);
+  tmrUI.Interval := TRK_UI_PLAY_INTERVAL_MS;   // the play position line needs a quick refresh
   memMidi.Lines.Text := 'playing "' + FProject.Midi.ClipName(FMidiClipIndex) +
     '" through the internal poly synth';
 end;
@@ -19806,6 +33125,7 @@ begin
     FMidiEngineRef.Stop;
   FMidiEngine := nil;
   FMidiEngineRef := nil;
+  if not (FTlPlaying or FTrkPlaying) then tmrUI.Interval := TRK_UI_IDLE_INTERVAL_MS;
   RefreshMidiTab;
 end;
 
@@ -19877,6 +33197,7 @@ end;
 
 procedure TfrmMain.btnMidiImportSMFClick(Sender: TObject);
 var
+  ti: Integer;
   smf: TSmfFile;
   seq: TMidiSequence;
   nm: string;
@@ -19890,13 +33211,26 @@ begin
       seq := TMidiSequence.Create;
       seq.BuildFromSMF(smf);
       nm := ChangeFileExt(ExtractFileName(dlgOpenMidi.FileName), '');
-      FProject.Midi.AddClip(nm, seq);
-      FProject.Touch;
+      { place it on the Timeline (new MIDI track at 0) as well as the library,
+        so the arrangement and piano roll both show it }
+      FCmds.Perform(TCommitMidiTakeCommand.Create(FProject, 0, seq, nm, 0.0, nm));
+      EnsureMixerStripsForTimelineTracks;   // the new MIDI lane gets its mixer strip
       FMidiClipIndex := FProject.Midi.ClipCount - 1;
       FMidiTrackIndex := 0;
-      FCmds.Clear;
+      { a type-1 file's first track is usually just tempo/meta - open the first one with notes }
+      with FProject.Midi.Clip(FMidiClipIndex) do
+        for ti := 0 to TrackCount - 1 do
+          if GetTrack(ti).NoteCount > 0 then
+          begin
+            FMidiTrackIndex := ti;
+            Break;
+          end;
+      FMidiZoomX := 1;
+      FMidiViewStart := 0;
+      if FTlPlayer <> nil then FTlPlayer.InvalidateAllMidi;
       memMidi.Lines.Text := 'imported ' + ExtractFileName(dlgOpenMidi.FileName) +
         sLineBreak + smf.Describe;
+      RefreshTimelineTab;
     except
       on E: Exception do
         memMidi.Lines.Text := 'import FAILED: ' + E.Message;
@@ -19968,7 +33302,7 @@ end;
        between the controls and App.Config ([audio]/[logging]/[general]/[ui]/
        [paths] sections - see UDAW.Config / UDAW.UI.Theme). }
 
-procedure SelOrAddCombo(ACombo: TComboBox; const AValue: string);
+procedure SelOrAddCombo(ACombo: TGLCombo; const AValue: string);
 var
   i: Integer;
 begin
@@ -19979,6 +33313,9 @@ end;
 
 procedure TfrmMain.ApplyDirDialogs;
 begin
+  TfrmEffectEditor.PresetsFolder := Trim(edDirPresets.Text);
+  { the saved equaliser presets in that folder fill the Mixer's preset box from the start }
+  MixEqRefreshPresets;
   if edDirAudioLib.Text <> '' then
   begin
     dlgOpenMp3.InitialDir := edDirAudioLib.Text;
@@ -19995,6 +33332,7 @@ begin
     dlgOpenProject.InitialDir := edDirProjects.Text;
     dlgSaveProject.InitialDir := edDirProjects.Text;
   end;
+  if edDirScripts.Text <> '' then dlgOpenPy.InitialDir := edDirScripts.Text;
 end;
 
 procedure TfrmMain.RefreshInputDeviceCombo(const ASelectedDeviceId: string);
@@ -20121,13 +33459,31 @@ begin
   if (FMidiOutDevice <> nil) and FMidiOutDevice.IsOpen then
     FMidiOutDevice.SendMessage(AMsg);
 
+  { MIDI record in the Tracker tab writes the played notes into the pattern grid }
+  if (btnTrkMidiRec <> nil) and btnTrkMidiRec.Down and TabIs(tabTracker) then
+  begin
+    TrkMidiRecord(AMsg, ATimestampMs);
+    Exit;
+  end;
+
+  { the INST page plays the pads from a connected keyboard }
+  if (FDrum <> nil) and ((FTlMode = MODE_INST) or (FTlMode = MODE_PATTERN)) and
+     (AMsg.StatusHi in [$80, $90]) then
+  begin
+    if AMsg.IsNoteOn then FDrum.HitNote(AMsg.NoteNumber, AMsg.Velocity)
+    else FDrum.ReleaseNote(AMsg.NoteNumber);
+  end;
+
   if FMidiRecording and (FMidiCapture <> nil) then
   begin
     elapsed := (Int64(ATimestampMs) - Int64(FMidiRecStartTick)) / 1000.0;
     FMidiCapture.Feed(AMsg, elapsed)
   end
   else if FMidiMonitorSynth <> nil then
+  begin
+    FMidiMonitorSynth.DrumMachine := nil;   { the kit is auditioned by the INST page itself }
     FMidiMonitorSynth.DispatchMessage(AMsg);
+  end;
 end;
 
 procedure TfrmMain.cboSetMidiInDeviceChange(Sender: TObject);
@@ -20169,7 +33525,7 @@ end;
   system-wide setting (Settings > Show hints), not per project. }
 procedure TfrmMain.InstallControlHints;
 const
-  TABLE: array[0..53] of array[0..2] of string = (
+  TABLE: array[0..60] of array[0..2] of string = (
     ('edtProjectName', 'Project name', 'Shown in the title bar and used for the saved project file.'),
     ('edtProjectTempo', 'Tempo (BPM)', 'Project tempo. Drives the Timeline grid, tracker/MIDI timing and tempo-stretched clips.'),
     ('cboProjectSampleRate', 'Project sample rate', 'Internal rate for rendering and export. Clips at other rates are resampled.'),
@@ -20193,8 +33549,7 @@ const
     ('tbTlMasterVol', 'Master volume', 'Output level for Timeline playback and export.'),
     ('edtTlTempo', 'Timeline tempo', 'Timeline BPM; kept in sync with the Project tab.'),
     ('cboTrkInstrSel', 'Instrument', 'Pick which tracker instrument sample to inspect and export.'),
-    ('btnTrkInstrAddTimeline', 'Add to Timeline', 'Bounce this instrument to a WAV in the Recordings folder and place it on the Timeline.'),
-    ('btnTrkInstrSaveWav', 'Export sample', 'Export as WAV, raw PCM or FLAC. WAV carries loop points and all applied settings (volume, pan, fadeout, envelopes); PCM/FLAC get a .txt sidecar.'),
+    ('ibTrkInstr', 'Instrument actions', 'Add to Timeline: bounce this instrument to a WAV in the Recordings folder and place it on the Timeline. Export sample: export as WAV, raw PCM or FLAC (WAV carries loop points and all applied settings; PCM/FLAC get a .txt sidecar). WAV editor: edit the instrument''s sound (trim, cut, fades, effects...); also opened by double-clicking the waveform. OK replaces the sample, Cancel leaves it unchanged.'),
     ('cboMidiGrid', 'Grid', 'Note-length grid used for piano roll edits.'),
     ('chkMidiScaleHighlight', 'Scale highlight', 'Tint piano roll rows that belong to the chosen scale.'),
     ('cboSetBackend', 'Audio backend', 'auto picks the best device API; wasapi is Windows native; software renders without hardware.'),
@@ -20203,8 +33558,16 @@ const
     ('chkSetExclusive', 'Exclusive mode', 'Take exclusive control of the device for the lowest latency. Other apps lose audio.'),
     ('chkSetCapture', 'Audio input', 'Enable audio capture; required for recording and voice control.'),
     ('cboSetInDevice', 'Input device', 'Microphone / line input used for recording.'),
+    ('btnLumaTest', 'Test Luma', 'Check the Luma connection and API key (this uses a few credits).'),
+    ('btnLumaConcepts', 'Load concepts', 'Load the Luma camera-concept list used to steer generation.'),
+    ('btnLumaOpen', 'Open result', 'Open the generated Luma video or image.'),
+    ('btnLumaGenerate', 'Generate', 'Send the prompt to Luma and generate the video or image.'),
+    ('btnLumaCancel', 'Cancel', 'Cancel the Luma generation in progress.'),
+    ('ibTlTransport', 'Transport', 'Start, play, stop, end, record and loop - plus the video panel, editor and Clip Stage switches, the lanes and the chords lane (Clip Stage: scenes with one launch slot per track; press a scene or a slot to loop it independently of the Timeline), the browser panel, and the metronome click.'),
+    ('cboTlStageQuant', 'Launch quantize', 'Launched clips start on this grid: none, 1 beat, 1 bar, 2 bars or 4 bars.'),
     ('cboSetTlRefresh', 'Timeline refresh', 'How many times a second the Timeline redraws while playing. Lower values use less CPU and leave more for audio and video; higher values look smoother.'),
     ('cboSetLogLevel', 'Log level', 'Minimum severity written to the log.'),
+    ('chkSetShowStart', 'Show Project Startup screen', 'Shows the Project Startup screen (New, Open, recent projects, Help) each time UDAW starts.'),
     ('chkSetTempoAuto', 'Auto-detect BPM', 'The first audio track you import sets the Timeline BPM.'),
     ('chkSetTempoResample', 'Resample tempo', 'Conform tempo by resampling (pitch follows) instead of the phase vocoder (pitch preserved).'),
     ('cboSetTheme', 'Visual theme', 'Application look. Applies immediately.'),
@@ -20224,8 +33587,12 @@ const
     ('btnSunoGenerate', 'Generate', 'Send the prompt to Suno and import the result on the Timeline.'),
     ('btnSunoCancel', 'Cancel', 'Cancel the running generation.'),
     ('chkSunoInstrumental', 'Instrumental', 'Generate without vocals.'));
-  TABLE2: array[0..164] of array[0..2] of string = (
+  TABLE2: array[0..161] of array[0..2] of string = (
     ('edtProjectAuthor', 'Author', 'Name stored in the project file as its author.'),
+    ('cboExpBitrate', 'Video quality', 'Video bitrate used when exporting MP4 / MKV. Higher = better picture, larger file. Saved with the project.'),
+    ('cboExpAudio', 'Audio quality', 'Audio bitrate used for MP3, MP4, M4A and MKV exports. Higher = better sound, larger file. Video exports use the nearest rate the AAC encoder offers (96-192 kbps). Saved with the project.'),
+    ('cboExpWidth', 'Video size', 'Largest picture width for video exports; bigger pictures are scaled down. Saved with the project.'),
+    ('edExpAuthor', 'Author', 'Author name written into the header of every exported file. Saved with the project.'),
     ('edtTimeSigNum', 'Time signature (beats)', 'Number of beats per bar, e.g. the 3 in 3/4. Drives the Timeline bar grid.'),
     ('edtTimeSigDen', 'Time signature (note value)', 'Note value that counts one beat, e.g. the 4 in 3/4.'),
     ('edtProjectChannels', 'Project channels', 'Number of output channels used when mixing and exporting (2 = stereo).'),
@@ -20246,9 +33613,7 @@ const
     ('btnMixRedoRow', 'Redo', 'Re-apply the mixer change you just undid.'),
     ('pbMixAuto', 'Automation lane', 'Click and drag to draw automation for the chosen parameter over time.'),
     ('memMix', 'Mixer log', 'Read-only details of the mixer state and recent actions.'),
-    ('pbMixer', 'Mixer', 'Click a strip to select it. Drag faders and pan knobs, and use M / S to mute or solo.'),
-    ('cboRecChannels', 'Input channels', 'Mono or stereo capture for new takes.'),
-    ('edtRecDuration', 'Duration', 'Length to record in seconds. 0 records until you stop.'),
+    ('pbMixer', 'Mixer', 'Click a strip to select it. Drag its fader and pan slider, use M / S / R to mute, solo or arm, and + FX / + Send to add effects and sends.'),
     ('edtRecPreRoll', 'Pre-roll', 'Seconds of audio played before the recording actually begins.'),
     ('edtRecCountIn', 'Count-in', 'Number of metronome beats played before recording starts.'),
     ('cboRecPunch', 'Punch mode', 'Record only between the punch-in and punch-out times.'),
@@ -20261,7 +33626,7 @@ const
     ('btnRecScan', 'Recover takes', 'Look for unfinished recordings left by a crash and rebuild them.'),
     ('memRec', 'Recording log', 'Read-only status of the capture engine and takes.'),
     ('pbRecTakes', 'Takes and comp lanes', 'Click a take to select it. Drag across takes to swipe-comp the best parts.'),
-    ('chkTlMetronome', 'Metronome', 'Play a click at the project tempo during Timeline playback.'),
+
     ('pbTlMeters', 'Output meters', 'Left and right output levels, active during playback.'),
     ('memTimeline', 'Timeline log', 'Read-only details of Timeline actions and playback.'),
     ('sbTlHorz', 'Horizontal scroll', 'Scroll the Timeline along time.'),
@@ -20269,11 +33634,6 @@ const
     ('cboTrkPattern', 'Pattern', 'Choose which tracker pattern to view and edit.'),
     ('edtTrkSpeed', 'Speed', 'Ticks per row. Lower is faster.'),
     ('edtTrkBPM', 'Tracker BPM', 'Tick rate of the module. Combined with speed it sets the tempo.'),
-    ('edtTrkNote', 'Note', 'Note entered into the selected cell, e.g. C-4.'),
-    ('edtTrkInstr', 'Instrument number', 'Instrument the selected cell triggers.'),
-    ('edtTrkVol', 'Volume column', 'Volume value of the selected cell.'),
-    ('edtTrkEff', 'Effect', 'Effect command of the selected cell (arpeggio, slide, vibrato...).'),
-    ('edtTrkParam', 'Effect parameter', 'Parameter value for the effect command.'),
     ('btnTrkSupport', 'ModPlug support', 'Open the ModPlug Tracker website.'),
     ('memTrk', 'Tracker log', 'Read-only module information and messages.'),
     ('pbTrkSequence', 'Order list', 'Click a position to jump to that pattern. Follows playback.'),
@@ -20298,6 +33658,8 @@ const
     ('btnDirAudioLib', 'Browse', 'Choose the audio library folder.'),
     ('edDirSfx', 'SFX folder', 'Folder of sound effects, shown in the Browser.'),
     ('btnDirSfx', 'Browse', 'Choose the sound effects folder.'),
+    ('edDirPresets', 'Presets folder', 'Where the effect editors save and load presets. Leave empty to use the data folder. Saved with your settings.'),
+    ('btnDirPresets', 'Browse', 'Choose the presets folder.'),
     ('edDirExport', 'Export folder', 'Default folder for rendered and exported files.'),
     ('btnDirExport', 'Browse', 'Choose the export folder.'),
     ('edDirRecordings', 'Recordings folder', 'Folder where recorded and generated takes are saved.'),
@@ -20306,6 +33668,8 @@ const
     ('btnDirTemp', 'Browse', 'Choose the temporary files folder.'),
     ('edDirCache', 'Cache files folder', 'Where UDAW keeps decoded and downloaded media it can rebuild. Leave empty for the default (under your user profile). Choose a roomier drive if your C: drive is small. Takes effect the next time UDAW starts.'),
     ('btnDirCache', 'Browse', 'Choose the cache files folder.'),
+    ('edDirScripts', 'Default scripting folder', 'Where Run Python Script opens and where the helper module for scripts is written. Leave empty to use a Scripts folder under the config folder. Saved with your settings.'),
+    ('btnDirScripts', 'Browse', 'Choose the default scripting folder.'),
     ('memSysPaths', 'System locations', 'Read-only fixed folders UDAW uses for config, data, cache and logs.'),
     ('cboColorTheme', 'Colour theme', 'Colour set for waveforms, meters, piano roll and tracker.'),
     ('btnColorThemeSave', 'Save copy', 'Save the current colours as a new named theme.'),
@@ -20386,10 +33750,7 @@ const
     ('btnAiClear', 'Clear', 'Clear the conversation.'),
     ('btnSunoTest', 'Test connection', 'Check the Suno server address and key.'),
     ('cboSunoApi', 'Suno API type', 'Which Suno service or proxy to talk to.'),
-    ('edtSunoContinueAt', 'Continue at', 'Second in the reference audio where Suno should extend.'),
-    ('memAiLog', 'AI log', 'Conversation and progress messages.'),
-    ('lvLog', 'Log', 'Every message logged by UDAW.'),
-    ('cboLevel', 'Log filter', 'Show only messages at or above this severity.'));
+    ('edtSunoContinueAt', 'Continue at', 'Second in the reference audio where Suno should extend.'));
 var
   i: Integer;
   c: TComponent;
@@ -20470,15 +33831,16 @@ begin
   SelOrAddCombo(cboSetLogLevel, cfg.GetString(CFG_SEC_LOGGING, CFG_LOG_LEVEL, 'info'));
 
   cboSetTlRefresh.Items.Clear;
-  for v := 1 to 8 do
+  for v := 1 to 12 do
     cboSetTlRefresh.Items.Add(IntToStr(v * 5));
   FTlRefreshHz := cfg.GetInt(CFG_SEC_GENERAL, CFG_GEN_TL_REFRESH_HZ, DEFAULT_TL_REFRESH_HZ);
-  if (FTlRefreshHz < 5) or (FTlRefreshHz > 40) then FTlRefreshHz := DEFAULT_TL_REFRESH_HZ;
+  if (FTlRefreshHz < 5) or (FTlRefreshHz > 60) then FTlRefreshHz := DEFAULT_TL_REFRESH_HZ;
   cboSetTlRefresh.ItemIndex := (FTlRefreshHz div 5) - 1;
   if FTlPlaying then tmrUI.Interval := TlPlayIntervalMs;
 
   edSetLocale.Text := cfg.GetString(CFG_SEC_GENERAL, CFG_GEN_LOCALE, 'en');
   chkSetTempoAuto.Checked := cfg.GetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_AUTO, True);
+  chkSetShowStart.Checked := cfg.GetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_START, True);
   chkSetTempoResample.Checked := cfg.GetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_RESAMPLE, False);
   chkSetHints.Checked := cfg.GetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_HINTS, True);
   SetUDAWHintsEnabled(chkSetHints.Checked);
@@ -20511,6 +33873,8 @@ begin
   edDirSfx.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_SFX, '');
   edDirExport.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_EXPORT, '');
   edDirRecordings.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_RECORDINGS, '');
+  edDirScripts.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_SCRIPTS, '');
+  edDirPresets.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_PRESETS, '');
   var ovTemp, ovCache: string;
   LoadFolderOverrides(ovTemp, ovCache);
   edDirTemp.Text := ovTemp;
@@ -20526,6 +33890,13 @@ begin
     'Temp        : ' + Paths.Temp + sLineBreak +
     'Config file : ' + cfg.Path + sLineBreak +
     'Executable  : ' + Paths.ExecutableFile;
+  edSysConfig.Text := Paths.Config;
+  edSysData.Text := Paths.Data;
+  edSysCache.Text := Paths.Cache;
+  edSysLogs.Text := Paths.Logs;
+  edSysTemp.Text := Paths.Temp;
+  edSysCfgFile.Text := cfg.Path;
+  edSysExe.Text := Paths.ExecutableFile;
 
   lblSettingsStatus.Caption := ' ';
 end;
@@ -20571,6 +33942,7 @@ begin
   if FTlPlaying then tmrUI.Interval := TlPlayIntervalMs;
   cfg.SetString(CFG_SEC_GENERAL, CFG_GEN_LOCALE, Trim(edSetLocale.Text));
   cfg.SetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_AUTO, chkSetTempoAuto.Checked);
+  cfg.SetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_START, chkSetShowStart.Checked);
   cfg.SetBool(CFG_SEC_GENERAL, CFG_GEN_TEMPO_RESAMPLE, chkSetTempoResample.Checked);
   cfg.SetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_HINTS, chkSetHints.Checked);
   SetUDAWHintsEnabled(chkSetHints.Checked);
@@ -20581,7 +33953,7 @@ begin
   begin
     ThemeColorsApply(cboColorTheme.Text);
     ThemeColorsSaveToConfig(cfg, cboColorTheme.Text);
-    Invalidate;   // repaint every custom-drawn surface with the new colours
+    RepaintThemedViews;   // repaint every custom-drawn surface with the new colours
   end;
 
   if cboSetTheme.ItemIndex >= 0 then
@@ -20596,6 +33968,8 @@ begin
   cfg.SetString(CFG_SEC_PATHS, CFG_PATH_SFX, Trim(edDirSfx.Text));
   cfg.SetString(CFG_SEC_PATHS, CFG_PATH_EXPORT, Trim(edDirExport.Text));
   cfg.SetString(CFG_SEC_PATHS, CFG_PATH_RECORDINGS, Trim(edDirRecordings.Text));
+  cfg.SetString(CFG_SEC_PATHS, CFG_PATH_SCRIPTS, Trim(edDirScripts.Text));
+  cfg.SetString(CFG_SEC_PATHS, CFG_PATH_PRESETS, Trim(edDirPresets.Text));
   ApplyDirDialogs;
 
   { Temp / Cache live in a bootstrap file (they are read before the config
@@ -20675,7 +34049,7 @@ begin
   if cboColorTheme.ItemIndex >= 0 then
   begin
     ThemeColorsApply(cboColorTheme.Text);
-    Invalidate;
+    RepaintThemedViews;
     LoadColorsTab;
   end;
 end;
@@ -20696,6 +34070,7 @@ begin
     LoadSettingsTab;
     SelOrAddCombo(cboColorTheme, name);
     ThemeColorsApply(name);
+    RepaintThemedViews;
     lblColorThemeStatus.Caption := 'saved "' + name + '"';
   end
   else
@@ -20708,7 +34083,7 @@ begin
   if ThemeColorsReset(cboColorTheme.Text) then
   begin
     ThemeColorsApply(cboColorTheme.Text);
-    Invalidate;
+    RepaintThemedViews;
     LoadColorsTab;
     lblColorThemeStatus.Caption := 'reset "' + cboColorTheme.Text + '" to its built-in colours';
   end
@@ -20718,10 +34093,10 @@ end;
 
 procedure TfrmMain.btnColorThemeExportClick(Sender: TObject);
 var
-  dlg: TSaveDialog;
+  dlg: TGLSaveDialog;
 begin
   if not RequireRegistration('Exporting a colour theme') then Exit;
-  dlg := TSaveDialog.Create(Self);
+  dlg := TGLSaveDialog.Create(Self);
   try
     dlg.DefaultExt := 'udawtheme';
     dlg.Filter := 'UDAW theme (*.udawtheme)|*.udawtheme|All files (*.*)|*.*';
@@ -20740,10 +34115,10 @@ end;
 
 procedure TfrmMain.btnColorThemeImportClick(Sender: TObject);
 var
-  dlg: TOpenDialog;
+  dlg: TGLOpenDialog;
   theme: TUDAWTheme;
 begin
-  dlg := TOpenDialog.Create(Self);
+  dlg := TGLOpenDialog.Create(Self);
   try
     dlg.DefaultExt := 'udawtheme';
     dlg.Filter := 'UDAW theme (*.udawtheme)|*.udawtheme|All files (*.*)|*.*';
@@ -20755,7 +34130,7 @@ begin
         LoadSettingsTab;
         SelOrAddCombo(cboColorTheme, theme.Name);
         ThemeColorsApply(theme.Name);
-        Invalidate;
+        RepaintThemedViews;
         lblColorThemeStatus.Caption := 'imported "' + theme.Name + '"';
       end
       else
@@ -20778,6 +34153,9 @@ procedure TfrmMain.LoadColorsTab;
 var
   sw: TColorSwatch;
   theme: TUDAWTheme;
+  fxName: string;
+  fxIdx: Integer;
+  fxInfo: TVideoFxInfo;
 begin
   cboFadeDisplay.ItemIndex := Ord(CurrentFadeDisplay);
   theme := ThemeColorsCurrent;
@@ -20786,6 +34164,7 @@ begin
   if lbColorSwatches.Items.Count = 0 then
   begin
     SetLength(FColorSwatchList, 0);
+    SetLength(FColorExtraKeys, 0);
     lbColorSwatches.Items.BeginUpdate;
     try
       for sw := Low(TColorSwatch) to High(TColorSwatch) do
@@ -20794,6 +34173,24 @@ begin
         SetLength(FColorSwatchList, Length(FColorSwatchList) + 1);
         FColorSwatchList[High(FColorSwatchList)] := sw;
         lbColorSwatches.Items.Add(ColorSwatchName(sw));
+        SetLength(FColorExtraKeys, Length(FColorSwatchList));
+      end;
+      { the remaining audio effects, then every video effect }
+      for fxName in TlExtraAudioFxNames do
+      begin
+        SetLength(FColorSwatchList, Length(FColorSwatchList) + 1);
+        SetLength(FColorExtraKeys, Length(FColorSwatchList));
+        FColorExtraKeys[High(FColorExtraKeys)] := fxName;
+        lbColorSwatches.Items.Add('Effect: ' + fxName);
+      end;
+      for fxIdx := 0 to VideoFxCount - 1 do
+      begin
+        fxInfo := VideoFxInfoAt(fxIdx);
+        SetLength(FColorSwatchList, Length(FColorSwatchList) + 1);
+        SetLength(FColorExtraKeys, Length(FColorSwatchList));
+        FColorExtraKeys[High(FColorExtraKeys)] := 'video:' + fxInfo.Id;
+        lbColorSwatches.Items.Add('Video ' + IfThen(fxInfo.Cls = vfTransition, 'transition', 'effect') +
+          ': ' + fxInfo.Name + ' (' + fxInfo.Group + ')');
       end;
     finally
       lbColorSwatches.Items.EndUpdate;
@@ -20808,7 +34205,10 @@ end;
 procedure TfrmMain.lbColorSwatchesClick(Sender: TObject);
 begin
   if (lbColorSwatches.ItemIndex < 0) or (lbColorSwatches.ItemIndex > High(FColorSwatchList)) then Exit;
-  FColorPreviewColor := ColorSwatchGet(ThemeColorsCurrent, FColorSwatchList[lbColorSwatches.ItemIndex]);
+  if FColorExtraKeys[lbColorSwatches.ItemIndex] <> '' then
+    FColorPreviewColor := ThemeExtraFxGet(ThemeColorsCurrent, FColorExtraKeys[lbColorSwatches.ItemIndex])
+  else
+    FColorPreviewColor := ColorSwatchGet(ThemeColorsCurrent, FColorSwatchList[lbColorSwatches.ItemIndex]);
   pbColorPreview.Invalidate;
 end;
 
@@ -20820,10 +34220,10 @@ end;
   custom-painted TPaintBox rather than a styled control. }
 procedure TfrmMain.pbColorPreviewPaint(Sender: TObject);
 var
-  cv: TCanvas;
+  cv: TGLCanvas;
   w, h: Integer;
 begin
-  cv := pbColorPreview.Canvas;
+  cv := pbColorPreview.GL;
   w := pbColorPreview.Width;
   h := pbColorPreview.Height;
   cv.Brush.Style := bsSolid;
@@ -20837,26 +34237,54 @@ var
   sw: TColorSwatch;
   theme: TUDAWTheme;
   dlg: TColorDialog;
+  extraKey: string;
 begin
   if (lbColorSwatches.ItemIndex < 0) or (lbColorSwatches.ItemIndex > High(FColorSwatchList)) then Exit;
   sw := FColorSwatchList[lbColorSwatches.ItemIndex];
   theme := ThemeColorsCurrent;
   dlg := TColorDialog.Create(Self);
   try
-    dlg.Color := ColorSwatchGet(theme, sw);
+    extraKey := FColorExtraKeys[lbColorSwatches.ItemIndex];
+    if extraKey <> '' then dlg.Color := ThemeExtraFxGet(theme, extraKey)
+    else dlg.Color := ColorSwatchGet(theme, sw);
     dlg.Options := [cdFullOpen];
     if dlg.Execute then
     begin
-      ColorSwatchSet(theme, sw, dlg.Color);
+      if extraKey <> '' then ThemeExtraFxSet(theme, extraKey, dlg.Color)
+      else ColorSwatchSet(theme, sw, dlg.Color);
       ThemeColorsSetCurrent(theme);
       FColorPreviewColor := dlg.Color;
       pbColorPreview.Invalidate;
       Invalidate;
+      RepaintThemedViews;
       lblColorsStatus.Caption := 'changed - click "Save to Theme" to keep it after restart';
     end;
   finally
     dlg.Free;
   end;
+end;
+
+{ The Timeline, Mixer, Score, piano roll and the strip / header widgets draw from the
+  current theme but only when asked to: after the colours change, ask every GL surface,
+  and have the widget groups re-read their tints }
+procedure TfrmMain.RepaintThemedViews;
+
+  procedure Walk(AParent: TWinControl);
+  var
+    i: Integer;
+  begin
+    for i := 0 to AParent.ControlCount - 1 do
+    begin
+      if AParent.Controls[i] is TGLView then AParent.Controls[i].Invalidate;
+      if AParent.Controls[i] is TWinControl then Walk(TWinControl(AParent.Controls[i]));
+    end;
+  end;
+
+begin
+  FMixSig := '';
+  FTlHdrSig := '';
+  Walk(Self);
+  Invalidate;
 end;
 
 procedure TfrmMain.cboFadeDisplayChange(Sender: TObject);
@@ -20884,46 +34312,22 @@ begin
   begin
     LoadColorsTab;
     Invalidate;
+    RepaintThemedViews;
     lblColorsStatus.Caption := 'reset "' + name + '" to its built-in colours';
   end
   else
     lblColorsStatus.Caption := '"' + name + '" has no saved edit to reset';
 end;
 
-{ Colours each row of the Log tab by severity (theme.LogTrace/.../LogCritical)
-  - PumpLog stashes the TLogLevel ordinal in TListItem.Data when it adds the
-  row, since a plain TListView has no per-item font colour of its own without
-  OwnerDraw/custom-draw. }
-procedure TfrmMain.lvLogCustomDrawItem(Sender: TCustomListView; Item: TListItem;
-  State: TCustomDrawState; var DefaultDraw: Boolean);
-var
-  theme: TUDAWTheme;
-begin
-  { Trace/Debug/Info are left completely alone (default text colour) - only
-    the levels that actually need attention get coloured, so routine logging
-    doesn't turn into a multi-colour wall of text. }
-  case TLogLevel(NativeInt(Item.Data)) of
-    llWarn, llError, llCritical:
-      begin
-        theme := CurrentTheme;
-        case TLogLevel(NativeInt(Item.Data)) of
-          llWarn:     Sender.Canvas.Font.Color := theme.LogWarn;
-          llError:    Sender.Canvas.Font.Color := theme.LogError;
-          llCritical: Sender.Canvas.Font.Color := theme.LogCritical;
-        end;
-      end;
-  end;
-  DefaultDraw := True;
-end;
 
 procedure TfrmMain.btnSettingsBrowseDirClick(Sender: TObject);
 var
-  ed: TEdit;
+  ed: TGLEdit;
   cap, dir: string;
 begin
   ed := nil;
   cap := 'Select a folder';
-  case (Sender as TButton).Tag of
+  case (Sender as TComponent).Tag of
     1: begin ed := edDirProjects;   cap := 'Projects folder'; end;
     2: begin ed := edDirAudioLib;   cap := 'Audio / media library folder'; end;
     3: begin ed := edDirSfx;        cap := 'Sound effects folder'; end;
@@ -20931,14 +34335,12 @@ begin
     5: begin ed := edDirRecordings; cap := 'Recordings folder'; end;
     6: begin ed := edDirTemp;       cap := 'Temporary files folder'; end;
     7: begin ed := edDirCache;      cap := 'Cache files folder'; end;
+    8: begin ed := edDirScripts;    cap := 'Default scripting folder'; end;
+    9: begin ed := edDirPresets;    cap := 'Presets folder'; end;
   end;
   if ed = nil then Exit;
   dir := ed.Text;
-  {$IFDEF FPC}
-  if SelectDirectory(cap, dir, dir) then
-  {$ELSE}
-  if SelectDirectory(cap, '', dir) then
-  {$ENDIF}
+  if GLSelectDirectory(cap, dir) then
     ed.Text := dir;
 end;
 
@@ -20954,7 +34356,7 @@ end;
   INTO pbTimeline/pbMixer covers the actual ask ("drag a sample onto the
   timeline") without that extra machinery.
 
-  Every tree node tags itself via TTreeNode.Data with one of the BRND_*
+  Every tree node tags itself via TGLTreeNode.Data with one of the BRND_*
   markers below - no heap-allocated per-node strings to manage. A node's
   full filesystem path is never stored; it is rebuilt on demand by
   BrowserNodePath, which walks the node's parent chain and joins their
@@ -20974,10 +34376,10 @@ begin
     (AExt = '.mkv') or (AExt = '.webm');
 end;
 
-function TfrmMain.BrowserNodePath(ANode: TTreeNode): string;
+function TfrmMain.BrowserNodePath(ANode: TGLTreeNode): string;
 var
   parts: TStringList;
-  n: TTreeNode;
+  n: TGLTreeNode;
   i: Integer;
 begin
   Result := '';
@@ -21000,7 +34402,7 @@ end;
 
 procedure TfrmMain.BrowserAddRoot(const APath: string);
 var
-  root: TTreeNode;
+  root: TGLTreeNode;
   i: Integer;
 begin
   if (Trim(APath) = '') or not DirectoryExists(APath) then Exit;
@@ -21055,11 +34457,12 @@ begin
   end;
 end;
 
-procedure TfrmMain.BrowserExpandNode(ANode: TTreeNode);
+procedure TfrmMain.BrowserExpandNode(ANode: TGLTreeNode);
 var
-  path, ext: string;
+  path, ext, nm: string;
+  names: TArray<string>;
   sr: TSearchRec;
-  child: TTreeNode;
+  child: TGLTreeNode;
 begin
   if (ANode = nil) or (ANode.Data <> BRND_DIR) then Exit;
   if not ((ANode.Count = 1) and (ANode.Item[0].Data = BRND_PLACEHOLDER)) then
@@ -21068,24 +34471,28 @@ begin
 
   path := BrowserNodePath(ANode);
 
-  { subdirectories first }
+  { subdirectories first, alphabetically }
+  names := nil;
   if FindFirst(IncludeTrailingPathDelimiter(path) + '*', faDirectory, sr) = 0 then
   begin
     try
       repeat
         if (sr.Attr and faDirectory <> 0) and (sr.Name <> '.') and (sr.Name <> '..') then
-        begin
-          child := tvBrowser.Items.AddChild(ANode, sr.Name);
-          child.Data := BRND_DIR;
-          tvBrowser.Items.AddChild(child, '(loading...)').Data := BRND_PLACEHOLDER;
-        end;
+          names := names + [sr.Name];
       until FindNext(sr) <> 0;
     finally
       FindClose(sr);
     end;
   end;
+  for nm in BrowserSortedNames(names) do
+  begin
+    child := tvBrowser.Items.AddChild(ANode, nm);
+    child.Data := BRND_DIR;
+    tvBrowser.Items.AddChild(child, '(loading...)').Data := BRND_PLACEHOLDER;
+  end;
 
-  { then files with a format the Timeline or Mixer can actually use }
+  { then files with a format the Timeline or Mixer can actually use, alphabetically }
+  names := nil;
   if FindFirst(IncludeTrailingPathDelimiter(path) + '*', faAnyFile, sr) = 0 then
   begin
     try
@@ -21093,23 +34500,24 @@ begin
         if (sr.Attr and faDirectory = 0) then
         begin
           ext := LowerCase(ExtractFileExt(sr.Name));
-          if BrowserIsAudioExt(ext) or (ext = '.dll') then
-          begin
-            child := tvBrowser.Items.AddChild(ANode, sr.Name);
-            child.Data := BRND_FILE;
-          end;
+          if BrowserIsAudioExt(ext) or (ext = '.dll') then names := names + [sr.Name];
         end;
       until FindNext(sr) <> 0;
     finally
       FindClose(sr);
     end;
   end;
+  for nm in BrowserSortedNames(names) do
+  begin
+    child := tvBrowser.Items.AddChild(ANode, nm);
+    child.Data := BRND_FILE;
+  end;
 
   if ANode.Count = 0 then
     tvBrowser.Items.AddChild(ANode, '(empty)').Data := nil;
 end;
 
-procedure TfrmMain.tvBrowserExpanding(Sender: TObject; Node: TTreeNode;
+procedure TfrmMain.tvBrowserExpanding(Sender: TObject; Node: TGLTreeNode;
   var AllowExpansion: Boolean);
 begin
   BrowserExpandNode(Node);
@@ -21122,7 +34530,7 @@ end;
 procedure TfrmMain.tvBrowserMouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
-  node: TTreeNode;
+  node: TGLTreeNode;
 begin
   if Button <> mbLeft then Exit;
   node := tvBrowser.GetNodeAt(X, Y);
@@ -21136,11 +34544,7 @@ var
   dir: string;
 begin
   dir := '';
-  {$IFDEF FPC}
-  if SelectDirectory('Add a folder to the Browser', dir, dir) then
-  {$ELSE}
-  if SelectDirectory('Add a folder to the Browser', '', dir) then
-  {$ENDIF}
+  if GLSelectDirectory('Add a folder to the Browser', dir) then
   begin
     ShowStatusProgress('Adding browser folder...', 100);
     try
@@ -21319,7 +34723,11 @@ begin
       RefreshTimelineTab;
     except
       on E: Exception do
+      begin
         memTimeline.Lines.Insert(0, 'Drag-drop import FAILED: ' + E.Message);
+        TlPruneSelection;
+        RefreshTimelineTab;
+      end;
     end;
   finally
     HideStatusProgress;
@@ -21376,17 +34784,32 @@ end;
   overlapping the first clip on the same track. }
 procedure TfrmMain.WMDropFiles(var Msg: TWMDropFiles);
 var
+  dropPtForm: TPoint;
+begin
+  DragQueryPoint(Msg.Drop, dropPtForm);
+  DoTimelineFileDrop(Msg.Drop, pbTimeline.ScreenToClient(ClientToScreen(dropPtForm)));
+  Msg.Result := 0;
+end;
+
+{ pbTimeline is a real window now (OpenGL surface), so Explorer drops over it
+  arrive here via its own OnDropFiles instead of the form's WM_DROPFILES. }
+procedure TfrmMain.pbTimelineDropFiles(Sender: TObject; ADrop: HDROP; const APoint: TPoint);
+begin
+  DoTimelineFileDrop(ADrop, APoint);
+end;
+
+procedure TfrmMain.DoTimelineFileDrop(ADrop: HDROP; const ADropPt: TPoint);
+var
   fileCount, i, len: Integer;
   fileName: string;
-  dropPtForm, dropPt: TPoint;
+  dropPt: TPoint;
   trackId: Integer;
   sec: Double;
   firstFile: Boolean;
 begin
+  dropPt := ADropPt;
   try
     if FProject = nil then Exit;
-    DragQueryPoint(Msg.Drop, dropPtForm);
-    dropPt := pbTimeline.ScreenToClient(ClientToScreen(dropPtForm));
     if not PtInRect(pbTimeline.ClientRect, dropPt) then
     begin
       memBrowser.Lines.Insert(0, 'drop ignored (not over the Timeline)');
@@ -21396,13 +34819,13 @@ begin
     sec := FTlView.Snap(FTlView.XToSeconds(dropPt.X));
     if sec < 0 then sec := 0;
 
-    fileCount := DragQueryFile(Msg.Drop, $FFFFFFFF, nil, 0);
+    fileCount := DragQueryFile(ADrop, $FFFFFFFF, nil, 0);
     firstFile := True;
     for i := 0 to fileCount - 1 do
     begin
-      len := DragQueryFile(Msg.Drop, i, nil, 0);
+      len := DragQueryFile(ADrop, i, nil, 0);
       SetLength(fileName, len);
-      DragQueryFile(Msg.Drop, i, PChar(fileName), len + 1);
+      DragQueryFile(ADrop, i, PChar(fileName), len + 1);
       if not BrowserIsAudioExt(LowerCase(ExtractFileExt(fileName))) then
       begin
         memBrowser.Lines.Insert(0, 'skipped (not an importable audio format): ' + fileName);
@@ -21421,8 +34844,7 @@ begin
         memBrowser.Lines.Insert(0, 'Explorer drop import FAILED: ' + fileName);
     end;
   finally
-    DragFinish(Msg.Drop);
-    Msg.Result := 0;
+    DragFinish(ADrop);
   end;
 end;
 {$ENDIF}
@@ -21463,7 +34885,7 @@ begin
   end;
 
   pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(path));
-  targetStrip := FProject.Mixer.StripById(targetStripId);
+  targetStrip := MixCur.StripById(targetStripId);
   if (targetStrip <> nil) and MixStripHasVst2Insert(targetStrip, pathB64) then
   begin
     memBrowser.Lines.Insert(0, 'already on that strip, ignored: ' + path);
@@ -21480,7 +34902,7 @@ begin
     end;
 
     UpdateStatusProgress(70, 'Adding plugin insert to selected mixer strip...');
-    FCmds.Perform(TAddMixInsertCommand.Create(FProject, targetStripId, 'vst2',
+    MixPerform(TAddMixInsertCommand.Create(FProject, targetStripId, 'vst2',
       Format('path=%s;state=;paramcount=%d', [pathB64, paramCount]), -1,
       ExtractFileName(path)));
     RefreshMixerTab;
@@ -21493,5 +34915,10 @@ end;
 
 initialization
   RegisterClass(TWheelPaintBox);
+  RegisterClass(TGLView);
+  RegisterClass(TGLIconBar);
+  RegisterClass(TGLCollapsePanel);
+  RegisterClass(TTlHeaderHost);
+  RegisterClass(TGLCapsuleProgress);
 
 end.

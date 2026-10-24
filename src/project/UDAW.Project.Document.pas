@@ -24,9 +24,9 @@ uses
   UDAW.Timeline.Time, UDAW.Timeline.Model,
   UDAW.Mixer.Model,
   UDAW.Tracker.Pattern,
-  UDAW.MIDI.Serialization,
+  UDAW.MIDI.Serialization, UDAW.Pattern.Model, UDAW.Drum.KitModel,
   UDAW.Composer.SongSpec, UDAW.Composer.Lyrics,
-  UDAW.Project.WindowLayout;
+  UDAW.Project.WindowLayout, UDAW.Project.DialogPaths;
 
 const
   PROJECT_SUBSYS = 'Project';
@@ -38,13 +38,35 @@ const
   PROJECT_DEFAULT_TSIG_DEN   = 4;
   PROJECT_DEFAULT_NAME       = 'Untitled Project';
 
+  EXPORT_MIN_VIDEO_KBPS = 500;
+  EXPORT_MAX_VIDEO_KBPS = 80000;
+  EXPORT_MIN_AUDIO_KBPS = 64;
+  EXPORT_MAX_AUDIO_KBPS = 320;
+  EXPORT_MIN_WIDTH      = 320;
+  SCORE_SPREAD_MIN      = 0.5;    // Score vertical spacing: tightest ...
+  SCORE_SPREAD_MAX      = 3.0;    // ... and widest
+  EXPORT_MAX_WIDTH      = 7680;
+
 type
+  { Per-project export options (Settings > Export). Saved in the project file
+    and restored when it is loaded. Zero means "automatic": a bitrate derived
+    from the picture size / the original picture width. }
+  TExportSettings = record
+    VideoBitrateKbps: Integer;   // 0 = automatic
+    MaxWidth: Integer;           // 0 = keep the source picture size
+    AudioBitrateKbps: Integer;   // 0 = automatic (MP3 / MP4 / M4A / MKV sound)
+    procedure Normalize;
+  end;
+
   TProjectDocument = class
   private
+    FExport: TExportSettings;
+    FScoreSpread: Double;       // vertical spacing of the Score (1.0 = normal)
     FUUID: TGUID;
     FName: string;
     FAuthor: string;
     FTempoBPM: Double;
+    FTempoMap: TTempoPoints;      // tempo changes after time 0 (see UDAW.Timeline.Time)
     FTimeSigNum: Integer;
     FTimeSigDen: Integer;
     FSampleRate: Integer;
@@ -56,14 +78,21 @@ type
     FGraph: TAudioGraph;
     FTimeline: TTimeline;
     FMixer: TMixerModel;
+    FTrackerMixer: TMixerModel;
     FTracker: TTrackerModule;
     FMidi: TMidiProject;
+    FPatterns: TPatternLibrary;
+    FDrumKit: TDrumKitModel;
     FSongSpec: TSongSpec;
     FLyrics: TLyricDocument;
     FWindows: TWindowLayout;
+    FDialogPaths: TDialogPaths;
     procedure SetName(const AValue: string);
     procedure SetAuthor(const AValue: string);
+    procedure SetExport(const AValue: TExportSettings);
+    procedure SetScoreSpread(AValue: Double);
     procedure SetTempoBPM(AValue: Double);
+    procedure SetTempoMap(const AValue: TTempoPoints);
     procedure SetTimeSigNum(AValue: Integer);
     procedure SetTimeSigDen(AValue: Integer);
     procedure SetSampleRate(AValue: Integer);
@@ -96,12 +125,20 @@ type
     { Adopts a freshly-parsed mixer, freeing the current one. Used only by the
       deserializer - normal code mutates Mixer in place / via commands. }
     procedure ReplaceMixer(AMixer: TMixerModel);
+    { Adopts a freshly-parsed Tracker mixer (the TRK-CHN strips + master the Tracker plays through),
+      freeing the current one. }
+    procedure ReplaceTrackerMixer(AMixer: TMixerModel);
     { Adopts a freshly-parsed tracker module, freeing the current one. Used
       only by the deserializer - normal code edits Tracker via commands. }
     procedure ReplaceTracker(ATracker: TTrackerModule);
     { Adopts a freshly-parsed MIDI project, freeing the current one. Used only
       by the deserializer - normal code edits Midi via commands. }
     procedure ReplaceMidi(AMidi: TMidiProject);
+    { Adopts a freshly-parsed pattern library, freeing the current one. Used by the
+      deserializer and by pattern undo / redo (UDAW.Pattern.Commands). }
+    procedure ReplacePatterns(APatterns: TPatternLibrary);
+    { Adopts a freshly-parsed drum kit, freeing the current one. }
+    procedure ReplaceDrumKit(AKit: TDrumKitModel);
     { Adopts a freshly-parsed/generated Song Specification, freeing the
       current one. Normal code edits SongSpec via UDAW.Composer.Commands. }
     procedure ReplaceSongSpec(ASpec: TSongSpec);
@@ -113,6 +150,7 @@ type
       place (Put/Remove) as windows open, move, resize, and close; window
       geometry is not undo-tracked. }
     procedure ReplaceWindows(AWindows: TWindowLayout);
+    procedure ReplaceDialogPaths(APaths: TDialogPaths);
     { The tempo / time-signature / sample-rate context timeline math needs. }
     function GridContext: TGridContext;
 
@@ -120,7 +158,16 @@ type
     property Name: string read FName write SetName;
     { Author / artist name stamped into MP3/MP4/M4A exports. May be empty. }
     property Author: string read FAuthor write SetAuthor;
+    { Export quality / size, saved with the project. }
+    property ExportSettings: TExportSettings read FExport write SetExport;
+    { How far apart the Score spreads its lines vertically - the gap between the two staves of a
+      grand staff and the space between lines of music; 1.0 is normal. Saved with the project and
+      used for the PDF as well as on screen. }
+    property ScoreSpread: Double read FScoreSpread write SetScoreSpread;
     property TempoBPM: Double read FTempoBPM write SetTempoBPM;
+    { tempo changes after time 0 (sorted, de-duplicated, clamped to the tempo range);
+      TempoBPM is the tempo before the first point }
+    property TempoMap: TTempoPoints read FTempoMap write SetTempoMap;
     property TimeSigNum: Integer read FTimeSigNum write SetTimeSigNum;
     property TimeSigDen: Integer read FTimeSigDen write SetTimeSigDen;
     property SampleRate: Integer read FSampleRate write SetSampleRate;
@@ -132,22 +179,63 @@ type
     property Graph: TAudioGraph read FGraph;
     property Timeline: TTimeline read FTimeline;
     property Mixer: TMixerModel read FMixer;
+    { the mixer the Tracker plays through: one TRK-CHN<n> strip per tracker channel and a master }
+    property TrackerMixer: TMixerModel read FTrackerMixer;
     property Tracker: TTrackerModule read FTracker;
     property Midi: TMidiProject read FMidi;
+    property Patterns: TPatternLibrary read FPatterns;
+    { the drum machine's pads (sample, level, pan ... and a waveform overview) as saved with the project }
+    property DrumKit: TDrumKitModel read FDrumKit;
     property SongSpec: TSongSpec read FSongSpec;
     property Lyrics: TLyricDocument read FLyrics;
     property Windows: TWindowLayout read FWindows;
+    { the last path each file dialog was used with, saved in the project }
+    property DialogPaths: TDialogPaths read FDialogPaths;
 
     function Describe: string;
   end;
 
 implementation
 
+uses
+  UDAW.Tracker.Player;
+
+procedure TExportSettings.Normalize;
+begin
+  if VideoBitrateKbps <= 0 then VideoBitrateKbps := 0
+  else VideoBitrateKbps := EnsureRange(VideoBitrateKbps, EXPORT_MIN_VIDEO_KBPS, EXPORT_MAX_VIDEO_KBPS);
+  if AudioBitrateKbps <= 0 then AudioBitrateKbps := 0
+  else AudioBitrateKbps := EnsureRange(AudioBitrateKbps, EXPORT_MIN_AUDIO_KBPS, EXPORT_MAX_AUDIO_KBPS);
+  if MaxWidth <= 0 then MaxWidth := 0
+  else MaxWidth := EnsureRange(MaxWidth, EXPORT_MIN_WIDTH, EXPORT_MAX_WIDTH);
+end;
+
+procedure TProjectDocument.SetScoreSpread(AValue: Double);
+begin
+  AValue := EnsureRange(AValue, SCORE_SPREAD_MIN, SCORE_SPREAD_MAX);
+  if SameValue(AValue, FScoreSpread, 1.0E-6) then Exit;
+  FScoreSpread := AValue;
+  MarkDirty;
+end;
+
+procedure TProjectDocument.SetExport(const AValue: TExportSettings);
+var
+  v: TExportSettings;
+begin
+  v := AValue;
+  v.Normalize;
+  if (v.VideoBitrateKbps = FExport.VideoBitrateKbps) and (v.MaxWidth = FExport.MaxWidth) and
+     (v.AudioBitrateKbps = FExport.AudioBitrateKbps) then Exit;
+  FExport := v;
+  MarkDirty;
+end;
+
 constructor TProjectDocument.Create;
 begin
   inherited Create;
   CreateGUID(FUUID);
   FName := PROJECT_DEFAULT_NAME;
+  FScoreSpread := 1.0;
   FTempoBPM := PROJECT_DEFAULT_TEMPO;
   FTimeSigNum := PROJECT_DEFAULT_TSIG_NUM;
   FTimeSigDen := PROJECT_DEFAULT_TSIG_DEN;
@@ -158,11 +246,15 @@ begin
   FGraph := TAudioGraph.Create(FChannels);
   FTimeline := TTimeline.Create;
   FMixer := TMixerModel.Create;
+  FTrackerMixer := TMixerModel.Create;
   FTracker := TTrackerModule.Create;
   FMidi := TMidiProject.Create;
+  FPatterns := TPatternLibrary.Create;
+  FDrumKit := TDrumKitModel.Create;
   FSongSpec := TSongSpec.Create;
   FLyrics := TLyricDocument.Create;
   FWindows := TWindowLayout.Create;
+  FDialogPaths := TDialogPaths.Create;
 end;
 
 constructor TProjectDocument.CreateNew(const AName: string);
@@ -172,16 +264,22 @@ begin
     FName := Trim(AName);
   FGraph.AddNode(nkOutput, 'Master');
   FMixer.InitDefault;
+  FTrackerMixer.InitDefault;
   FTracker.InitDefault;
+  EnsureTrackerMixerStrips(FTrackerMixer, FTracker.Channels, FTracker);
 end;
 
 destructor TProjectDocument.Destroy;
 begin
   FWindows.Free;
+  FDialogPaths.Free;
   FLyrics.Free;
   FSongSpec.Free;
+  FDrumKit.Free;
+  FPatterns.Free;
   FMidi.Free;
   FTracker.Free;
+  FTrackerMixer.Free;
   FMixer.Free;
   FTimeline.Free;
   FGraph.Free;
@@ -200,7 +298,10 @@ begin
   Result.FUUID := FUUID;
   Result.FName := FName;
   Result.FAuthor := FAuthor;
+  Result.FExport := FExport;
+  Result.FScoreSpread := FScoreSpread;
   Result.FTempoBPM := FTempoBPM;
+  Result.FTempoMap := Copy(FTempoMap);
   Result.FTimeSigNum := FTimeSigNum;
   Result.FTimeSigDen := FTimeSigDen;
   Result.FSampleRate := FSampleRate;
@@ -230,11 +331,20 @@ begin
   Result.FMixer.Free;
   Result.FMixer := FMixer.Clone;
 
+  Result.FTrackerMixer.Free;
+  Result.FTrackerMixer := FTrackerMixer.Clone;
+
   Result.FTracker.Free;
   Result.FTracker := FTracker.Clone;
 
   Result.FMidi.Free;
   Result.FMidi := FMidi.Clone;
+
+  Result.FPatterns.Free;
+  Result.FPatterns := FPatterns.Clone;
+
+  Result.FDrumKit.Free;
+  Result.FDrumKit := FDrumKit.Clone;
 
   Result.FSongSpec.Free;
   Result.FSongSpec := FSongSpec.Clone;
@@ -244,6 +354,8 @@ begin
 
   Result.FWindows.Free;
   Result.FWindows := FWindows.Clone;
+  Result.FDialogPaths.Free;
+  Result.FDialogPaths := FDialogPaths.Clone;
 end;
 
 procedure TProjectDocument.ReplaceGraph(AGraph: TAudioGraph);
@@ -267,6 +379,13 @@ begin
   FMixer := AMixer;
 end;
 
+procedure TProjectDocument.ReplaceTrackerMixer(AMixer: TMixerModel);
+begin
+  if AMixer = FTrackerMixer then Exit;
+  FTrackerMixer.Free;
+  FTrackerMixer := AMixer;
+end;
+
 procedure TProjectDocument.ReplaceTracker(ATracker: TTrackerModule);
 begin
   if ATracker = FTracker then Exit;
@@ -279,6 +398,20 @@ begin
   if AMidi = FMidi then Exit;
   FMidi.Free;
   FMidi := AMidi;
+end;
+
+procedure TProjectDocument.ReplacePatterns(APatterns: TPatternLibrary);
+begin
+  if APatterns = FPatterns then Exit;
+  FPatterns.Free;
+  FPatterns := APatterns;
+end;
+
+procedure TProjectDocument.ReplaceDrumKit(AKit: TDrumKitModel);
+begin
+  if AKit = FDrumKit then Exit;
+  FDrumKit.Free;
+  FDrumKit := AKit;
 end;
 
 procedure TProjectDocument.ReplaceSongSpec(ASpec: TSongSpec);
@@ -302,9 +435,17 @@ begin
   FWindows := AWindows;
 end;
 
+procedure TProjectDocument.ReplaceDialogPaths(APaths: TDialogPaths);
+begin
+  if APaths = FDialogPaths then Exit;
+  FDialogPaths.Free;
+  FDialogPaths := APaths;
+end;
+
 function TProjectDocument.GridContext: TGridContext;
 begin
   Result := TGridContext.Make(FTempoBPM, FTimeSigNum, FTimeSigDen, FSampleRate);
+  Result.Map := Copy(FTempoMap);
 end;
 
 procedure TProjectDocument.MarkDirty;
@@ -353,6 +494,52 @@ begin
       [AValue, PROJECT_MIN_TEMPO, PROJECT_MAX_TEMPO]);
   if SameValue(AValue, FTempoBPM, 1e-9) then Exit;
   FTempoBPM := AValue;
+  MarkDirty;
+end;
+
+procedure TProjectDocument.SetTempoMap(const AValue: TTempoPoints);
+var
+  clean: TTempoPoints;
+  i, j, n: Integer;
+  p: TTempoPoint;
+  same: Boolean;
+begin
+  { keep only points after time 0, clamp the tempo, sort by time, drop duplicates }
+  SetLength(clean, 0);
+  for i := 0 to High(AValue) do
+  begin
+    p := AValue[i];
+    if p.Seconds < 0.001 then Continue;
+    p.Bpm := EnsureRange(p.Bpm, PROJECT_MIN_TEMPO, PROJECT_MAX_TEMPO);
+    n := Length(clean);
+    SetLength(clean, n + 1);
+    j := n;
+    while (j > 0) and (clean[j - 1].Seconds > p.Seconds) do
+    begin
+      clean[j] := clean[j - 1];
+      Dec(j);
+    end;
+    clean[j] := p;
+  end;
+  j := 0;
+  for i := 0 to High(clean) do
+    if (j = 0) or (clean[i].Seconds - clean[j - 1].Seconds >= 0.001) then
+    begin
+      clean[j] := clean[i];
+      Inc(j);
+    end;
+  SetLength(clean, j);
+  same := Length(clean) = Length(FTempoMap);
+  if same then
+    for i := 0 to High(clean) do
+      if not (SameValue(clean[i].Seconds, FTempoMap[i].Seconds, 1e-9) and
+              SameValue(clean[i].Bpm, FTempoMap[i].Bpm, 1e-9)) then
+      begin
+        same := False;
+        Break;
+      end;
+  if same then Exit;
+  FTempoMap := clean;
   MarkDirty;
 end;
 

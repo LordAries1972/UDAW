@@ -15,7 +15,7 @@ interface
 
 uses
   SysUtils, Math,
-  UDAW.Audio.Types, UDAW.DSP.Filters, UDAW.Sequencer.Patterns;
+  UDAW.Audio.Types, UDAW.DSP.Filters, UDAW.DSP.Math, UDAW.Sequencer.Patterns;
 
 type
   TOscShape = (osSine, osSaw, osSquare, osTriangle);
@@ -68,6 +68,10 @@ type
   end;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 class function TSynthPatch.Default: TSynthPatch;
 begin
@@ -127,7 +131,7 @@ end;
 function OscSample(AShape: TOscShape; APhase, ADt: Double; var ATri: Double): Double;
 begin
   case AShape of
-    osSine: Result := Sin(2.0 * Pi * APhase);
+    osSine: Result := FastSin(2.0 * Pi * APhase);
     osSaw: Result := 2.0 * APhase - 1.0 - PolyBlep(APhase, ADt);
     osSquare:
       begin
@@ -173,7 +177,7 @@ end;
 
 function KeyToHz(AKey: Double): Double; inline;
 begin
-  Result := 440.0 * Power(2.0, (AKey - 69.0) / 12.0);
+  Result := 440.0 * SemitoneRatio(AKey - 69.0);
 end;
 
 { TSubtractiveSynth }
@@ -229,21 +233,21 @@ begin
       tri1a[u] := 0; tri2a[u] := 0;
     end;
     lfoPh := 0;
-    ratio2 := Power(2.0, Patch.Osc2Semis / 12.0 + Patch.Osc2Detune / 1200.0);
+    ratio2 := FastExp2(Patch.Osc2Semis / 12.0 + Patch.Osc2Detune / 1200.0);
     for i := i0 to i1 do
     begin
       t := (i - i0) / sr;
       if t >= noteSec then relT := t - noteSec else relT := -1;
       envA := Adsr(Patch.AmpA, Patch.AmpD, Patch.AmpS, Patch.AmpR, t, noteSec, relT, levelA);
       envF := Adsr(Patch.FltA, Patch.FltD, Patch.FltS, Patch.FltR, t, noteSec, relT, levelF);
-      lfo := Sin(2.0 * Pi * lfoPh);
+      lfo := FastSin(2.0 * Pi * lfoPh);
       lfoPh := Frac(lfoPh + Patch.LfoRateHz / sr);
       gl := 0; gr := 0;
       for u := 0 to nUni - 1 do
       begin
         if nUni = 1 then det := 0
         else det := (u / (nUni - 1) - 0.5) * 2.0 * Patch.UnisonDetune;
-        ratio1 := Power(2.0, (det + lfo * Patch.LfoToPitch) / 1200.0);
+        ratio1 := FastExp2((det + lfo * Patch.LfoToPitch) / 1200.0);
         dt1 := Min(f0 * ratio1 / sr, 0.45);
         dt2 := Min(f0 * ratio1 * ratio2 / sr, 0.45);
         s := (1.0 - Patch.OscMix) * OscSample(Patch.Osc1, ph1a[u], dt1, tri1a[u])
@@ -253,13 +257,13 @@ begin
         if Patch.SubLevel > 0 then
         begin
           ph3 := Frac(ph1a[u] * 0.5);
-          s := s + Patch.SubLevel * Sin(2.0 * Pi * ph3);
+          s := s + Patch.SubLevel * FastSin(2.0 * Pi * ph3);
         end;
         if nUni = 1 then pan := 0.5 else pan := u / (nUni - 1);
-        gl := gl + s * Cos(pan * Pi * 0.5);
-        gr := gr + s * Sin(pan * Pi * 0.5);
+        gl := gl + s * FastCos(pan * Pi * 0.5);
+        gr := gr + s * FastSin(pan * Pi * 0.5);
       end;
-      fc := Patch.CutoffHz * Power(2.0, Patch.FilterEnvAmount * envF + Patch.LfoToCutoff * lfo);
+      fc := Patch.CutoffHz * FastExp2(Patch.FilterEnvAmount * envF + Patch.LfoToCutoff * lfo);
       fc := EnsureRange(fc, 30.0, sr * 0.45);
       flt.SetParams(bqLowpass, fc, EnsureRange(Patch.Resonance, 0.4, 14.0));
       fltR.SetParams(bqLowpass, fc, EnsureRange(Patch.Resonance, 0.4, 14.0));
@@ -303,7 +307,7 @@ begin
   begin
     nt := ANotes[ni];
     noteSec := nt.Length * spb;
-    step := Power(2.0, (nt.Key - RootKey) / 12.0) * SourceRate / sr;
+    step := SemitoneRatio(nt.Key - RootKey) * SourceRate / sr;
     i0 := Max(Round(nt.Beat * spb * sr), 0);
     i1 := Min(i0 + Round((noteSec + ReleaseSec) * sr), total - 1);
     pos := 0;

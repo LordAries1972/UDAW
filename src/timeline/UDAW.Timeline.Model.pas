@@ -34,8 +34,8 @@ const
     the range a user's drag-resize (see UDAW.UI.MainForm's pbTimeline mouse
     handlers) is clamped to - wide enough for a track name, never so narrow
     the lane area vanishes or so wide it swallows the whole viewport. }
-  TIMELINE_HEADER_WIDTH_DEFAULT = 150;
-  TIMELINE_HEADER_WIDTH_MIN = 60;
+  TIMELINE_HEADER_WIDTH_DEFAULT = 230;
+  TIMELINE_HEADER_WIDTH_MIN = 190;   // room for the avatar, name, M / S / R, volume and pan
   TIMELINE_HEADER_WIDTH_MAX = 400;
 
 type
@@ -223,7 +223,10 @@ type
     procedure RemoveClip(AClipId: Integer);
     function ClipById(AClipId: Integer): TTimelineClip;
     function IndexOfClip(AClipId: Integer): Integer;
-    function ClipAtSeconds(ASeconds: Double): TTimelineClip;  // first overlapping
+    function ClipAtSeconds(ASeconds: Double): TTimelineClip;
+    { the looping clip (Loop set) that has already ended before ASeconds but is still repeating: it
+      fills the lane until ALimit (the end of the last segment on the Timeline) }
+    function LoopFillClipAt(ASeconds, ALimit: Double): TTimelineClip;  // first overlapping
     function ClipCount: Integer;
     function GetClip(AIndex: Integer): TTimelineClip;
     function LastEndSeconds: Double;
@@ -245,16 +248,38 @@ type
     property Title: string read FTitle write FTitle;
   end;
 
+  { one chord of the Chords lane: a symbol such as "Am7" held over a span }
+  TTimelineChord = class
+  private
+    FId: Integer;
+    FName: string;
+    FStartSeconds: Double;
+    FLengthSeconds: Double;
+    FLocked: Boolean;
+  public
+    constructor Create(AId: Integer; const AName: string; AStart, ALength: Double);
+    function EndSeconds: Double;
+    property Id: Integer read FId;
+    property Name: string read FName write FName;
+    property StartSeconds: Double read FStartSeconds write FStartSeconds;
+    property LengthSeconds: Double read FLengthSeconds write FLengthSeconds;
+    { locked: it cannot be moved until it is unlocked }
+    property Locked: Boolean read FLocked write FLocked;
+  end;
+
   TTimelineMarker = class
   private
     FId: Integer;
     FName: string;
     FSeconds: Double;
+    FLocked: Boolean;
   public
     constructor Create(AId: Integer; const AName: string; ASeconds: Double);
     property Id: Integer read FId;
     property Name: string read FName write FName;
     property Seconds: Double read FSeconds write FSeconds;
+    { locked: it cannot be moved until it is unlocked }
+    property Locked: Boolean read FLocked write FLocked;
   end;
 
   TTimelineRegion = class
@@ -264,14 +289,20 @@ type
     FStartSeconds: Double;
     FLengthSeconds: Double;
     FColor: Integer;
+    FContinuous: Boolean;
+    FLocked: Boolean;
   public
     constructor Create(AId: Integer; const AName: string; AStart, ALength: Double);
     function EndSeconds: Double;
     property Id: Integer read FId;
     property Name: string read FName write FName;
+    { a launched scene plays its region once and then stops, unless this is set: then it loops on and on }
+    property Continuous: Boolean read FContinuous write FContinuous;
     property StartSeconds: Double read FStartSeconds write FStartSeconds;
     property LengthSeconds: Double read FLengthSeconds write FLengthSeconds;
     property Color: Integer read FColor write FColor;
+    { locked: it cannot be moved until it is unlocked }
+    property Locked: Boolean read FLocked write FLocked;
   end;
 
   { A video effect or transition laid over a span of one video track (see
@@ -311,6 +342,8 @@ type
     FTracks: TObjectList<TTimelineTrack>;
     FSources: TObjectList<TMediaSource>;
     FMarkers: TObjectList<TTimelineMarker>;
+    FChords: TObjectList<TTimelineChord>;
+    FNextChordId: Integer;
     FRegions: TObjectList<TTimelineRegion>;
     FNextTrackId: Integer;
     FNextClipId: Integer;
@@ -400,6 +433,19 @@ type
     procedure SetClipMuted(AClipId: Integer; AMuted: Boolean);
     procedure SetClipLocked(AClipId: Integer; ALocked: Boolean);
 
+    { ---- chords (the Chords lane; edited through TSetTimelineChordsCommand) ---- }
+    function AddChord(const AName: string; AStart, ALength: Double): TTimelineChord;
+    function AddChordWithId(AId: Integer; const AName: string; AStart, ALength: Double): TTimelineChord;
+    procedure RemoveChord(AId: Integer);
+    function ChordCount: Integer;
+    function GetChord(AIndex: Integer): TTimelineChord;
+    function ChordById(AId: Integer): TTimelineChord;
+    { the chord sounding at ASeconds, nil when none }
+    function ChordAt(ASeconds: Double): TTimelineChord;
+    { whole-lane text snapshot / restore, what the undo command swaps }
+    function ChordsSnapshot: string;
+    procedure RestoreChords(const ASnapshot: string);
+
     { ---- markers / regions ---- }
     function AddMarker(const AName: string; ASeconds: Double): TTimelineMarker;
     function AddMarkerWithId(AId: Integer; const AName: string; ASeconds: Double): TTimelineMarker;
@@ -459,6 +505,10 @@ function EncodeMidiSourceId(AMidiClipId: Integer): Integer;
 function DecodeMidiSourceId(ASourceId: Integer): Integer;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 const
   TRACK_KIND_IDS: array[TTrackKind] of string = (
@@ -520,7 +570,7 @@ end;
 
 function DbToGain(ADb: Double): Double;
 begin
-  if ADb <= -240 then Result := 0 else Result := Power(10.0, ADb / 20.0);
+  if ADb <= -240 then Result := 0 else Result := FastExp10(ADb / 20.0);
 end;
 
 function EncodeMidiSourceId(AMidiClipId: Integer): Integer;
@@ -739,8 +789,8 @@ begin
   if T <= 0 then Exit(0);
   if T >= 1 then Exit(1);
   case AShape of
-    fsEqualPower: Result := Sin(T * Pi / 2);
-    fsLogarithmic: Result := Power(T, 2.0);
+    fsEqualPower: Result := FastSin(T * Pi / 2);
+    fsLogarithmic: Result := FastPow(T, 2.0);
   else
     Result := T;   // fsLinear
   end;
@@ -893,6 +943,28 @@ begin
   Result := nil;
 end;
 
+function TTimelineTrack.LoopFillClipAt(ASeconds, ALimit: Double): TTimelineClip;
+var
+  i: Integer;
+  c: TTimelineClip;
+begin
+  Result := nil;
+  if ASeconds >= ALimit then Exit;
+  for i := 0 to FClips.Count - 1 do
+  begin
+    c := FClips[i];
+    if c.Loop and not c.Muted and (c.LengthSeconds > 0.001) and (ASeconds >= c.EndSeconds) and
+       ((Result = nil) or (c.EndSeconds > Result.EndSeconds)) then
+      Result := c;
+  end;
+  { another clip further along the lane takes over from the loop }
+  if Result <> nil then
+    for i := 0 to FClips.Count - 1 do
+      if (FClips[i] <> Result) and (FClips[i].StartSeconds > Result.EndSeconds - 0.0005) and
+         (FClips[i].StartSeconds <= ASeconds) then
+        Exit(nil);
+end;
+
 function TTimelineTrack.ClipCount: Integer;
 begin
   Result := FClips.Count;
@@ -923,6 +995,20 @@ begin
   FSeconds := ASeconds;
 end;
 
+constructor TTimelineChord.Create(AId: Integer; const AName: string; AStart, ALength: Double);
+begin
+  inherited Create;
+  FId := AId;
+  FName := AName;
+  FStartSeconds := AStart;
+  FLengthSeconds := ALength;
+end;
+
+function TTimelineChord.EndSeconds: Double;
+begin
+  Result := FStartSeconds + FLengthSeconds;
+end;
+
 constructor TTimelineRegion.Create(AId: Integer; const AName: string; AStart, ALength: Double);
 begin
   inherited Create;
@@ -946,6 +1032,8 @@ begin
   FTracks := TObjectList<TTimelineTrack>.Create(True);
   FSources := TObjectList<TMediaSource>.Create(True);
   FMarkers := TObjectList<TTimelineMarker>.Create(True);
+  FChords := TObjectList<TTimelineChord>.Create(True);
+  FNextChordId := 1;
   FRegions := TObjectList<TTimelineRegion>.Create(True);
   FVideoFx := TObjectList<TVideoEffectRegion>.Create(True);
   FNextVideoFxId := 1;
@@ -961,6 +1049,7 @@ destructor TTimeline.Destroy;
 begin
   FVideoFx.Free;
   FRegions.Free;
+  FChords.Free;
   FMarkers.Free;
   FTracks.Free;
   FSources.Free;
@@ -972,6 +1061,8 @@ begin
   FTracks.Clear;
   FSources.Clear;
   FMarkers.Clear;
+  FChords.Clear;
+  FNextChordId := 1;
   FRegions.Clear;
   FVideoFx.Clear;
   FNextVideoFxId := 1;
@@ -1041,12 +1132,22 @@ begin
   begin
     m := FMarkers[i];
     Result.FMarkers.Add(TTimelineMarker.Create(m.Id, m.Name, m.Seconds));
+    Result.FMarkers.Last.Locked := m.Locked;
   end;
+  for i := 0 to FChords.Count - 1 do
+  begin
+    Result.FChords.Add(TTimelineChord.Create(FChords[i].Id, FChords[i].Name,
+      FChords[i].StartSeconds, FChords[i].LengthSeconds));
+    Result.FChords.Last.Locked := FChords[i].Locked;
+  end;
+  Result.FNextChordId := FNextChordId;
   for i := 0 to FRegions.Count - 1 do
   begin
     rg := FRegions[i];
     Result.FRegions.Add(TTimelineRegion.Create(rg.Id, rg.Name, rg.StartSeconds, rg.LengthSeconds));
     Result.FRegions.Last.Color := rg.Color;
+    Result.FRegions.Last.Continuous := rg.Continuous;
+    Result.FRegions.Last.Locked := rg.Locked;
   end;
   for i := 0 to FVideoFx.Count - 1 do
     Result.FVideoFx.Add(TVideoEffectRegion.Create(FVideoFx[i].Id, FVideoFx[i].TrackId,
@@ -1530,6 +1631,111 @@ begin
   if clip = nil then
     RaiseUDAWFmt(errInvalidArgument, TIMELINE_MODEL_SUBSYS, 'no clip with id %d', [AClipId]);
   clip.FLocked := ALocked;
+end;
+
+{ ---- chords ---- }
+
+function TTimeline.AddChord(const AName: string; AStart, ALength: Double): TTimelineChord;
+begin
+  Result := AddChordWithId(FNextChordId, AName, AStart, ALength);
+end;
+
+function TTimeline.AddChordWithId(AId: Integer; const AName: string; AStart, ALength: Double): TTimelineChord;
+var
+  i: Integer;
+begin
+  Result := TTimelineChord.Create(AId, AName, Max(0, AStart), Max(0.01, ALength));
+  { kept sorted by start so the lane paints and searches in order }
+  i := FChords.Count;
+  while (i > 0) and (FChords[i - 1].StartSeconds > Result.StartSeconds) do Dec(i);
+  FChords.Insert(i, Result);
+  if AId >= FNextChordId then FNextChordId := AId + 1;
+end;
+
+procedure TTimeline.RemoveChord(AId: Integer);
+var
+  i: Integer;
+begin
+  for i := 0 to FChords.Count - 1 do
+    if FChords[i].Id = AId then
+    begin
+      FChords.Delete(i);
+      Exit;
+    end;
+end;
+
+function TTimeline.ChordCount: Integer;
+begin
+  Result := FChords.Count;
+end;
+
+function TTimeline.GetChord(AIndex: Integer): TTimelineChord;
+begin
+  Result := FChords[AIndex];
+end;
+
+function TTimeline.ChordById(AId: Integer): TTimelineChord;
+var
+  i: Integer;
+begin
+  Result := nil;
+  for i := 0 to FChords.Count - 1 do
+    if FChords[i].Id = AId then Exit(FChords[i]);
+end;
+
+function TTimeline.ChordAt(ASeconds: Double): TTimelineChord;
+var
+  i: Integer;
+begin
+  Result := nil;
+  for i := 0 to FChords.Count - 1 do
+    if (ASeconds >= FChords[i].StartSeconds) and (ASeconds < FChords[i].EndSeconds) then
+      Exit(FChords[i]);
+end;
+
+{ "id,start,length,name" entries joined by ';' - the symbols never contain either
+  separator (they are stripped on entry) }
+function TTimeline.ChordsSnapshot: string;
+var
+  i: Integer;
+  sb: TStringBuilder;
+  fs: TFormatSettings;
+begin
+  fs := TFormatSettings.Invariant;
+  sb := TStringBuilder.Create;
+  try
+    for i := 0 to FChords.Count - 1 do
+      sb.Append(FChords[i].Id).Append(',').Append(FormatFloat('0.######', FChords[i].StartSeconds, fs))
+        .Append(',').Append(FormatFloat('0.######', FChords[i].LengthSeconds, fs)).Append(',')
+        .Append(StringReplace(StringReplace(FChords[i].Name, ',', ' ', [rfReplaceAll]), ';', ' ', [rfReplaceAll]))
+        .Append(';');
+    Result := sb.ToString;
+  finally
+    sb.Free;
+  end;
+end;
+
+procedure TTimeline.RestoreChords(const ASnapshot: string);
+var
+  entries, f: TArray<string>;
+  e: string;
+  fs: TFormatSettings;
+  id: Integer;
+  st, ln: Double;
+begin
+  fs := TFormatSettings.Invariant;
+  FChords.Clear;
+  entries := ASnapshot.Split([';']);
+  for e in entries do
+  begin
+    if e = '' then Continue;
+    f := e.Split([','], 4);
+    if Length(f) < 4 then Continue;
+    if not TryStrToInt(f[0], id) then Continue;
+    if not TryStrToFloat(f[1], st, fs) then Continue;
+    if not TryStrToFloat(f[2], ln, fs) then Continue;
+    AddChordWithId(id, f[3], st, ln);
+  end;
 end;
 
 { ---- markers / regions ---- }

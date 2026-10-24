@@ -310,7 +310,7 @@ begin
       Spec(0, 4, 0, 0, 0, $F, $03),     // set speed 3
       Spec(0, 5, 0, 0, 0, $E, $C4),     // EC4 note cut on tick 4
       Spec(0, 6, 0, 0, 0, $E, $A3),     // EA3 fine volume up 3
-      Spec(0, 7, 0, 0, 0, $10, $40),    // G (set global volume) -> no internal equivalent
+      Spec(0, 7, 0, 0, 0, $15, $40),    // L (set envelope position) -> no internal equivalent
       Spec(0, 8, 0, 0, 0, $19, $35) ]); // P (panning slide) -> tfxPanSlide, same nibble layout (x right, y left)
   m := XmToModule(data, info);
   try
@@ -321,7 +321,7 @@ begin
     ExpectFx(3, tfxPatternBreak, 12, 'pattern break decodes BCD');
     ExpectFx(4, tfxSetSpeed, $03, 'set speed');
     ExpectFx(6, tfxFineVolUp, 3, 'EA fine volume up');
-    Check(p.GetCell(7, 0).Effect = tfxNone, 'unmapped G leaves no effect');
+    Check(p.GetCell(7, 0).Effect = tfxNone, 'unmapped L leaves no effect');
     ExpectFx(8, tfxPanSlide, $35, 'P panning slide keeps x=right, y=left');
     Check(info.LostEffectCells >= 1, 'the dropped command is counted');
   finally

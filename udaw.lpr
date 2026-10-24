@@ -19,7 +19,7 @@ uses
   UDAW.Audio.Types, UDAW.Audio.Buffer, UDAW.Audio.Ring, UDAW.Audio.Source,
   UDAW.Audio.Offline, UDAW.Audio.Device, UDAW.Audio.Backend.Software,
   UDAW.Audio.Backend.WASAPI, UDAW.Audio.Backend.Factory, UDAW.Audio.Engine,
-  UDAW.DSP.Math, UDAW.DSP.Interpolation, UDAW.DSP.Filters, UDAW.DSP.FFT,
+  UDAW.DSP.MathTables, UDAW.DSP.Math, UDAW.DSP.Interpolation, UDAW.DSP.Filters, UDAW.DSP.FFT,
   UDAW.DSP.Resampler, UDAW.DSP.Envelope, UDAW.DSP.Meter,
   UDAW.DSP.Dynamics, UDAW.DSP.Modulation, UDAW.DSP.Distortion,
   UDAW.DSP.Reverb, UDAW.DSP.GraphicEQ,

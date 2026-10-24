@@ -77,6 +77,9 @@ type
     function ClipById(AId: Integer): TMidiSequence;          // nil if not found
     function NameById(AId: Integer): string;
     procedure RemoveClipById(AId: Integer);
+    { swaps the sequence of clip AId for ASeq (adopted), keeping its id and name -
+      the clips a Timeline references stay valid. False (ASeq freed) if AId is unknown. }
+    function ReplaceClipById(AId: Integer; ASeq: TMidiSequence): Boolean;
     { Adds ASeq (adopts it) and returns its new stable Id, not its index -
       the form TCommitMidiTakeCommand and the arrangement engine's Timeline
       linkage want. }
@@ -193,6 +196,24 @@ var
 begin
   idx := IndexOfId(AId);
   if idx < 0 then Result := '' else Result := FNames[idx];
+end;
+
+function TMidiProject.ReplaceClipById(AId: Integer; ASeq: TMidiSequence): Boolean;
+var
+  idx: Integer;
+begin
+  idx := IndexOfId(AId);
+  Result := idx >= 0;
+  if not Result then
+  begin
+    ASeq.Free;
+    Exit;
+  end;
+  if ASeq <> FClips[idx] then
+  begin
+    FClips[idx].Free;
+    FClips[idx] := ASeq;
+  end;
 end;
 
 procedure TMidiProject.RemoveClipById(AId: Integer);

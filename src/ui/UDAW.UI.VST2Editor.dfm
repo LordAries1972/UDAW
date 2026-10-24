@@ -2,9 +2,11 @@ object frmVST2Editor: TfrmVST2Editor
   Left = 0
   Top = 0
   Caption = 'VST Plugin'
-  ClientHeight = 420
-  ClientWidth = 520
+  ClientHeight = 440
+  ClientWidth = 560
   Color = clBtnFace
+  Constraints.MinHeight = 280
+  Constraints.MinWidth = 440
   Font.Charset = DEFAULT_CHARSET
   Font.Color = clWindowText
   Font.Height = -12
@@ -14,109 +16,160 @@ object frmVST2Editor: TfrmVST2Editor
   OnClose = FormClose
   OnDestroy = FormDestroy
   TextHeight = 15
-  object pnlTop: TPanel
+  object pnlTop: TGLPanel
     Left = 0
     Top = 0
-    Width = 520
+    Width = 560
     Height = 44
     Align = alTop
     BevelOuter = bvNone
     TabOrder = 0
-    object lblInfo: TLabel
+    object lblInfo: TGLLabel
       Transparent = True
-      Left = 8
-      Top = 8
+      Left = 12
+      Top = 14
       Width = 300
       Height = 15
       Caption = 'plugin info'
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -12
+      Font.Name = 'Segoe UI'
+      Font.Style = [fsBold]
+      ParentFont = False
     end
-    object btnSave: TButton
-      Left = 340
-      Top = 6
+    object btnSave: TGLButton
+      Left = 380
+      Top = 9
       Width = 80
-      Height = 25
+      Height = 26
+      Anchors = [akTop, akRight]
       Caption = 'Save'
+      Hint = 'Save the plug-in settings you have edited into the project.'
+      ShowHint = True
       TabOrder = 0
       OnClick = btnSaveClick
     end
-    object btnClose: TButton
-      Left = 426
-      Top = 6
+    object btnClose: TGLButton
+      Left = 468
+      Top = 9
       Width = 80
-      Height = 25
+      Height = 26
+      Anchors = [akTop, akRight]
       Caption = 'Close'
+      Hint = 'Close the plug-in editor.'
+      ShowHint = True
       TabOrder = 1
       OnClick = btnCloseClick
     end
   end
-  object pnlHost: TPanel
+  object pnlHost: TGLPanel
     Left = 0
     Top = 44
-    Width = 520
-    Height = 376
+    Width = 560
+    Height = 396
     Align = alClient
-    BevelOuter = bvLowered
-    Caption = ''
+    BevelOuter = bvNone
+    ShowCaption = False
     TabOrder = 1
     Visible = False
   end
-  object pnlParams: TPanel
+  object pnlParams: TGLPanel
     Left = 0
     Top = 44
-    Width = 520
-    Height = 376
+    Width = 560
+    Height = 396
     Align = alClient
     BevelOuter = bvNone
     TabOrder = 2
-    object lbParams: TListBox
+    object lbParams: TGLList
       Left = 0
       Top = 0
-      Width = 220
-      Height = 376
+      Width = 230
+      Height = 396
       Align = alLeft
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clWindowText
       Font.Height = -12
       Font.Name = 'Consolas'
       Font.Style = []
-      ItemHeight = 15
+      ItemHeight = 20
       ParentFont = False
       TabOrder = 0
       OnClick = lbParamsClick
     end
-    object pnlParamDetail: TPanel
-      Left = 220
+    object pnlParamDetail: TGLPanel
+      Left = 230
       Top = 0
-      Width = 300
-      Height = 376
+      Width = 330
+      Height = 396
       Align = alClient
       BevelOuter = bvNone
       TabOrder = 1
-      object lblParamName: TLabel
+      object lblParamHead: TGLLabel
         Transparent = True
-        Left = 12
-        Top = 12
-        Width = 100
+        Left = 20
+        Top = 20
+        Width = 120
         Height = 15
+        Caption = 'PARAMETER'
+      end
+      object lblParamName: TGLLabel
+        Transparent = True
+        Left = 20
+        Top = 40
+        Width = 290
+        Height = 22
         Caption = 'param name'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clWindowText
+        Font.Height = -16
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
       end
-      object lblParamValue: TLabel
+      object lblValueHead: TGLLabel
         Transparent = True
-        Left = 12
-        Top = 44
-        Width = 100
+        Left = 20
+        Top = 84
+        Width = 120
         Height = 15
-        Caption = 'value'
+        Caption = 'VALUE'
       end
-      object tbParam: TTrackBar
-        Left = 12
-        Top = 68
-        Width = 260
-        Height = 30
+      object lblParamValue: TGLLabel
+        Transparent = True
+        Left = 20
+        Top = 104
+        Width = 290
+        Height = 20
+        Caption = 'value'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clWindowText
+        Font.Height = -14
+        Font.Name = 'Consolas'
+        Font.Style = []
+        ParentFont = False
+      end
+      object tbParam: TGLTrackBar
+        Left = 20
+        Top = 138
+        Width = 290
+        Height = 28
+        Anchors = [akLeft, akTop, akRight]
         Max = 1000
         Min = 0
+        Position = 0
         TabOrder = 0
+        ThumbLength = 14
         OnChange = tbParamChange
+      end
+      object lblParamHint: TGLLabel
+        Transparent = True
+        Left = 20
+        Top = 180
+        Width = 290
+        Height = 15
+        Caption = 'Pick a parameter on the left, then drag the slider.'
       end
     end
   end

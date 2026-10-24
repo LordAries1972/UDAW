@@ -387,7 +387,7 @@ type
     FProc: TDistortionProcessor;
     FMode: TDistMode;
     FDrive, FTrimDb, FMix, FBits: Double;
-    FDown: Integer;
+    FDown, FOs: Integer;
   public
     destructor Destroy; override;
     procedure Reset; override;
@@ -423,6 +423,9 @@ type
     procedure Process(AIn, AOut: TAudioBuffer); override;
     function SerializeParams: string; override;
     procedure DeserializeParams(const AText: string); override;
+    { re-reads only the band gains of a "bands=N;gains=..." text while the node is running;
+      the band count is left alone, so nothing is reallocated }
+    procedure ApplyGainsLive(const AText: string);
   protected
     procedure DoConfigure; override;
   end;
@@ -510,6 +513,7 @@ type
   private
     FProc: TExciter;
     FFreqHz, FDrive, FMix: Double;
+    FOs: Integer;
   public
     destructor Destroy; override;
     procedure Reset; override;
@@ -696,6 +700,10 @@ function ParamInt(const AText, AKey: string; ADefault: Integer): Integer;
 function ParamBool(const AText, AKey: string; ADefault: Boolean): Boolean;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 { ================= small parsers ================= }
 
@@ -1956,8 +1964,9 @@ begin
   if FMix = 0 then FMix := 1.0;
   if FBits = 0 then FBits := 8.0;
   if FDown = 0 then FDown := 1;
+  if FOs = 0 then FOs := 2;
   FProc.Configure(FSampleRate, FChannels);
-  FProc.SetParams(FMode, FDrive, FTrimDb, FMix, FBits, FDown);
+  FProc.SetParams(FMode, FDrive, FTrimDb, FMix, FBits, FDown, FOs);
 end;
 
 procedure TDistortionNode.Reset;
@@ -1977,9 +1986,9 @@ end;
 
 function TDistortionNode.SerializeParams: string;
 begin
-  Result := Format('type=%s;drive=%s;trim=%s;mix=%s;bits=%s;down=%d',
+  Result := Format('type=%s;drive=%s;trim=%s;mix=%s;bits=%s;down=%d;os=%d',
     [DistModeId(FMode), FloatId(FDrive), FloatId(FTrimDb), FloatId(FMix),
-     FloatId(FBits), FDown]);
+     FloatId(FBits), FDown, FOs]);
 end;
 
 procedure TDistortionNode.DeserializeParams(const AText: string);
@@ -1994,6 +2003,7 @@ begin
   FMix := ParamFloat(AText, 'mix', 1.0);
   FBits := ParamFloat(AText, 'bits', 8.0);
   FDown := ParamInt(AText, 'down', 1);
+  FOs := ParamInt(AText, 'os', 2);
   if FConfigured then DoConfigure;
 end;
 
@@ -2120,6 +2130,24 @@ begin
       FGains[i] := v;
   end;
   if FConfigured then DoConfigure;
+end;
+
+procedure TGraphicEQNode.ApplyGainsLive(const AText: string);
+var
+  parts: TArray<string>;
+  i: Integer;
+  v: Double;
+begin
+  if FProc = nil then Exit;
+  parts := ParamStrDef(AText, 'gains', '').Split([',']);
+  for i := 0 to High(FGains) do
+  begin
+    v := 0;
+    if i <= High(parts) then
+      if not TryStrToFloat(Trim(parts[i]), v, TFormatSettings.Invariant) then v := 0;
+    FGains[i] := v;
+    FProc.SetBandGain(i, v);
+  end;
 end;
 
 { ================= TMultibandCompNode ================= }
@@ -2445,8 +2473,9 @@ begin
   if FFreqHz = 0 then FFreqHz := 3000.0;
   if FDrive = 0 then FDrive := 4.0;
   if FMix = 0 then FMix := 0.25;
+  if FOs = 0 then FOs := 2;
   FProc.Configure(FSampleRate, FChannels);
-  FProc.SetParams(FFreqHz, FDrive, FMix);
+  FProc.SetParams(FFreqHz, FDrive, FMix, FOs);
 end;
 
 procedure TExciterNode.Reset;
@@ -2466,7 +2495,7 @@ end;
 
 function TExciterNode.SerializeParams: string;
 begin
-  Result := Format('freq=%s;drive=%s;mix=%s', [FloatId(FFreqHz), FloatId(FDrive), FloatId(FMix)]);
+  Result := Format('freq=%s;drive=%s;mix=%s;os=%d', [FloatId(FFreqHz), FloatId(FDrive), FloatId(FMix), FOs]);
 end;
 
 procedure TExciterNode.DeserializeParams(const AText: string);
@@ -2474,6 +2503,7 @@ begin
   FFreqHz := ParamFloat(AText, 'freq', 3000.0);
   FDrive := ParamFloat(AText, 'drive', 4.0);
   FMix := ParamFloat(AText, 'mix', 0.25);
+  FOs := ParamInt(AText, 'os', 2);
   if FConfigured then DoConfigure;
 end;
 
@@ -2557,7 +2587,7 @@ begin
   begin
     SetLength(FWindow, PS_CHUNK);
     for i := 0 to PS_CHUNK - 1 do
-      FWindow[i] := Single(0.5 - 0.5 * Cos(DSP_TWO_PI * i / PS_CHUNK));
+      FWindow[i] := Single(0.5 - 0.5 * FastCos(DSP_TWO_PI * i / PS_CHUNK));
   end;
   if Length(FInWin) <> FChannels then
   begin
@@ -2582,12 +2612,14 @@ procedure TPitchShiftNode.RunHop(AChannel: Integer);
 var
   shifted: TArray<Single>;
   i, wp: Integer;
+  ola: PSingle;
 begin
   FShifter.Process(FInWin[AChannel], FSemitones, FSampleRate, shifted);
   if Length(shifted) < PS_CHUNK then SetLength(shifted, PS_CHUNK);
 
+  ola := @FOlaBuf[AChannel][0];
   for i := 0 to PS_CHUNK - 1 do
-    FOlaBuf[AChannel][i] := FOlaBuf[AChannel][i] + shifted[i] * FWindow[i];
+    ola[i] := ola[i] + shifted[i] * FWindow[i];
 
   { emit the front PS_HOP samples of the OLA accumulator into the output
     ring - the Hann window satisfies the constant-overlap-add identity at
@@ -2596,7 +2628,7 @@ begin
   begin
     wp := FRingWrite[AChannel];
     FRing[AChannel][wp] := FOlaBuf[AChannel][i];
-    FRingWrite[AChannel] := (wp + 1) mod FRingLen;
+    FRingWrite[AChannel] := (wp + 1) and (PS_RING_LEN - 1);   // PS_RING_LEN is a power of two
     if FRingCount[AChannel] < FRingLen then Inc(FRingCount[AChannel]);
   end;
 
@@ -2652,7 +2684,7 @@ begin
       begin
         rp := FRingRead[ch];
         FOutPtrs[ch][i] := FRing[ch][rp];
-        FRingRead[ch] := (rp + 1) mod FRingLen;
+        FRingRead[ch] := (rp + 1) and (PS_RING_LEN - 1);
         Dec(FRingCount[ch]);
       end
       else

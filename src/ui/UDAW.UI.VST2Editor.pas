@@ -1,7 +1,8 @@
 unit UDAW.UI.VST2Editor;
 {$I udaw.inc}
 
-{ A dedicated window for editing one hosted VST2 plugin insert (see
+{ A dedicated window for editing one hosted VST2 plugin insert (all of its own controls are UDAW
+  OpenGL 3.3 widgets; only the plug-in's native editor, when it has one, is the plug-in's window) (see
   UDAW.Mixer.VST2 and UDAW.Audio.Graph.Nodes.TVST2Node).
 
   This form owns its own scratch TVST2Host, loaded from the insert's saved
@@ -25,22 +26,25 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, StdCtrls, ExtCtrls, ComCtrls, Math, System.UITypes,
+  Dialogs, ExtCtrls, Math, System.UITypes, UDAW.GL.Widgets,
   UDAW.Mixer.VST2;
 
 type
   TfrmVST2Editor = class(TForm)
-    pnlTop: TPanel;
-    lblInfo: TLabel;
-    btnSave: TButton;
-    btnClose: TButton;
-    pnlHost: TPanel;
-    pnlParams: TPanel;
-    lbParams: TListBox;
-    pnlParamDetail: TPanel;
-    lblParamName: TLabel;
-    lblParamValue: TLabel;
-    tbParam: TTrackBar;
+    pnlTop: TGLPanel;
+    lblInfo: TGLLabel;
+    btnSave: TGLButton;
+    btnClose: TGLButton;
+    pnlHost: TGLPanel;            // the plug-in's own editor window lives in here
+    pnlParams: TGLPanel;
+    lbParams: TGLList;
+    pnlParamDetail: TGLPanel;
+    lblParamHead: TGLLabel;
+    lblParamName: TGLLabel;
+    lblValueHead: TGLLabel;
+    lblParamValue: TGLLabel;
+    tbParam: TGLTrackBar;
+    lblParamHint: TGLLabel;
     tmrIdle: TTimer;
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure FormDestroy(Sender: TObject);

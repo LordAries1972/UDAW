@@ -36,7 +36,8 @@ function TimelineHasVideoInRange(ATl: TTimeline; AStart, ADuration: Double): Boo
   conformed to (0 = none); reversed clips play backwards. AProgress receives
   0..1 and may raise to cancel. }
 procedure ExportTimelineVideoMp4(ATl: TTimeline; const ARawPcm16, AOutMp4: string;
-  ASampleRate: Integer; AStart, ADuration, AStretchBPM: Double; AProgress: TProc<Double>);
+  ASampleRate: Integer; AStart, ADuration, AStretchBPM: Double; AProgress: TProc<Double>;
+  AMaxWidth: Integer = 0; ABitrateKbps: Integer = 0; AAudioKbps: Integer = 0);
 
 { Renders the Timeline's picture alone (effects and transitions applied) from
   AStart for ADuration seconds into AOutMp4, tuned for speed - see the
@@ -850,6 +851,8 @@ type
     MaxFps: Integer;             // 0 = keep the first clip's rate
     KeyframeSeconds: Double;     // longest gap between key pictures (short = fast seeking)
     BitsPerPixel: Double;        // encoder budget
+    AudioKbps: Integer;          // > 0 picks the AAC rate (snapped to what the encoder offers)
+    BitrateKbps: Integer;        // > 0 overrides the BitsPerPixel budget with a fixed bitrate
   end;
 
 procedure RenderVideoCore(ATl: TTimeline; const ARawPcm16, AOutMp4: string;
@@ -964,6 +967,16 @@ var
     Result.SetUINT64(MF_MT_PIXEL_ASPECT_RATIO, Pack32(1, 1));
   end;
 
+  { The Windows AAC encoder only accepts 96 / 128 / 160 / 192 kbit/s stereo. }
+  function AacBytesPerSec(AKbps: Integer): UINT;
+  begin
+    if AKbps <= 0 then Exit(AUDIO_BYTES_PER_SEC);
+    if AKbps >= 176 then Exit(24000);
+    if AKbps >= 144 then Exit(20000);
+    if AKbps >= 112 then Exit(16000);
+    Result := 12000;
+  end;
+
   function AudioType(AEncoded: Boolean): IMFMediaType;
   begin
     Check(MFCreateMediaType(Result), 'Create audio type');
@@ -974,7 +987,7 @@ var
     if AEncoded then
     begin
       Result.SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
-      Result.SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, AUDIO_BYTES_PER_SEC);
+      Result.SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, AacBytesPerSec(AOpts.AudioKbps));
       Result.SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 1);
       Result.SetUINT32(MF_MT_AAC_PAYLOAD_TYPE, 0);      // raw access units (MP4)
     end
@@ -1115,8 +1128,13 @@ begin
     while i <> 0 do begin j := Integer(g mod Cardinal(i)); g := Cardinal(i); i := j; end;
     if g > 1 then begin fpsNum := fpsNum div g; fpsDen := fpsDen div g; end;
 
-    bitrate := Round(outW * outH * (fpsNum / fpsDen) * AOpts.BitsPerPixel);
-    bitrate := Max(1000000, Min(50000000, bitrate));
+    if AOpts.BitrateKbps > 0 then
+      bitrate := AOpts.BitrateKbps * 1000
+    else
+    begin
+      bitrate := Round(outW * outH * (fpsNum / fpsDen) * AOpts.BitsPerPixel);
+      bitrate := Max(1000000, Min(50000000, bitrate));
+    end;
     totalFrames := Ceil(ADuration * fpsNum / fpsDen);
     SetLength(canvas, outW * outH * 4);
     SetLength(fxA, outW * outH * 4);
@@ -1210,16 +1228,19 @@ begin
 end;
 
 procedure ExportTimelineVideoMp4(ATl: TTimeline; const ARawPcm16, AOutMp4: string;
-  ASampleRate: Integer; AStart, ADuration, AStretchBPM: Double; AProgress: TProc<Double>);
+  ASampleRate: Integer; AStart, ADuration, AStretchBPM: Double; AProgress: TProc<Double>;
+  AMaxWidth: Integer; ABitrateKbps: Integer; AAudioKbps: Integer);
 var
   o: TVideoRenderOpts;
 begin
   o.VideoOnly := False;
   o.Hardware := False;           // deterministic software encode
-  o.MaxWidth := 0;
+  o.MaxWidth := AMaxWidth;       // Settings > Export (0 = source size)
   o.MaxFps := 0;
   o.KeyframeSeconds := 2;
   o.BitsPerPixel := 0.10;
+  o.BitrateKbps := ABitrateKbps; // Settings > Export (0 = automatic)
+  o.AudioKbps := AAudioKbps;
   RenderVideoCore(ATl, ARawPcm16, AOutMp4, ASampleRate, AStart, ADuration, AStretchBPM, o, AProgress);
 end;
 
@@ -1239,6 +1260,8 @@ begin
   o.MaxFps := 30;
   o.KeyframeSeconds := 1;
   o.BitsPerPixel := 0.07;
+  o.BitrateKbps := 0;
+  o.AudioKbps := 0;
   try
     RenderVideoCore(ATl, '', AOutMp4, 48000, AStart, ADuration, AStretchBPM, o, AProgress);
   except

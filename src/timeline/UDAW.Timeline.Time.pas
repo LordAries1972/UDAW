@@ -15,9 +15,11 @@ unit UDAW.Timeline.Time;
   here beyond a small immutable TGridContext value record, so it is trivially
   testable and shared by the model, the serializer and the view.
 
-  A single constant tempo / time signature is assumed (the project has exactly
-  one of each until the tempo-map phase). The API is shaped so a future
-  TTempoMap can replace the free functions without touching call sites. }
+  The context carries the project's base tempo plus an optional TEMPO MAP: tempo
+  changes after time 0 (Map). With an empty map everything below is the old
+  constant-tempo arithmetic; with points, seconds <-> beats / bars and the
+  beat-based grid / snap modes integrate piecewise across the tempo segments.
+  There is still one time signature for the whole project. }
 
 interface
 
@@ -49,14 +51,26 @@ type
     smSample    // sample-accurate (no sub-sample positions)
   );
 
+  { one tempo change: from Seconds onward the tempo is Bpm }
+  TTempoPoint = record
+    Seconds: Double;
+    Bpm: Double;
+  end;
+  TTempoPoints = TArray<TTempoPoint>;
+
   { Immutable musical/sample context for every conversion below. }
   TGridContext = record
-    Tempo: Double;        // BPM, quarter notes per minute
+    Tempo: Double;        // BPM at time 0, quarter notes per minute
+    Map: TTempoPoints;    // tempo changes after time 0, sorted by Seconds (empty = constant tempo)
     TSigNum: Integer;     // beats per bar
     TSigDen: Integer;     // note value that gets one beat (1,2,4,8,16,32,64)
     SampleRate: Integer;  // Hz
     class function Make(ATempo: Double; ATSigNum, ATSigDen, ASampleRate: Integer): TGridContext; static;
     function SecondsPerBeat: Double;
+    { length of one notated beat at the given tempo }
+    function BeatSecondsAtBpm(ABpm: Double): Double;
+    { tempo in force at ASeconds }
+    function TempoAt(ASeconds: Double): Double;
     function SecondsPerBar: Double;
     function BeatsPerBar: Double;
     function IsValid: Boolean;
@@ -154,6 +168,24 @@ begin
   Result := (60.0 / Tempo) * (4.0 / TSigDen);
 end;
 
+function TGridContext.BeatSecondsAtBpm(ABpm: Double): Double;
+begin
+  if ABpm <= 0 then
+    RaiseUDAW(errInvalidArgument, TIMELINE_SUBSYS, 'tempo must be > 0');
+  if TSigDen <= 0 then
+    RaiseUDAW(errInvalidArgument, TIMELINE_SUBSYS, 'time-signature denominator must be > 0');
+  Result := (60.0 / ABpm) * (4.0 / TSigDen);
+end;
+
+function TGridContext.TempoAt(ASeconds: Double): Double;
+var
+  i: Integer;
+begin
+  Result := Tempo;
+  for i := 0 to High(Map) do
+    if Map[i].Seconds <= ASeconds then Result := Map[i].Bpm else Break;
+end;
+
 function TGridContext.BeatsPerBar: Double;
 begin
   if TSigNum <= 0 then
@@ -190,23 +222,52 @@ end;
 { ================= seconds <-> beats / bars ================= }
 
 function SecondsToBeats(const ACtx: TGridContext; ASeconds: Double): Double;
+var
+  i: Integer;
+  t0, bpm: Double;
 begin
-  Result := ASeconds / ACtx.SecondsPerBeat;
+  if Length(ACtx.Map) = 0 then Exit(ASeconds / ACtx.SecondsPerBeat);
+  Result := 0;
+  t0 := 0;
+  bpm := ACtx.Tempo;
+  for i := 0 to High(ACtx.Map) do
+  begin
+    if ASeconds <= ACtx.Map[i].Seconds then Break;
+    Result := Result + (ACtx.Map[i].Seconds - t0) / ACtx.BeatSecondsAtBpm(bpm);
+    t0 := ACtx.Map[i].Seconds;
+    bpm := ACtx.Map[i].Bpm;
+  end;
+  Result := Result + (ASeconds - t0) / ACtx.BeatSecondsAtBpm(bpm);
 end;
 
 function BeatsToSeconds(const ACtx: TGridContext; ABeats: Double): Double;
+var
+  i: Integer;
+  t0, bpm, segBeats, spb: Double;
 begin
-  Result := ABeats * ACtx.SecondsPerBeat;
+  if Length(ACtx.Map) = 0 then Exit(ABeats * ACtx.SecondsPerBeat);
+  t0 := 0;
+  bpm := ACtx.Tempo;
+  for i := 0 to High(ACtx.Map) do
+  begin
+    spb := ACtx.BeatSecondsAtBpm(bpm);
+    segBeats := (ACtx.Map[i].Seconds - t0) / spb;
+    if ABeats <= segBeats then Exit(t0 + ABeats * spb);
+    ABeats := ABeats - segBeats;
+    t0 := ACtx.Map[i].Seconds;
+    bpm := ACtx.Map[i].Bpm;
+  end;
+  Result := t0 + ABeats * ACtx.BeatSecondsAtBpm(bpm);
 end;
 
 function SecondsToBars(const ACtx: TGridContext; ASeconds: Double): Double;
 begin
-  Result := ASeconds / ACtx.SecondsPerBar;
+  Result := SecondsToBeats(ACtx, ASeconds) / ACtx.BeatsPerBar;
 end;
 
 function BarsToSeconds(const ACtx: TGridContext; ABars: Double): Double;
 begin
-  Result := ABars * ACtx.SecondsPerBar;
+  Result := BeatsToSeconds(ACtx, ABars * ACtx.BeatsPerBar);
 end;
 
 { ================= grid ================= }
@@ -235,13 +296,41 @@ begin
   end;
 end;
 
+{ length of one grid step in BEATS for the beat-based modes, 0 for the others }
+function GridStepBeats(const ACtx: TGridContext; AMode: TSnapMode): Double;
+begin
+  case AMode of
+    smBar:   Result := ACtx.BeatsPerBar;
+    smBeat:  Result := 1.0;
+    smDiv2:  Result := 1.0 / 2.0;
+    smDiv3:  Result := 1.0 / 3.0;
+    smDiv4:  Result := 1.0 / 4.0;
+    smDiv6:  Result := 1.0 / 6.0;
+    smDiv8:  Result := 1.0 / 8.0;
+    smDiv16: Result := 1.0 / 16.0;
+  else
+    Result := 0.0;
+  end;
+end;
+
 function SnapSecondsDir(const ACtx: TGridContext; ASeconds: Double; AMode: TSnapMode;
   ADir: Integer): Double;
 var
-  step, q: Double;
+  step, q, stepBeats: Double;
 begin
   if AMode = smOff then
     Exit(Max(0.0, ASeconds));
+
+  { beat-based grid under a tempo map: quantise in beats, convert back }
+  stepBeats := GridStepBeats(ACtx, AMode);
+  if (Length(ACtx.Map) > 0) and (stepBeats > 0) then
+  begin
+    q := SecondsToBeats(ACtx, Max(0.0, ASeconds)) / stepBeats;
+    if ADir < 0 then q := Floor(q + 1e-9)
+    else if ADir > 0 then q := Ceil(q - 1e-9)
+    else q := Floor(q + 0.5);
+    Exit(Max(0.0, BeatsToSeconds(ACtx, q * stepBeats)));
+  end;
 
   step := GridSpacingSeconds(ACtx, AMode);
   if step <= 0 then
@@ -267,8 +356,11 @@ end;
 
 function GridLineSeconds(const ACtx: TGridContext; AMode: TSnapMode; AIndex: Integer): Double;
 var
-  step: Double;
+  step, stepBeats: Double;
 begin
+  stepBeats := GridStepBeats(ACtx, AMode);
+  if (Length(ACtx.Map) > 0) and (stepBeats > 0) then
+    Exit(Max(0.0, BeatsToSeconds(ACtx, AIndex * stepBeats)));
   step := GridSpacingSeconds(ACtx, AMode);
   if step <= 0 then
     Exit(0.0);
@@ -281,16 +373,16 @@ end;
 
 function FormatBarsBeats(const ACtx: TGridContext; ASeconds: Double): string;
 var
-  spb, totalBeats, beatsPerBar: Double;
+  totalBeats, beatsPerBar: Double;
   bar, beat, tick: Integer;
   fracBeat: Double;
 begin
   if not ACtx.IsValid then
     Exit(FormatTimecode(ASeconds));
-  spb := ACtx.SecondsPerBeat;
+  if ACtx.SecondsPerBeat <= 0 then Exit(FormatTimecode(ASeconds));
   beatsPerBar := ACtx.BeatsPerBar;
   if ASeconds < 0 then ASeconds := 0;
-  totalBeats := ASeconds / spb;
+  totalBeats := SecondsToBeats(ACtx, ASeconds);
 
   bar := Floor(totalBeats / beatsPerBar);
   beat := Floor(totalBeats - bar * beatsPerBar);

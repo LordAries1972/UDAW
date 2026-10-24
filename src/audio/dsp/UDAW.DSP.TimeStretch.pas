@@ -52,6 +52,10 @@ type
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 function WrapPhase(APhase: Double): Double;
 begin
   { wrap into (-pi, pi] }
@@ -189,8 +193,8 @@ begin
         { scale the true per-hop advance by the synthesis hop instead }
         sumPhase[bin] := sumPhase[bin] + trueFreqPerHop * (hs / FHopAnalysis);
 
-      synRe[bin] := mag[bin] * Cos(sumPhase[bin]);
-      synIm[bin] := mag[bin] * Sin(sumPhase[bin]);
+      synRe[bin] := mag[bin] * FastCos(sumPhase[bin]);
+      synIm[bin] := mag[bin] * FastSin(sumPhase[bin]);
     end;
 
     FFFT.RealInverse(synRe, synIm, outFrame);

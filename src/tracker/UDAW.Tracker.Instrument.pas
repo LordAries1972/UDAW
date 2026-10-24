@@ -56,11 +56,26 @@ type
     FFadeout: Single;           // fraction removed per tick after key-off (0..1)
     FVolEnv: TTrackerEnvelope;
     FPanEnv: TTrackerEnvelope;
+    FLayers: array of TTrackerInstrument;   // owned extra samples (XM multi-sample instruments)
+    FKeyMap: array[0..TRK_NOTE_MAX] of Byte;   // note -> 0 = own sample, n = FLayers[n-1]
     procedure ClampLoop;
+    function GetLayer(AIndex: Integer): TTrackerInstrument;
+    function GetLayerCount: Integer;
   public
     constructor Create(const AName: string = 'Instrument');
     destructor Destroy; override;
     function Clone: TTrackerInstrument;
+
+    { Multi-sample instruments: a layer is a further sample (its own data, rate, loop,
+      volume, pan and root note) that the key map selects per note; envelopes and
+      fade-out always come from the instrument itself. }
+    function AddLayer: TTrackerInstrument;
+    procedure SetKeyMap(ANote, ALayer: Integer);
+    function KeyMapAt(ANote: Integer): Integer;
+    { the sample that plays ANote: Self, or one of the layers }
+    function SampleForNote(ANote: Integer): TTrackerInstrument;
+    property LayerCount: Integer read GetLayerCount;
+    property Layers[AIndex: Integer]: TTrackerInstrument read GetLayer;
 
     procedure SetData(const AData: TAudioSampleArray; ASampleRate: Integer);
     { Fill with a deterministic one-cycle-looped sine at AFreqHz for the tests
@@ -89,6 +104,10 @@ function LoopModeId(AMode: TTrackerLoopMode): string;
 function LoopModeFromId(const AId: string; out AMode: TTrackerLoopMode): Boolean;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 function LoopModeId(AMode: TTrackerLoopMode): string;
 begin
@@ -181,12 +200,58 @@ begin
 end;
 
 destructor TTrackerInstrument.Destroy;
+var
+  i: Integer;
 begin
+  for i := 0 to High(FLayers) do FLayers[i].Free;
+  SetLength(FLayers, 0);
   SetLength(FData, 0);
   inherited Destroy;
 end;
 
+function TTrackerInstrument.GetLayerCount: Integer;
+begin
+  Result := Length(FLayers);
+end;
+
+function TTrackerInstrument.GetLayer(AIndex: Integer): TTrackerInstrument;
+begin
+  Result := FLayers[AIndex];
+end;
+
+function TTrackerInstrument.AddLayer: TTrackerInstrument;
+begin
+  Result := TTrackerInstrument.Create(FName);
+  SetLength(FLayers, Length(FLayers) + 1);
+  FLayers[High(FLayers)] := Result;
+end;
+
+procedure TTrackerInstrument.SetKeyMap(ANote, ALayer: Integer);
+begin
+  if (ANote < 0) or (ANote > TRK_NOTE_MAX) then Exit;
+  if (ALayer < 0) or (ALayer > Length(FLayers)) then ALayer := 0;
+  FKeyMap[ANote] := Byte(ALayer);
+end;
+
+function TTrackerInstrument.KeyMapAt(ANote: Integer): Integer;
+begin
+  if (ANote < 0) or (ANote > TRK_NOTE_MAX) then Exit(0);
+  Result := FKeyMap[ANote];
+end;
+
+function TTrackerInstrument.SampleForNote(ANote: Integer): TTrackerInstrument;
+var
+  l: Integer;
+begin
+  Result := Self;
+  l := KeyMapAt(ANote);
+  if (l > 0) and (l <= Length(FLayers)) and (FLayers[l - 1].FrameCount > 0) then
+    Result := FLayers[l - 1];
+end;
+
 function TTrackerInstrument.Clone: TTrackerInstrument;
+var
+  i: Integer;
 begin
   Result := TTrackerInstrument.Create(FName);
   Result.FRootNote := FRootNote;
@@ -202,6 +267,9 @@ begin
   Result.FVolEnv.Points := Copy(FVolEnv.Points);
   Result.FPanEnv := FPanEnv;
   Result.FPanEnv.Points := Copy(FPanEnv.Points);
+  SetLength(Result.FLayers, Length(FLayers));
+  for i := 0 to High(FLayers) do Result.FLayers[i] := FLayers[i].Clone;
+  Result.FKeyMap := FKeyMap;
 end;
 
 procedure TTrackerInstrument.ClampLoop;
@@ -234,11 +302,11 @@ begin
   n := Max(1, Round(ASeconds * ASampleRate));
   SetLength(FData, n);
   for i := 0 to n - 1 do
-    FData[i] := Single(AAmplitude * Sin(2 * Pi * AFreqHz * i / ASampleRate));
+    FData[i] := Single(AAmplitude * FastSin(2 * Pi * AFreqHz * i / ASampleRate));
   FRootNote := A4_NOTE_VALUE;
   { the native pitch of this sample is AFreqHz -> pick the root note that
     matches it so the player's pitch maths line up }
-  FRootNote := Byte(ClampInt(A4_NOTE_VALUE + Round(12.0 * Ln(AFreqHz / A4_HZ) / Ln(2.0)),
+  FRootNote := Byte(ClampInt(A4_NOTE_VALUE + Round(12.0 * FastLn(AFreqHz / A4_HZ) / FastLn(2.0)),
     TRK_NOTE_MIN, TRK_NOTE_MAX));
   FLoopMode := tlmForward;
   FLoopStart := 0;

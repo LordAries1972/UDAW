@@ -40,10 +40,15 @@ type
   TMixerCommand = class abstract(TDAWCommand)
   protected
     FDoc: TProjectDocument;
+    { True when the command edits the Tracker mixer (set before it is performed); it keeps working
+      on that mixer however the Mixer view is switched afterwards }
+    FTrackerSide: Boolean;
     function M: TMixerModel;
+    procedure ReplaceM(AModel: TMixerModel);
     procedure RequireValidRouting;
   public
     constructor Create(ADoc: TProjectDocument);
+    property TrackerSide: Boolean read FTrackerSide write FTrackerSide;
   end;
 
   { ---- structural (text snapshot before/after) ---- }
@@ -386,11 +391,17 @@ constructor TMixerCommand.Create(ADoc: TProjectDocument);
 begin
   inherited Create;
   FDoc := ADoc;
+  FTrackerSide := False;
 end;
 
 function TMixerCommand.M: TMixerModel;
 begin
-  Result := FDoc.Mixer;
+  if FTrackerSide then Result := FDoc.TrackerMixer else Result := FDoc.Mixer;
+end;
+
+procedure TMixerCommand.ReplaceM(AModel: TMixerModel);
+begin
+  if FTrackerSide then FDoc.ReplaceTrackerMixer(AModel) else FDoc.ReplaceMixer(AModel);
 end;
 
 procedure TMixerCommand.RequireValidRouting;
@@ -410,7 +421,7 @@ begin
   begin
     { Mutate may have restored the model itself; make sure. }
     if MixerToString(M) <> FBefore then
-      FDoc.ReplaceMixer(MixerFromString(FBefore));
+      ReplaceM(MixerFromString(FBefore));
     Exit(False);
   end;
   FAfter := MixerToString(M);
@@ -421,13 +432,13 @@ end;
 
 procedure TMixerStructuralCommand.Undo;
 begin
-  FDoc.ReplaceMixer(MixerFromString(FBefore));
+  ReplaceM(MixerFromString(FBefore));
   FDoc.Touch;
 end;
 
 function TMixerStructuralCommand.Redo: Boolean;
 begin
-  FDoc.ReplaceMixer(MixerFromString(FAfter));
+  ReplaceM(MixerFromString(FAfter));
   FDoc.Touch;
   Result := True;
 end;
@@ -710,7 +721,7 @@ var
   t: TTimelineTrack;
   lbl: string;
 begin
-  t := TrackForMixStrip(FDoc, FStripId);
+  if FTrackerSide then t := nil else t := TrackForMixStrip(FDoc, FStripId);
   if t <> nil then
   begin
     FTitleTrackId := t.Id;
@@ -866,7 +877,7 @@ begin
   Result := (ANext is TSetMixInsertParamsCommand);
   if not Result then Exit;
   nx := TSetMixInsertParamsCommand(ANext);
-  Result := (nx.FDoc = FDoc) and (nx.FStripId = FStripId) and (nx.FIndex = FIndex)
+  Result := (nx.FDoc = FDoc) and (nx.TrackerSide = TrackerSide) and (nx.FStripId = FStripId) and (nx.FIndex = FIndex)
     and (MsSinceStamp <= COMMAND_MERGE_WINDOW_MS);
   if Result then
   begin
@@ -967,7 +978,7 @@ begin
   Result := (ANext is TAddAutomationPointCommand);
   if not Result then Exit;
   nx := TAddAutomationPointCommand(ANext);
-  Result := (nx.FDoc = FDoc) and (nx.FStripId = FStripId) and (nx.FParam = FParam)
+  Result := (nx.FDoc = FDoc) and (nx.TrackerSide = TrackerSide) and (nx.FStripId = FStripId) and (nx.FParam = FParam)
     and (nx.FTargetIndex = FTargetIndex) and (nx.FSubIndex = FSubIndex)
     and (Abs(nx.FTimeSeconds - FTimeSeconds) < 0.25) and (MsSinceStamp <= COMMAND_MERGE_WINDOW_MS);
   if Result then
@@ -1110,7 +1121,7 @@ begin
   Result := (ANext is TSetMixStripFloatCommand);
   if not Result then Exit;
   nx := TSetMixStripFloatCommand(ANext);
-  Result := (nx.FDoc = FDoc) and (nx.FStripId = FStripId) and (nx.FField = FField)
+  Result := (nx.FDoc = FDoc) and (nx.TrackerSide = TrackerSide) and (nx.FStripId = FStripId) and (nx.FField = FField)
     and (MsSinceStamp <= COMMAND_MERGE_WINDOW_MS);
   if Result then
   begin
@@ -1278,7 +1289,7 @@ begin
   Result := (ANext is TSetMixSendGainCommand);
   if not Result then Exit;
   nx := TSetMixSendGainCommand(ANext);
-  Result := (nx.FDoc = FDoc) and (nx.FStripId = FStripId) and (nx.FTargetId = FTargetId)
+  Result := (nx.FDoc = FDoc) and (nx.TrackerSide = TrackerSide) and (nx.FStripId = FStripId) and (nx.FTargetId = FTargetId)
     and (MsSinceStamp <= COMMAND_MERGE_WINDOW_MS);
   if Result then
   begin

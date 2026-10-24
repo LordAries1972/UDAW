@@ -11,7 +11,7 @@ uses {$IFDEF FPC}UDAW.Compat,{$ENDIF} SysUtils;
   "Created by ..." field (TENC / (c)too) and a "Version" field (TXXX /
   freeform atom) holding the UDAW build version. }
 procedure EncodeCompressedFile(const AWav, AOutput, AFormat: string; AProgress: TProc<Double>;
-  ABpm: Double = 0; const AArtist: string = '');
+  ABpm: Double = 0; const AArtist: string = ''; AAudioKbps: Integer = 0);
 { Writes the same tempo / author / created-by / version atoms into an existing
   MP4 (e.g. a video export). Only the movie header moves; media is untouched. }
 procedure StampMp4File(const AFile: string; ABpm: Double; const AArtist: string);
@@ -264,7 +264,7 @@ begin
 end;
 
 procedure EncodeCompressedFile(const AWav, AOutput, AFormat: string; AProgress: TProc<Double>;
-  ABpm: Double; const AArtist: string);
+  ABpm: Double; const AArtist: string; AAudioKbps: Integer);
 var
   source, dest: IStorageFile;
   load: IAsyncOperation_1__IStorageFile;
@@ -324,7 +324,7 @@ begin
     else profile := TMediaEncodingProfile.CreateM4a(AudioEncodingQuality.High);
     profile.Audio.SampleRate := WavSampleRate(AWav);
     profile.Audio.ChannelCount := 2;
-    if AFormat = '.mp3' then profile.Audio.Bitrate := 320000
+    if AAudioKbps > 0 then profile.Audio.Bitrate := Cardinal(AAudioKbps) * 1000   // Settings > Export
     else profile.Audio.Bitrate := 320000;
     stage := 'preparing encoder';
     prepare := transcoder.PrepareFileTranscodeAsync(source, dest, profile);
@@ -364,7 +364,7 @@ begin
 end;
 
 procedure EncodeCompressedFile(const AWav, AOutput, AFormat: string; AProgress: TProc<Double>;
-  ABpm: Double; const AArtist: string);
+  ABpm: Double; const AArtist: string; AAudioKbps: Integer);
 begin
   RaiseUDAW(errNotImplemented, 'Media.Transcode', 'AAC export requires Windows.');
 end;

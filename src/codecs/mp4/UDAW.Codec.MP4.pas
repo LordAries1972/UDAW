@@ -659,7 +659,7 @@ begin
   EnsurePlanar(ARes.Data, chans, totalFrames);
   for fi := 0 to totalFrames - 1 do
   begin
-    if (fi mod 4096) = 0 then ReportMediaProgress('Decoding MP4 PCM', fi, totalFrames, ATrack.SampleRate);
+    if (fi and 4095) = 0 then ReportMediaProgress('Decoding MP4 PCM', fi, totalFrames, ATrack.SampleRate);
     for ch := 0 to chans - 1 do
     begin
       s := ReadOne(Int64(fi) * frameBytes + ch * bytesPerSample);
@@ -897,7 +897,7 @@ begin
   SetLength(inter, Int64(frames) * chans * bytesPerSample);
   for fi := 0 to frames - 1 do
   begin
-    if Assigned(AOnProgress) and ((fi mod 4096) = 0) then AOnProgress(fi / frames);
+    if Assigned(AOnProgress) and ((fi and 4095) = 0) then AOnProgress(fi / frames);
     for ch := 0 to chans - 1 do
     begin
       ofs := (Int64(fi) * chans + ch) * bytesPerSample;

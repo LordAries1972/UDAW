@@ -275,8 +275,8 @@ var
 begin
   if ACount <= 0 then Exit;
   total := Int64(FBitPos) + ACount;
-  Inc(FBytePos, total div 8);
-  FBitPos := total mod 8;
+  Inc(FBytePos, total shr 3);
+  FBitPos := total and 7;
   if FBytePos >= FLen then
   begin
     FOverrun := True;

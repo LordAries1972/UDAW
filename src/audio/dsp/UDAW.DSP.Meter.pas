@@ -40,7 +40,7 @@ type
     procedure Init(ASampleRate: Double; AReleaseDbPerSec: Double = 20.0;
       AHoldMs: Double = 1500.0; AHoldDecayDbPerSec: Double = 10.0);
     procedure Reset;
-    procedure Push(AX: Single); {$IFDEF FPC}inline;{$ENDIF}
+    procedure Push(AX: Single); inline;
     procedure PushBlock(ABuf: PSingle; AFrames: Integer);
     function Value: Double;        // linear, ballistic
     function ValueDb: Double;
@@ -58,7 +58,7 @@ type
   public
     procedure Init(ASampleRate: Double; AWindowMs: Double = 300.0);
     procedure Reset;
-    procedure Push(AX: Single); {$IFDEF FPC}inline;{$ENDIF}
+    procedure Push(AX: Single); inline;
     procedure PushBlock(ABuf: PSingle; AFrames: Integer);
     function Value: Double;       // linear RMS
     function ValueDb: Double;
@@ -134,13 +134,17 @@ function SafeDb(ALinear: Double): Double;
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 function SafeDb(ALinear: Double): Double;
 begin
   if ALinear <= 0 then
     Result := METER_MIN_DB
   else
   begin
-    Result := 20.0 * Log10(ALinear);
+    Result := 20.0 * FastLog10(ALinear);
     if Result < METER_MIN_DB then Result := METER_MIN_DB;
   end;
 end;
@@ -328,19 +332,31 @@ end;
 
 procedure TTruePeakMeter.Push(AX: Single);
 var
-  ph, t, hi: Integer;
+  ph, t, tail: Integer;
   acc, a: Double;
+  h: PSingle;
+  c: PDouble;
 begin
   FHist[FHead] := AX;
-  FHead := (FHead + 1) mod FTaps;
+  Inc(FHead);
+  if FHead >= FTaps then FHead := 0;
 
+  { history is a ring read oldest -> newest starting at FHead: two straight
+    runs (FHead..end, then 0..FHead-1) replace a per-tap wrap }
+  tail := FTaps - FHead;
   for ph := 0 to FPhases - 1 do
   begin
     acc := 0;
-    for t := 0 to FTaps - 1 do
+    c := @FCoeffs[ph * FTaps];
+    h := @FHist[FHead];
+    for t := 0 to tail - 1 do
+      acc := acc + h[t] * c[t];
+    if FHead > 0 then
     begin
-      hi := (FHead + t) mod FTaps;   // oldest -> newest
-      acc := acc + FHist[hi] * FCoeffs[ph * FTaps + t];
+      h := @FHist[0];
+      c := @FCoeffs[ph * FTaps + tail];
+      for t := 0 to FHead - 1 do
+        acc := acc + h[t] * c[t];
     end;
     a := Abs(acc);
     if a > FPeak then FPeak := a;
@@ -363,7 +379,7 @@ end;
 function TTruePeakMeter.ValueDb: Double;
 begin
   if FPeak <= 0 then Exit(METER_MIN_DB);
-  Result := 20.0 * Log10(FPeak);
+  Result := 20.0 * FastLog10(FPeak);
 end;
 
 { ---------------- TLoudnessMeter (BS.1770-4) ---------------- }
@@ -458,7 +474,7 @@ end;
 function TLoudnessMeter.BlockLoudnessFromEnergy(AEnergy: Double): Double;
 begin
   if AEnergy <= 0 then Exit(METER_MIN_DB);
-  Result := -0.691 + 10.0 * Log10(AEnergy);
+  Result := -0.691 + 10.0 * FastLog10(AEnergy);
 end;
 
 function TLoudnessMeter.MeanOfLastSubEnergies(ACount: Integer): Double;

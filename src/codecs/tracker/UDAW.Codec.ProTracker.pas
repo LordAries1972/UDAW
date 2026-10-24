@@ -190,8 +190,10 @@ begin
         sub := AParam shr 4;
         lo := AParam and $0F;
         case sub of
-          $1: begin AEffect := tfxPortaUp;     AOutParam := lo; end;   // fine porta up
-          $2: begin AEffect := tfxPortaDown;   AOutParam := lo; end;   // fine porta down
+          $6: begin AEffect := tfxPatternLoop;   AOutParam := lo; end;
+          $E: begin AEffect := tfxPatternDelay;  AOutParam := lo; end;
+          $1: begin AEffect := tfxFinePortaUp;   AOutParam := lo; end;   // fine porta up (tick 0 only)
+          $2: begin AEffect := tfxFinePortaDown; AOutParam := lo; end;   // fine porta down
           $8: begin AEffect := tfxSetPanning;  AOutParam := Byte(lo * 17); end;
           $9: begin AEffect := tfxRetrigger;   AOutParam := lo; end;
           $A: begin AEffect := tfxFineVolUp;   AOutParam := lo; end;
@@ -227,6 +229,10 @@ begin
     tfxArpeggio:     begin ACmd := $0; AOutParam := AParam; end;
     tfxPortaUp:      begin ACmd := $1; AOutParam := AParam; end;
     tfxPortaDown:    begin ACmd := $2; AOutParam := AParam; end;
+    tfxPatternLoop:  begin ACmd := $E; AOutParam := Byte($60 or (AParam and $0F)); end;
+    tfxPatternDelay: begin ACmd := $E; AOutParam := Byte($E0 or (AParam and $0F)); end;
+    tfxFinePortaUp:  begin ACmd := $E; AOutParam := Byte($10 or (AParam and $0F)); end;
+    tfxFinePortaDown: begin ACmd := $E; AOutParam := Byte($20 or (AParam and $0F)); end;
     tfxTonePorta:    begin ACmd := $3; AOutParam := AParam; end;
     tfxVibrato:      begin ACmd := $4; AOutParam := AParam; end;
     tfxTremolo:      begin ACmd := $7; AOutParam := AParam; end;

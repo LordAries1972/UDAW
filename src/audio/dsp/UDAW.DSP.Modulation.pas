@@ -79,6 +79,10 @@ function ModEffectFromId(const AId: string; out AEffect: TModEffect): Boolean;
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 { 4-point, 3rd-order Hermite (Catmull-Rom) interpolation between Y1 and Y2. }
 function Hermite4(AY0, AY1, AY2, AY3, AFrac: Double): Double; inline;
 var
@@ -150,8 +154,8 @@ begin
     SetLength(FAllpassZ[ch], MOD_PHASER_STAGES_MAX + 1);
   SetLength(FWetLP, FChannels);
   SetLength(FFbLP, FChannels);
-  FWetCoef := 1.0 - Exp(-2.0 * DSP_PI * MOD_WET_CUT_HZ / FSampleRate);
-  FFbCoef := 1.0 - Exp(-2.0 * DSP_PI * MOD_FB_DAMP_HZ / FSampleRate);
+  FWetCoef := 1.0 - FastExp(-2.0 * DSP_PI * MOD_WET_CUT_HZ / FSampleRate);
+  FFbCoef := 1.0 - FastExp(-2.0 * DSP_PI * MOD_FB_DAMP_HZ / FSampleRate);
   Recalc;
   Reset;
 end;
@@ -222,17 +226,17 @@ begin
   base := BaseDelayMs * 0.001 * FSampleRate;
   sweep := SweepMs * 0.001 * FSampleRate * FDepth;
   if FEffect = modChorus then nv := MOD_CHORUS_VOICES else nv := 1;
-  fHi := MOD_PHASER_FMIN * Power(MOD_PHASER_RANGE, FDepth);
+  fHi := MOD_PHASER_FMIN * FastPow(MOD_PHASER_RANGE, FDepth);
 
   for i := 0 to AFrames - 1 do
   begin
-    lfo := Sin(FPhase);
+    lfo := FastSin(FPhase);
 
     case FEffect of
       modTremolo:
         begin
           { amplitude modulation, in phase on all channels; depth 1 = full }
-          g := 1.0 - FDepth * (0.5 - 0.5 * Cos(FPhase));
+          g := 1.0 - FDepth * (0.5 - 0.5 * FastCos(FPhase));
           for ch := 0 to nc - 1 do
             AOut[ch][i] := Single(AIn[ch][i] * g);
         end;
@@ -256,10 +260,10 @@ begin
           { all-pass cascade, exponential sweep, per-channel LFO phase }
           for ch := 0 to nc - 1 do
           begin
-            if ch = 1 then lfoCh := Sin(FPhase + chOff) else lfoCh := lfo;
-            apf := MOD_PHASER_FMIN * Power(fHi / MOD_PHASER_FMIN, 0.5 + 0.5 * lfoCh);
+            if ch = 1 then lfoCh := FastSin(FPhase + chOff) else lfoCh := lfo;
+            apf := MOD_PHASER_FMIN * FastPow(fHi / MOD_PHASER_FMIN, 0.5 + 0.5 * lfoCh);
             if apf > 0.45 * FSampleRate then apf := 0.45 * FSampleRate;
-            tn := Tan(DSP_PI * apf / FSampleRate);
+            tn := FastTan(DSP_PI * apf / FSampleRate);
             g := (1.0 - tn) / (1.0 + tn);
             x := AIn[ch][i] + FFeedback * FAllpassZ[ch][MOD_PHASER_STAGES_MAX];
             for st := 0 to FStages - 1 do
@@ -282,8 +286,8 @@ begin
           for v := 0 to nv - 1 do
           begin
             voiceOff := v * 2.0 * DSP_PI / nv;
-            if ch = 1 then lfoCh := Sin(FPhase + chOff + voiceOff)
-            else lfoCh := Sin(FPhase + voiceOff);
+            if ch = 1 then lfoCh := FastSin(FPhase + chOff + voiceOff)
+            else lfoCh := FastSin(FPhase + voiceOff);
             rd := base * (1.0 + 0.12 * v) + sweep * (0.5 + 0.5 * lfoCh);
             if rd < 3 then rd := 3;
             if rd > FLen - 4 then rd := FLen - 4;

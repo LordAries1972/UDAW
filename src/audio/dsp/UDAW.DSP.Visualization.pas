@@ -142,7 +142,7 @@ type
     function UsesRms: Boolean;
   public
     procedure Configure(ASampleRate: Double; APreset: TMeterBallistics);
-    procedure Push(AX: Single); {$IFDEF FPC}inline;{$ENDIF}
+    procedure Push(AX: Single); inline;
     procedure PushBlock(ABuf: PSingle; AFrames: Integer);
     procedure Reset;
     function ReadingDb: Double;       // plain dBFS, independent of the preset's scale
@@ -452,7 +452,8 @@ begin
     r := AR[i];
     FPointsX[FHead] := (l - r) * ROT;
     FPointsY[FHead] := (l + r) * ROT;
-    FHead := (FHead + 1) mod FCapacity;
+    Inc(FHead);
+    if FHead >= FCapacity then FHead := 0;
     if FCount < FCapacity then Inc(FCount);
   end;
 end;

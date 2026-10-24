@@ -47,8 +47,8 @@ procedure VideoFxRenderTransition(const AId, AParams: string; AProgress: Double;
 
 implementation
 
-uses
-  SysUtils, Math;
+uses UDAW.DSP.MathTables,
+  SysUtils, Math, UDAW.Video.EffectsPlus;
 
 const
   FX_COUNT = 52;
@@ -66,21 +66,21 @@ const
     ('wipedown', 'Wipe Down', 'Wipe', 'T'),
     ('clock', 'Clock Wipe', 'Wipe', 'T'),
     ('barndoor', 'Barn Doors', 'Wipe', 'T'),
-    ('circleopen', 'Iris Open', 'Wipe', 'T'),
-    ('circleclose', 'Iris Close', 'Wipe', 'T'),
-    ('slideleft', 'Push Left', 'Slide and Zoom', 'T'),
-    ('slideright', 'Push Right', 'Slide and Zoom', 'T'),
-    ('slideup', 'Push Up', 'Slide and Zoom', 'T'),
-    ('slidedown', 'Push Down', 'Slide and Zoom', 'T'),
-    ('zoomin', 'Zoom In', 'Slide and Zoom', 'T'),
-    ('zoomout', 'Zoom Out', 'Slide and Zoom', 'T'),
-    ('glitchtrans', 'Glitch Transition', 'Slide and Zoom', 'T'),
+    ('circleopen', 'Iris Open', 'Iris', 'T'),
+    ('circleclose', 'Iris Close', 'Iris', 'T'),
+    ('slideleft', 'Push Left', 'Motion', 'T'),
+    ('slideright', 'Push Right', 'Motion', 'T'),
+    ('slideup', 'Push Up', 'Motion', 'T'),
+    ('slidedown', 'Push Down', 'Motion', 'T'),
+    ('zoomin', 'Zoom In', 'Motion', 'T'),
+    ('zoomout', 'Zoom Out', 'Motion', 'T'),
+    ('glitchtrans', 'Glitch Transition', 'Motion', 'T'),
     ('fadein', 'Fade In', 'Fade', 'F'),
     ('fadeout', 'Fade Out', 'Fade', 'F'),
     ('flash', 'Flash', 'Fade', 'F'),
-    ('blur', 'Blur', 'Blur and Sharpen', 'F'),
-    ('sharpen', 'Sharpen', 'Blur and Sharpen', 'F'),
-    ('pixelate', 'Pixelate', 'Blur and Sharpen', 'F'),
+    ('blur', 'Box Blur', 'Blur', 'F'),
+    ('sharpen', 'Sharpen', 'Sharpen', 'F'),
+    ('pixelate', 'Mosaic Blur', 'Blur', 'F'),
     ('bw', 'Black and White', 'Colour', 'F'),
     ('sepia', 'Sepia', 'Colour', 'F'),
     ('invert', 'Invert', 'Colour', 'F'),
@@ -94,30 +94,39 @@ const
     ('vivid', 'Vivid', 'Colour', 'F'),
     ('desaturate', 'Desaturate', 'Colour', 'F'),
     ('posterize', 'Posterize', 'Colour', 'F'),
-    ('vignette', 'Vignette', 'Style', 'F'),
-    ('grain', 'Film Grain', 'Style', 'F'),
-    ('scanlines', 'VHS Scanlines', 'Style', 'F'),
-    ('sketch', 'Sketch', 'Style', 'F'),
-    ('emboss', 'Emboss', 'Style', 'F'),
-    ('glitch', 'Glitch', 'Distort', 'F'),
-    ('rgbsplit', 'RGB Split', 'Distort', 'F'),
-    ('mirror', 'Mirror', 'Distort', 'F'),
-    ('flipv', 'Flip Vertical', 'Distort', 'F'),
-    ('shake', 'Shake', 'Motion', 'F'),
-    ('slowzoom', 'Slow Zoom In', 'Motion', 'F'),
-    ('spin', 'Spin', 'Motion', 'F'),
-    ('pulse', 'Zoom Pulse', 'Motion', 'F'));
+    ('vignette', 'Vignette', 'Light', 'F'),
+    ('grain', 'Film Grain', 'Texture', 'F'),
+    ('scanlines', 'Scanlines', 'Texture', 'F'),
+    ('sketch', 'Sketch', 'Stylize', 'F'),
+    ('emboss', 'Emboss', 'Stylize', 'F'),
+    ('glitch', 'Glitch', 'Glitch', 'F'),
+    ('rgbsplit', 'RGB Split', 'Glitch', 'F'),
+    ('mirror', 'Mirror (Left to Right)', 'Transform', 'F'),
+    ('flipv', 'Flip Vertical', 'Transform', 'F'),
+    ('shake', 'Shake', 'Camera Motion', 'F'),
+    ('slowzoom', 'Slow Zoom In', 'Camera Motion', 'F'),
+    ('spin', 'Spin', 'Camera Motion', 'F'),
+    ('pulse', 'Zoom Pulse', 'Camera Motion', 'F'));
 
 var
   FInv: TFormatSettings;
 
 function VideoFxCount: Integer;
 begin
-  Result := FX_COUNT;
+  Result := FX_COUNT + VfxPlusCount;
 end;
 
 function VideoFxInfoAt(AIndex: Integer): TVideoFxInfo;
+var
+  isTrans: Boolean;
 begin
+  if AIndex >= FX_COUNT then
+  begin
+    VfxPlusInfo(AIndex - FX_COUNT, Result.Id, Result.Name, Result.Group, isTrans);
+    if isTrans then Result.Cls := vfTransition
+    else Result.Cls := vfFilter;
+    Exit;
+  end;
   Result.Id := FX_TABLE[AIndex][0];
   Result.Name := FX_TABLE[AIndex][1];
   Result.Group := FX_TABLE[AIndex][2];
@@ -129,12 +138,11 @@ function VideoFxFind(const AId: string; out AInfo: TVideoFxInfo): Boolean;
 var
   i: Integer;
 begin
-  for i := 0 to FX_COUNT - 1 do
-    if SameText(FX_TABLE[i][0], AId) then
-    begin
-      AInfo := VideoFxInfoAt(i);
-      Exit(True);
-    end;
+  for i := 0 to VideoFxCount - 1 do
+  begin
+    AInfo := VideoFxInfoAt(i);
+    if SameText(AInfo.Id, AId) then Exit(True);
+  end;
   Result := False;
 end;
 
@@ -305,8 +313,8 @@ begin
   if AScale < 0.01 then AScale := 0.01;
   cx := (W - 1) / 2;
   cy := (H - 1) / 2;
-  ca := Cos(ARad);
-  sa := Sin(ARad);
+  ca := FastCos(ARad);
+  sa := FastSin(ARad);
   for y := 0 to H - 1 do
     for x := 0 to W - 1 do
     begin
@@ -555,7 +563,7 @@ begin
     for y := 0 to H - 1 do
     begin
       { slow horizontal wobble, a tape-tracking look }
-      r := Round(Sin((y + ASeed * 3) * 0.05) * Clamp01(amt) * 3);
+      r := Round(FastSin((y + ASeed * 3) * 0.05) * Clamp01(amt) * 3);
       for x := 0 to W - 1 do
       begin
         s := PixAt(ASrc, W, H, x + r, y);
@@ -657,13 +665,13 @@ begin
   if AId = 'pulse' then
   begin
     if amt < 0 then amt := 0.15;
-    ZoomRotate(ASrc, ADst, W, H, 1 + amt * Sin(Clamp01(AProgress) * Pi), 0);
+    ZoomRotate(ASrc, ADst, W, H, 1 + amt * FastSin(Clamp01(AProgress) * Pi), 0);
     Exit;
   end;
 
   if AId = 'spin' then
   begin
-    ZoomRotate(ASrc, ADst, W, H, 1 + 0.4 * Sin(Clamp01(AProgress) * Pi), Clamp01(AProgress) * 2 * Pi);
+    ZoomRotate(ASrc, ADst, W, H, 1 + 0.4 * FastSin(Clamp01(AProgress) * Pi), Clamp01(AProgress) * 2 * Pi);
     Exit;
   end;
 
@@ -730,6 +738,7 @@ begin
     Exit;
   end;
 
+  if VfxPlusFilter(AId, AParams, AProgress, ASrc, ADst, W, H, ASeed) then Exit;
   PerPixelFilter(AId, AParams, AProgress, ASrc, ADst, W, H, ASeed);
 end;
 
@@ -807,7 +816,7 @@ begin
   begin
     SetLength(ta, n * 4);
     SetLength(tb, n * 4);
-    sh := Max(1, Round(Sin(p * Pi) * Min(W, H) / 18));
+    sh := Max(1, Round(FastSin(p * Pi) * Min(W, H) / 18));
     BoxBlur(AFrom, @ta[0], W, H, sh);
     BoxBlur(ATo, @tb[0], W, H, sh);
     for i := 0 to n - 1 do Blend(@ta[i * 4], @tb[i * 4], ADst + i * 4, w256);
@@ -818,7 +827,7 @@ begin
   begin
     SetLength(ta, n * 4);
     SetLength(tb, n * 4);
-    bs := 1 + Round(Sin(p * Pi) * Min(W, H) / 14);
+    bs := 1 + Round(FastSin(p * Pi) * Min(W, H) / 14);
     Mosaic(AFrom, @ta[0], W, H, bs);
     Mosaic(ATo, @tb[0], W, H, bs);
     for i := 0 to n - 1 do Blend(@ta[i * 4], @tb[i * 4], ADst + i * 4, w256);
@@ -857,7 +866,7 @@ begin
     for y := 0 to H - 1 do
       for x := 0 to W - 1 do
       begin
-        ang := ArcTan2(x - cx, -(y - cy));          // 0 = straight up, clockwise
+        ang := FastArcTan2(x - cx, -(y - cy));          // 0 = straight up, clockwise
         if ang < 0 then ang := ang + 2 * Pi;
         PutPix(x, y, ang < p * 2 * Pi);
       end;
@@ -940,7 +949,7 @@ begin
     begin
       useB := (Rnd(seed) mod 1000) / 1000 < p;
       sh := Integer(Rnd(seed) mod Cardinal(Max(1, W div 6))) - W div 12;
-      sh := Round(sh * Sin(p * Pi));
+      sh := Round(sh * FastSin(p * Pi));
       for i := y to Min(H - 1, y + band - 1) do
         for x := 0 to W - 1 do
         begin
@@ -954,6 +963,7 @@ begin
     Exit;
   end;
 
+  if VfxPlusTransition(AId, AParams, AProgress, AFrom, ATo, ADst, W, H, ASeed) then Exit;
   for i := 0 to n - 1 do Blend(AFrom + i * 4, ATo + i * 4, ADst + i * 4, w256);
 end;
 

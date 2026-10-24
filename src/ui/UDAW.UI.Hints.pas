@@ -15,7 +15,7 @@ interface
 
 uses
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, ExtCtrls,
-  StdCtrls;
+  StdCtrls, Types, Math;
 
 type
   TUDAWHintWindow = class(THintWindow)
@@ -46,6 +46,9 @@ function UDAWHintsEnabled: Boolean;
 procedure ActivateHintsFor(AOwner: TComponent);
 
 implementation
+
+uses
+  UDAW.GL.Widgets;
 
 type
   TCtlAccess = class(TControl);   // Caption/ParentShowHint are protected on TControl
@@ -97,7 +100,9 @@ begin
   Result := '';
   c := FindVCLWindow(Mouse.CursorPos);
   if c = nil then Exit;
-  if (c is TButtonControl) or (c is TCustomLabel) or (c is TCustomStaticText) then
+  if c is TGLWidget then
+    Result := TGLWidget(c).Caption
+  else if (c is TButtonControl) or (c is TCustomLabel) or (c is TCustomStaticText) then
     Result := TCtlAccess(c).Caption;
   Result := StringReplace(Result, '&', '', [rfReplaceAll]);
   Result := Trim(Result);
@@ -182,8 +187,25 @@ end;
 procedure TUDAWHintWindow.ActivateHint(Rect: TRect; const AHint: string);
 var
   rgn: HRGN;
+  pt: TPoint;
+  wa: TRect;
+  w, h, x, y: Integer;
 begin
   SplitHint(AHint);
+  { keep the hint on screen: when it would run off the right or bottom edge it opens the
+    other way round the pointer (to its left / above it) instead, then is clamped to the
+    monitor's work area so it can always be read }
+  pt := Mouse.CursorPos;
+  wa := Screen.MonitorFromPoint(pt).WorkareaRect;
+  w := Rect.Right - Rect.Left;
+  h := Rect.Bottom - Rect.Top;
+  x := Rect.Left;
+  y := Rect.Top;
+  if x + w > wa.Right then x := pt.X - w - 6;
+  if y + h > wa.Bottom then y := pt.Y - h - 6;
+  x := Max(wa.Left, Min(x, wa.Right - w));
+  y := Max(wa.Top, Min(y, wa.Bottom - h));
+  Rect := Types.Rect(x, y, x + w, y + h);
   FAlpha := 0;
   FFade.Enabled := False;
   BoundsRect := Rect;
@@ -260,8 +282,26 @@ begin
   DrawText(Canvas.Handle, PChar(FBody), -1, r, DT_WORDBREAK or DT_NOPREFIX);
 end;
 
+type
+  { every form's designer-set button hints go live the moment that form is
+    shown, so secondary windows (Foley, Meters, insert editor, Help...) get
+    the same rollover hints as the main window without wiring each one }
+  TFormHintActivator = class
+    procedure ActiveFormChanged(Sender: TObject);
+  end;
+
+procedure TFormHintActivator.ActiveFormChanged(Sender: TObject);
+begin
+  if Screen.ActiveForm <> nil then ActivateHintsFor(Screen.ActiveForm);
+end;
+
+var
+  GFormHintActivator: TFormHintActivator;
+
 initialization
   HintWindowClass := TUDAWHintWindow;
+  GFormHintActivator := TFormHintActivator.Create;
+  Screen.OnActiveFormChange := GFormHintActivator.ActiveFormChanged;
   Application.HintPause := 400;
   Application.HintShortPause := 120;
   Application.HintHidePause := 12000;

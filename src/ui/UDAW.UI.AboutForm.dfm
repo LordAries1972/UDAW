@@ -21,7 +21,7 @@ object frmAbout: TfrmAbout
     Align = alClient
     BevelOuter = bvNone
     TabOrder = 0
-    object lblAppName: TLabel
+    object lblAppName: TGLLabel
       Left = 24
       Top = 20
       Width = 200
@@ -34,35 +34,35 @@ object frmAbout: TfrmAbout
       Font.Style = [fsBold]
       ParentFont = False
     end
-    object lblPublisher: TLabel
+    object lblPublisher: TGLLabel
       Left = 24
       Top = 58
       Width = 130
       Height = 15
       Caption = 'by Ultimanium Designs'
     end
-    object lblAuthor: TLabel
+    object lblAuthor: TGLLabel
       Left = 24
       Top = 78
       Width = 220
       Height = 15
       Caption = 'Daniel J. Hobson of Australia, 2026'
     end
-    object lblVersion: TLabel
+    object lblVersion: TGLLabel
       Left = 24
       Top = 98
       Width = 100
       Height = 15
       Caption = 'Version 0.0.0.0'
     end
-    object lblWebsiteCaption: TLabel
+    object lblWebsiteCaption: TGLLabel
       Left = 24
       Top = 134
       Width = 51
       Height = 15
       Caption = 'Website:'
     end
-    object lblWebsite: TLabel
+    object lblWebsite: TGLLabel
       Left = 24
       Top = 154
       Width = 110
@@ -83,6 +83,7 @@ object frmAbout: TfrmAbout
       Width = 80
       Height = 25
       Caption = 'Close'
+      Hint = 'Close this About window.'
       Default = True
       ModalResult = 1
       TabOrder = 0

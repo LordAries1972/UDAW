@@ -295,7 +295,8 @@ var
 begin
   sb := TStringBuilder.Create;
   try
-    sb.AppendLine(UDAWFullVersionString);
+    sb.AppendLine(UDAW_PRODUCT_NAME);
+    sb.AppendLine('  version : ' + UDAWDisplayVersionString);
     sb.AppendLine('');
     sb.AppendLine('Platform');
     sb.AppendLine('  ' + FPlatform.Summary);

@@ -33,6 +33,7 @@ uses
   UDAW.Audio.Backend.WASAPI in 'src\audio\backend\UDAW.Audio.Backend.WASAPI.pas',
   UDAW.Audio.Backend.Factory in 'src\audio\UDAW.Audio.Backend.Factory.pas',
   UDAW.Audio.Engine in 'src\audio\UDAW.Audio.Engine.pas',
+  UDAW.DSP.MathTables in 'src\audio\dsp\UDAW.DSP.MathTables.pas',
   UDAW.DSP.Math in 'src\audio\dsp\UDAW.DSP.Math.pas',
   UDAW.DSP.Interpolation in 'src\audio\dsp\UDAW.DSP.Interpolation.pas',
   UDAW.DSP.Filters in 'src\audio\dsp\UDAW.DSP.Filters.pas',
@@ -41,6 +42,7 @@ uses
   UDAW.DSP.Envelope in 'src\audio\dsp\UDAW.DSP.Envelope.pas',
   UDAW.DSP.Meter in 'src\audio\dsp\UDAW.DSP.Meter.pas',
   UDAW.DSP.Dynamics in 'src\audio\dsp\UDAW.DSP.Dynamics.pas',
+  UDAW.DSP.CurveMath in 'src\audio\dsp\UDAW.DSP.CurveMath.pas',
   UDAW.DSP.Modulation in 'src\audio\dsp\UDAW.DSP.Modulation.pas',
   UDAW.DSP.Distortion in 'src\audio\dsp\UDAW.DSP.Distortion.pas',
   UDAW.DSP.Reverb in 'src\audio\dsp\UDAW.DSP.Reverb.pas',
@@ -58,14 +60,20 @@ uses
   UDAW.DSP.Dither in 'src\audio\dsp\UDAW.DSP.Dither.pas',
   UDAW.DSP.Spectral in 'src\audio\dsp\UDAW.DSP.Spectral.pas',
   UDAW.Sequencer.Patterns in 'src\sequencer\UDAW.Sequencer.Patterns.pas',
+  UDAW.Pattern.Model in 'src\sequencer\UDAW.Pattern.Model.pas',
+  UDAW.Pattern.Commands in 'src\sequencer\UDAW.Pattern.Commands.pas',
+  UDAW.Drum.KitModel in 'src\sequencer\UDAW.Drum.KitModel.pas',
+  UDAW.UI.DrumInstrument in 'src\ui\UDAW.UI.DrumInstrument.pas',
   UDAW.Synth.Instruments in 'src\synth\UDAW.Synth.Instruments.pas',
   UDAW.Mixer.Modulation in 'src\mixer\UDAW.Mixer.Modulation.pas',
   UDAW.Mixer.CLAP in 'src\mixer\UDAW.Mixer.CLAP.pas',
   UDAW.Mixer.VST3 in 'src\mixer\UDAW.Mixer.VST3.pas',
   UDAW.DSP.AudioToMidi in 'src\audio\dsp\UDAW.DSP.AudioToMidi.pas',
+  UDAW.Timeline.ExtraFx in 'src\timeline\UDAW.Timeline.ExtraFx.pas',
   UDAW.Timeline.SpectralFx in 'src\timeline\UDAW.Timeline.SpectralFx.pas',
   UDAW.Timeline.Warp in 'src\timeline\UDAW.Timeline.Warp.pas',
   UDAW.Timeline.VideoPlayer in 'src\timeline\UDAW.Timeline.VideoPlayer.pas',
+  UDAW.Video.EffectsPlus in 'src\timeline\UDAW.Video.EffectsPlus.pas',
   UDAW.Video.Effects in 'src\timeline\UDAW.Video.Effects.pas',
   UDAW.Timeline.VideoFxCache in 'src\timeline\UDAW.Timeline.VideoFxCache.pas',
   UDAW.Media.DirectShow in 'src\video\UDAW.Media.DirectShow.pas',
@@ -112,6 +120,7 @@ uses
   UDAW.Browser.Catalogue in 'src\browser\UDAW.Browser.Catalogue.pas',
   UDAW.Timeline.Time in 'src\timeline\UDAW.Timeline.Time.pas',
   UDAW.Timeline.Waveform in 'src\timeline\UDAW.Timeline.Waveform.pas',
+  UDAW.Timeline.TrackerSource in 'src\timeline\UDAW.Timeline.TrackerSource.pas',
   UDAW.Timeline.Model in 'src\timeline\UDAW.Timeline.Model.pas',
   UDAW.Timeline.Serialization in 'src\timeline\UDAW.Timeline.Serialization.pas',
   UDAW.Timeline.View in 'src\timeline\UDAW.Timeline.View.pas',
@@ -124,10 +133,12 @@ uses
   UDAW.Tracker.Instrument in 'src\tracker\UDAW.Tracker.Instrument.pas',
   UDAW.Tracker.Pattern in 'src\tracker\UDAW.Tracker.Pattern.pas',
   UDAW.Tracker.Player in 'src\tracker\UDAW.Tracker.Player.pas',
+  UDAW.Tracker.ScoreNotes in 'src\tracker\UDAW.Tracker.ScoreNotes.pas',
   UDAW.Tracker.Serialization in 'src\tracker\UDAW.Tracker.Serialization.pas',
   UDAW.Codec.ProTracker in 'src\codecs\tracker\UDAW.Codec.ProTracker.pas',
   UDAW.Codec.XM in 'src\codecs\tracker\UDAW.Codec.XM.pas',
   UDAW.Codec.MPTM in 'src\codecs\tracker\UDAW.Codec.MPTM.pas',
+  UDAW.Codec.TrackerLegacy in 'src\codecs\tracker\UDAW.Codec.TrackerLegacy.pas',
   UDAW.Codec.FLStudio in 'src\codecs\flstudio\UDAW.Codec.FLStudio.pas',
   UDAW.Codec.FLStudio.Timeline in 'src\codecs\flstudio\UDAW.Codec.FLStudio.Timeline.pas',
   UDAW.Project.Document in 'src\project\UDAW.Project.Document.pas',
@@ -135,6 +146,7 @@ uses
   UDAW.Project.Commands in 'src\project\UDAW.Project.Commands.pas',
   UDAW.Project.Recovery in 'src\project\UDAW.Project.Recovery.pas',
   UDAW.Project.WindowLayout in 'src\project\UDAW.Project.WindowLayout.pas',
+  UDAW.Project.DialogPaths in 'src\project\UDAW.Project.DialogPaths.pas',
   UDAW.Timeline.Commands in 'src\timeline\UDAW.Timeline.Commands.pas',
   UDAW.Timeline.Playback in 'src\timeline\UDAW.Timeline.Playback.pas',
   UDAW.Mixer.Commands in 'src\mixer\UDAW.Mixer.Commands.pas',
@@ -177,14 +189,25 @@ uses
   UDAW.UI.ThemeColors in 'src\ui\UDAW.UI.ThemeColors.pas',
   UDAW.UI.Hints in 'src\ui\UDAW.UI.Hints.pas',
   UDAW.Web.HelpClient in 'src\web\UDAW.Web.HelpClient.pas',
-  UDAW.Licensing in 'src\web\UDAW.Licensing.pas',
+  // UDAW.Licensing in 'src\web\UDAW.Licensing.pas',   // registration disabled: full version by default
   UDAW.Update in 'src\web\UDAW.Update.pas',
   UDAW.Input.KeyHooks in 'src\input\UDAW.Input.KeyHooks.pas',
   UDAW.UI.HelpForm in 'src\ui\UDAW.UI.HelpForm.pas' {frmHelp},
   UDAW.UI.AboutForm in 'src\ui\UDAW.UI.AboutForm.pas' {frmAbout},
   UDAW.UI.VST2Editor in 'src\ui\UDAW.UI.VST2Editor.pas' {frmVST2Editor},
   UDAW.UI.SplashForm in 'src\ui\UDAW.UI.SplashForm.pas' {frmSplash},
+  UDAW.UI.ProjectStartForm in 'src\ui\UDAW.UI.ProjectStartForm.pas' {frmProjectStart},
   UDAW.UI.LogForm in 'src\ui\UDAW.UI.LogForm.pas' {frmLogViewer},
+  UDAW.UI.MeterForm in 'src\ui\UDAW.UI.MeterForm.pas' {frmMeters},
+  UDAW.UI.VideoForm in 'src\ui\UDAW.UI.VideoForm.pas' {frmVideoPlayer},
+  UDAW.UI.SpectrumForm in 'src\ui\UDAW.UI.SpectrumForm.pas' {frmSpectrum},
+  UDAW.UI.FoleyForm in 'src\ui\UDAW.UI.FoleyForm.pas' {frmFoley},
+  UDAW.UI.CurvePaint in 'src\ui\UDAW.UI.CurvePaint.pas',
+  UDAW.UI.EffectEditor in 'src\ui\UDAW.UI.EffectEditor.pas' {frmEffectEditor},
+  UDAW.UI.InstrumentEditor in 'src\ui\UDAW.UI.InstrumentEditor.pas' {frmInstrumentEditor},
+  UDAW.UI.TrkFxPick in 'src\ui\UDAW.UI.TrkFxPick.pas' {frmTrkFxPick},
+  UDAW.Timeline.FxPresets in 'src\timeline\UDAW.Timeline.FxPresets.pas',
+  UDAW.Timeline.OfflineFx in 'src\timeline\UDAW.Timeline.OfflineFx.pas',
   UDAW.UI.MainForm in 'src\ui\UDAW.UI.MainForm.pas' {frmMain};
 
 {$R *.res}
@@ -215,11 +238,11 @@ var
   recheck: TUDAWUpdateInfo;
   {$ENDIF}
   updErr: string;
-  licResult: TLicenseResult;
+  // licResult: TLicenseResult;   // registration disabled
 begin
   Application.Initialize;
   Application.MainFormOnTaskbar := True;
-  Application.Title := 'Ultimanium Audio Studio';
+  Application.Title := UDAW_PRODUCT_NAME;
 
   splash := ShowSplash(FindSplashLogo, UDAW_PRODUCT_NAME,
     'Version ' + UDAWDisplayVersionString, UDAW_AUTHOR_LINE);
@@ -266,8 +289,7 @@ begin
              not (recheck.ExeMismatch or recheck.FilesMismatch)) then
           begin
             updInfo := recheck;   // newer build, or the mismatch went away
-            if not (updInfo.ExeMismatch or updInfo.FilesMismatch) then
-              TUDAWLicense.TamperDetected := False;
+            // registration disabled: TUDAWLicense.TamperDetected := False;
           end;
         end;
         if updInfo.ExeMismatch or updInfo.FilesMismatch then
@@ -313,13 +335,20 @@ begin
       else
         Logger.Warn('update', 'Update/checksum check skipped: ' + updErr);
 
-      { Registration: re-verify the DPAPI-cached credentials online. }
+      { Every look-up table the runtime maths uses (sine, exp2, log2, atan,
+        semitone / MIDI tables, plus any a unit registered itself) is built
+        here, before anything starts, so no hot path ever computes them. }
+      splash.OnAppProgress(MT_STATUS_TEXT, 0, 0);
+      GeneratePrecalcMathTables(splash.OnAppProgress);
+
+      { Registration disabled - UDAW is the full version by default.
       splash.OnAppProgress('Verifying registration...', 0, 0);
       licResult := TUDAWLicense.AttemptSilentVerifyBounded;
       if TUDAWLicense.IsRegistered then
         TUDAWLicense.StartHeartbeat
       else
         splash.OnAppProgress('Running unregistered - export and AI are disabled', 0, 0);
+      }
 
       splash.OnAppProgress('Loading interface...', 0, 0);
       Application.CreateForm(TfrmMain, frmMain);
@@ -328,7 +357,7 @@ begin
     end;
     Application.Run;
   finally
-    TUDAWLicense.EndSession;   // frees this run's licence seat; keeps the cached registration
+    // TUDAWLicense.EndSession;   // registration disabled
     SetApp(nil);
     LCore.Free;
   end;

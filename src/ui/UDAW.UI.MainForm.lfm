@@ -2114,6 +2114,89 @@
                 Caption = ' '
               end
             end
+            object grpExport: TGroupBox
+              Left = 8
+              Top = 1000
+              Width = 920
+              Height = 150
+              Caption = ' Export (saved with the project) '
+              TabOrder = 5
+              object lblExpBitrate: TLabel
+                Transparent = True
+                Left = 16
+                Top = 27
+                Width = 140
+                Height = 15
+                Caption = 'Video quality (bitrate)'
+              end
+              object cboExpBitrate: TComboBox
+                Left = 164
+                Top = 24
+                Width = 160
+                Height = 23
+                Style = csDropDownList
+                TabOrder = 0
+                OnChange = cboExportChange
+              end
+              object lblExpWidth: TLabel
+                Transparent = True
+                Left = 16
+                Top = 59
+                Width = 140
+                Height = 15
+                Caption = 'Video size (max width)'
+              end
+              object cboExpWidth: TComboBox
+                Left = 164
+                Top = 56
+                Width = 160
+                Height = 23
+                Style = csDropDownList
+                TabOrder = 1
+                OnChange = cboExportChange
+              end
+              object lblExpAuthor: TLabel
+                Transparent = True
+                Left = 16
+                Top = 91
+                Width = 140
+                Height = 15
+                Caption = 'Author (embedded)'
+              end
+              object edExpAuthor: TEdit
+                Left = 164
+                Top = 88
+                Width = 340
+                Height = 23
+                TabOrder = 2
+                OnExit = edExpAuthorExit
+              end
+              object lblExpAudio: TLabel
+                Transparent = True
+                Left = 360
+                Top = 27
+                Width = 140
+                Height = 15
+                Caption = 'Audio quality (bitrate)'
+              end
+              object cboExpAudio: TComboBox
+                Left = 508
+                Top = 24
+                Width = 160
+                Height = 23
+                Style = csDropDownList
+                TabOrder = 3
+                OnChange = cboExportChange
+              end
+              object lblExpNote: TLabel
+                Transparent = True
+                Left = 16
+                Top = 120
+                Width = 880
+                Height = 15
+                Caption = 'Video settings apply to MP4 / MKV exports; audio quality applies to MP3, MP4, M4A and MKV. The author name is written into the header of every exported file.'
+              end
+            end
           end
         end
         object tabRegistration: TTabSheet
@@ -4356,6 +4439,13 @@
     Left = 688
     Top = 328
   end
+  object dlgOpenPy: TOpenDialog
+    DefaultExt = 'py'
+    Filter = 'Python script (*.py)|*.py|All files (*.*)|*.*'
+    Options = [ofFileMustExist]
+    Left = 800
+    Top = 288
+  end
   object dlgOpenMidi: TOpenDialog
     DefaultExt = 'mid'
     Filter = 'Standard MIDI File (*.mid;*.midi)|*.mid;*.midi|All files (*.*)|*.*'
@@ -5187,7 +5277,6 @@
     end
     object mnuProject: TMenuItem
       Caption = 'Project'
-      Visible = False
       object mnuProjectFile: TMenuItem
         Caption = 'File'
         object mnuProjectNew: TMenuItem
@@ -5613,6 +5702,17 @@
         end
       end
     end
+    object mnuScripts: TMenuItem
+      Caption = 'Scripts'
+      object mnuScriptRun: TMenuItem
+        Caption = 'Run Python script...'
+        OnClick = mnuScriptRunClick
+      end
+      object mnuScriptFolder: TMenuItem
+        Caption = 'Open scripts folder'
+        OnClick = mnuScriptFolderClick
+      end
+    end
     object mnuHelp: TMenuItem
       Caption = 'Help'
       object mnuHelpAbout: TMenuItem
@@ -5959,6 +6059,10 @@
       object pmTlRenameTrack: TMenuItem
         Caption = 'Rename Channel...'
         OnClick = pmTlRenameTrackClick
+      end
+      object pmTlCreateScore: TMenuItem
+        Caption = 'Create to Score'
+        OnClick = pmTlCreateScoreClick
       end
       object pmTlSepChanB: TMenuItem
         Caption = '-'

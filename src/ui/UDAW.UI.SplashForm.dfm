@@ -31,22 +31,16 @@ object frmSplash: TfrmSplash
       Proportional = True
       Stretch = True
     end
-    object lblAppName: TLabel
-      Left = 0
-      Top = 288
-      Width = 420
-      Height = 25
-      Alignment = taCenter
-      AutoSize = False
-      Caption = 'Ultimanium Digital Audio Workstation (UDAW)'
-      Font.Charset = DEFAULT_CHARSET
-      Font.Color = clWindowText
-      Font.Height = -15
-      Font.Name = 'Segoe UI'
-      Font.Style = [fsBold]
-      ParentFont = False
+    object pnlTitle: TPanel
+      Left = 2
+      Top = 286
+      Width = 416
+      Height = 28
+      BevelOuter = bvNone
+      Caption = ''
+      TabOrder = 2
     end
-    object lblVersion: TLabel
+    object lblVersion: TGLLabel
       Left = 0
       Top = 318
       Width = 420
@@ -55,7 +49,7 @@ object frmSplash: TfrmSplash
       AutoSize = False
       Caption = 'Version 1.0.175.01/01/2026'
     end
-    object lblAuthor: TLabel
+    object lblAuthor: TGLLabel
       Left = 0
       Top = 338
       Width = 420
@@ -70,7 +64,7 @@ object frmSplash: TfrmSplash
       Font.Style = []
       ParentFont = False
     end
-    object lblStatus: TLabel
+    object lblStatus: TGLLabel
       Left = 56
       Top = 366
       Width = 344
@@ -83,12 +77,14 @@ object frmSplash: TfrmSplash
       Font.Style = []
       ParentFont = False
     end
-    object prgLoad: TProgressBar
+    object prgLoad: TGLCapsuleProgress
       Left = 20
-      Top = 392
+      Top = 390
       Width = 380
-      Height = 16
-      TabOrder = 0
+      Height = 20
+      Min = 0
+      Max = 100
+      TabStop = False
     end
     object pnlActivity: TPanel
       Left = 20

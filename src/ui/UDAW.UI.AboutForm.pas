@@ -16,17 +16,17 @@ uses
   Winapi.Windows, Winapi.ShellAPI,
   {$ENDIF}
   SysUtils, Classes, Graphics, Controls, Forms, StdCtrls, ExtCtrls,
-  UDAW.Version;
+  UDAW.GL.Widgets, UDAW.Version;
 
 type
   TfrmAbout = class(TForm)
     pnlMain: TPanel;
-    lblAppName: TLabel;
-    lblPublisher: TLabel;
-    lblAuthor: TLabel;
-    lblVersion: TLabel;
-    lblWebsiteCaption: TLabel;
-    lblWebsite: TLabel;
+    lblAppName: TGLLabel;
+    lblPublisher: TGLLabel;
+    lblAuthor: TGLLabel;
+    lblVersion: TGLLabel;
+    lblWebsiteCaption: TGLLabel;
+    lblWebsite: TGLLabel;
     btnClose: TButton;
     procedure lblWebsiteClick(Sender: TObject);
     procedure btnCloseClick(Sender: TObject);

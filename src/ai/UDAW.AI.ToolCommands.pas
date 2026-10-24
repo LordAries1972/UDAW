@@ -52,7 +52,11 @@ type
     atkSuggestMix, atkExportProject,
     atkFindSample, atkAddSampleToTimeline,
     atkRenameTrack, atkSplitClip, atkDeleteClip, atkSetClipFade,
-    atkTransportPlay, atkTransportStop, atkGetAIProviders
+    atkTransportPlay, atkTransportStop, atkGetAIProviders,
+    { the whole application: every menu / toolbar command, the selection those commands act
+      on, and the playhead / range they use }
+    atkListCommands, atkRunCommand, atkSelectClips, atkSelectTrack,
+    atkSetPlayhead, atkSetRange, atkClampClips
   );
 
   { A parsed, not-yet-validated call. Fields are a flat union of every
@@ -98,6 +102,16 @@ type
     HasFadeOutSec: Boolean;
     FromBeginning: Boolean;
     HasFromBeginning: Boolean;
+    CommandPath: string;
+    HasCommandPath: Boolean;
+    ClipIds: TArray<Integer>;
+    HasClipIds: Boolean;
+    StartSec: Double;
+    HasStartSec: Boolean;
+    EndSec: Double;
+    HasEndSec: Boolean;
+    Mode: string;
+    HasMode: Boolean;
     RawJSON: string;
   end;
 
@@ -151,6 +165,11 @@ type
     AAction is 'play' or 'stop'; returns a short result text. }
   TAITransportFunc = function(const AAction: string; AFromBeginning: Boolean): string of object;
 
+  { The application-level tools (ListCommands, RunCommand, SelectClips, SelectTrack, SetPlayhead,
+    SetRange, ClampClips) act on the live window, which only the UI layer owns. It receives the
+    whole call and returns a JSON result; a result holding an "error" member counts as a failure. }
+  TAIUICommandFunc = function(const ACall: TAIToolCall): string of object;
+
   TAIToolDispatcher = class
   private
     FDoc: TProjectDocument;
@@ -161,6 +180,7 @@ type
     FOnGenerateMusic: TAIGenerateMusicFunc;
     FOnGetBrowserRoots: TAIGetBrowserRootsFunc;
     FOnTransport: TAITransportFunc;
+    FOnUICommand: TAIUICommandFunc;
     function FindStripByName(const AName: string): TMixStrip;
     function FindTrackByName(const AName: string): TTimelineTrack;
     function BuildProjectInfoJSON: string;
@@ -185,6 +205,7 @@ type
     property OnGenerateMusic: TAIGenerateMusicFunc read FOnGenerateMusic write FOnGenerateMusic;
     property OnGetBrowserRoots: TAIGetBrowserRootsFunc read FOnGetBrowserRoots write FOnGetBrowserRoots;
     property OnTransport: TAITransportFunc read FOnTransport write FOnTransport;
+    property OnUICommand: TAIUICommandFunc read FOnUICommand write FOnUICommand;
   end;
 
 implementation
@@ -221,6 +242,13 @@ begin
     atkTransportPlay:    Result := 'TransportPlay';
     atkTransportStop:    Result := 'TransportStop';
     atkGetAIProviders:   Result := 'GetAIProviders';
+    atkListCommands:     Result := 'ListCommands';
+    atkRunCommand:       Result := 'RunCommand';
+    atkSelectClips:      Result := 'SelectClips';
+    atkSelectTrack:      Result := 'SelectTrack';
+    atkSetPlayhead:      Result := 'SetPlayhead';
+    atkSetRange:         Result := 'SetRange';
+    atkClampClips:       Result := 'ClampClips';
   else
     Result := '?';
   end;
@@ -253,14 +281,15 @@ end;
 function IsDestructiveTool(AKind: TAIToolKind): Boolean;
 begin
   Result := AKind in [atkAddTrack, atkMoveClip, atkSetTempo, atkExportProject,
-    atkGenerateMusic, atkAddSampleToTimeline, atkDeleteClip];
+    atkGenerateMusic, atkAddSampleToTimeline, atkDeleteClip,
+    atkRunCommand, atkClampClips];
 end;
 
 function IsReadOnlyTool(AKind: TAIToolKind): Boolean;
 begin
   Result := AKind in [atkGetProjectInfo, atkGetTracks, atkGetTrackInfo,
     atkGetMixerState, atkGetSelection, atkAnalyzeAudio, atkSuggestMix,
-    atkFindSample, atkGetAIProviders, atkTransportStop];
+    atkFindSample, atkGetAIProviders, atkTransportStop, atkListCommands];
 end;
 
 function AIToolDescription(AKind: TAIToolKind): string;
@@ -293,6 +322,13 @@ begin
     atkTransportPlay:    Result := 'Start timeline playback.';
     atkTransportStop:    Result := 'Stop timeline playback (playhead rewinds to 0).';
     atkGetAIProviders:   Result := 'Which AI providers have a stored credential (never returns the key).';
+    atkListCommands:     Result := 'List every command of the application (menus, popup menus, toolbar and icon buttons) with its path, whether it is enabled right now, and whether it opens a dialog. Optional criteria filters by words.';
+    atkRunCommand:       Result := 'Run one command from ListCommands by its path (or a unique ending of it), exactly as if the user had clicked it. Commands act on the current selection, playhead and range - set those first with SelectClips, SelectTrack, SetPlayhead and SetRange. Commands that open a dialog are refused.';
+    atkSelectClips:      Result := 'Select one or more Timeline clips (replaces the selection); the first id is the primary clip.';
+    atkSelectTrack:      Result := 'Select a Timeline track (lane) by name.';
+    atkSetPlayhead:      Result := 'Move the Timeline playhead to a time in seconds.';
+    atkSetRange:         Result := 'Set the Timeline time-range selection (start and end in seconds), or clear it.';
+    atkClampClips:       Result := 'Slide clips along their own lane so each sits snug against the end of the previous clip (mode "last") or so its end meets the start of the next clip (mode "next") - gap-free playback.';
   else
     Result := AIToolKindId(AKind);
   end;
@@ -335,6 +371,20 @@ begin
       Result := 'clip_id:integer:req:Clip id|fade_in_sec:number:opt:Fade-in seconds|fade_out_sec:number:opt:Fade-out seconds';
     atkTransportPlay:
       Result := 'from_beginning:boolean:opt:Start at 0 instead of the current position';
+    atkListCommands:
+      Result := 'criteria:string:opt:Only commands whose path contains one of these words';
+    atkRunCommand:
+      Result := 'menu_path:string:req:Command path from ListCommands, e.g. Timeline > Edit > Clamp to > Clamp to Next Segment';
+    atkSelectClips:
+      Result := 'clip_ids:array:req:Clip ids (numbers)';
+    atkSelectTrack:
+      Result := 'track:string:req:Track name';
+    atkSetPlayhead:
+      Result := 'position_sec:number:req:Time in seconds (>= 0)';
+    atkSetRange:
+      Result := 'start_sec:number:opt:Range start (s)|end_sec:number:opt:Range end (s)|enabled:boolean:opt:false clears the range';
+    atkClampClips:
+      Result := 'clip_ids:array:req:Clip ids (numbers)|mode:string:req:"last" or "next"';
   else
     Result := '';
   end;
@@ -386,11 +436,13 @@ end;
 
 function ParseOneToolCall(const AJSON: string; out ACall: TAIToolCall): Boolean;
 var
-  v, cmdV: TJSONValue;
+  v, cmdV, ids: TJSONValue;
   cmdId, s: string;
   num: Double;
   b: Boolean;
+  k: Integer;
 begin
+  Finalize(ACall);
   FillChar(ACall, SizeOf(ACall), 0);
   ACall.RawJSON := AJSON;
   try
@@ -447,6 +499,29 @@ begin
     begin ACall.FadeOutSec := num; ACall.HasFadeOutSec := True; end;
     if JBool(v, 'from_beginning', b) then
     begin ACall.FromBeginning := b; ACall.HasFromBeginning := True; end;
+    if JStr(v, 'menu_path', s) or JStr(v, 'command_path', s) then
+    begin ACall.CommandPath := s; ACall.HasCommandPath := True; end;
+    if JNum(v, 'start_sec', num) then
+    begin ACall.StartSec := num; ACall.HasStartSec := True; end;
+    if JNum(v, 'end_sec', num) then
+    begin ACall.EndSec := num; ACall.HasEndSec := True; end;
+    if JStr(v, 'mode', s) then
+    begin ACall.Mode := s; ACall.HasMode := True; end;
+    ids := v.ByName('clip_ids');
+    if (ids <> nil) and (ids.Kind = jkArray) then
+    begin
+      SetLength(ACall.ClipIds, 0);
+      for k := 0 to ids.Count - 1 do
+        if ids.Items[k].Kind = jkNumber then
+          ACall.ClipIds := ACall.ClipIds + [Round(ids.Items[k].AsNumber)];
+      ACall.HasClipIds := Length(ACall.ClipIds) > 0;
+    end
+    else if ACall.HasClipId then
+    begin
+      { a single clip_id stands in for a list of one }
+      ACall.ClipIds := [ACall.ClipId];
+      ACall.HasClipIds := True;
+    end;
 
     Result := True;
   finally
@@ -574,6 +649,37 @@ begin
     atkFindSample:
       if (not ACall.HasCriteria) or (Trim(ACall.Criteria) = '') then
       begin AError := 'missing "criteria"'; Exit(False); end;
+    atkRunCommand:
+      if (not ACall.HasCommandPath) or (Trim(ACall.CommandPath) = '') then
+      begin AError := 'missing "menu_path" (a path from ListCommands)'; Exit(False); end;
+    atkSelectClips:
+      if not ACall.HasClipIds then
+      begin AError := 'missing "clip_ids"'; Exit(False); end;
+    atkSelectTrack:
+      if (not ACall.HasTrackName) or (Trim(ACall.TrackName) = '') then
+      begin AError := 'missing "track"'; Exit(False); end;
+    atkSetPlayhead:
+      begin
+        if not ACall.HasPositionSec then
+        begin AError := 'missing "position_sec"'; Exit(False); end;
+        if ACall.PositionSec < 0 then
+        begin AError := 'position_sec must be >= 0'; Exit(False); end;
+      end;
+    atkSetRange:
+      if (not ACall.HasEnabled) or ACall.Enabled then
+      begin
+        if not (ACall.HasStartSec and ACall.HasEndSec) then
+        begin AError := 'missing "start_sec" and "end_sec"'; Exit(False); end;
+        if (ACall.StartSec < 0) or (ACall.EndSec <= ACall.StartSec) then
+        begin AError := 'start_sec must be >= 0 and end_sec after it'; Exit(False); end;
+      end;
+    atkClampClips:
+      begin
+        if not ACall.HasClipIds then
+        begin AError := 'missing "clip_ids"'; Exit(False); end;
+        if not (SameText(ACall.Mode, 'last') or SameText(ACall.Mode, 'next')) then
+        begin AError := '"mode" must be "last" or "next"'; Exit(False); end;
+      end;
     atkAddSampleToTimeline:
       begin
         if (not ACall.HasFilePath) or (Trim(ACall.FilePath) = '') then
@@ -606,7 +712,15 @@ begin
     'AddSampleToTimeline{path,track,position_sec}, RenameTrack{track,name}, ' +
     'SplitClip{clip_id,position_sec}, DeleteClip{clip_id}, ' +
     'SetClipFade{clip_id,fade_in_sec,fade_out_sec}, TransportPlay{from_beginning}, ' +
-    'TransportStop, GetAIProviders. ' +
+    'TransportStop, GetAIProviders, ' +
+    'ListCommands{criteria}, RunCommand{menu_path}, SelectClips{clip_ids[]}, ' +
+    'SelectTrack{track}, SetPlayhead{position_sec}, SetRange{start_sec,end_sec|enabled:false}, ' +
+    'ClampClips{clip_ids[],mode:last|next}. ' +
+    'ListCommands returns every command of the application (every menu, popup menu, toolbar ' +
+    'and icon button) with its "path", "enabled" and "dialog" flags; RunCommand runs one by ' +
+    'its path exactly as a click would, acting on the current selection, playhead and range, ' +
+    'so set those first with SelectClips / SelectTrack / SetPlayhead / SetRange. Commands ' +
+    'that open a dialog need a person and are refused. ' +
     'FindSample searches every folder the user has added to the Browser tab ' +
     '(recursively) for audio files whose file name or containing folder name ' +
     'contains a word from criteria, e.g. ' +
@@ -1473,6 +1587,16 @@ begin
         AResultText := BuildAIProvidersJSON;
         Result := True;
       end;
+
+    atkListCommands, atkRunCommand, atkSelectClips, atkSelectTrack,
+    atkSetPlayhead, atkSetRange, atkClampClips:
+      if Assigned(FOnUICommand) then
+      begin
+        AResultText := FOnUICommand(ACall);
+        Result := Pos('"error"', AResultText) = 0;
+      end
+      else
+        AResultText := '{"error":"application commands are not wired up in this session"}';
   end;
 end;
 

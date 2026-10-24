@@ -73,7 +73,7 @@ type
   to apply an LPC predictor's shift to a (possibly negative) accumulator.
   This is the standard two's-complement identity for arithmetic shift-right of
   a negative value: NOT ( (NOT V) shr Sh ). }
-function AShr64(V: Int64; Sh: Integer): Int64; {$IFDEF FPC}inline;{$ENDIF}
+function AShr64(V: Int64; Sh: Integer): Int64; inline;
 begin
   if Sh <= 0 then Exit(V);
   if Sh >= 64 then begin if V < 0 then Exit(-1) else Exit(0); end;
@@ -81,7 +81,7 @@ begin
   else Result := not Int64(UInt64(not V) shr Sh);
 end;
 
-function ZigZagDecode(AU: UInt64): Int64; {$IFDEF FPC}inline;{$ENDIF}
+function ZigZagDecode(AU: UInt64): Int64; inline;
 begin
   if (AU and 1) = 0 then Result := Int64(AU shr 1)
   else Result := -Int64((AU + 1) shr 1);

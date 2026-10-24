@@ -44,6 +44,8 @@ type
     FDn: array of array[0..1] of TBiquad;   // [channel] 2x anti-alias filters
     FDcX, FDcY: array of Double;            // [channel] DC blocker state
     FDcR: Double;
+    FOs: Integer;            // oversampling factor of the smooth shapers: 2, 4 or 8
+    procedure BuildOsFilters;
     function Shape(AX: Double): Double;
     function IsOversampled: Boolean;
     function ShapeOversampled(ACh: Integer; AX: Double): Double;
@@ -52,7 +54,7 @@ type
     procedure Configure(ASampleRate, AChannels: Integer);
     procedure Reset;
     procedure SetParams(AMode: TDistMode; ADrive, ATrimDb, AMix, ABits: Double;
-      ADownsample: Integer);
+      ADownsample: Integer; AOversample: Integer = 2);
     procedure ProcessBlock(const AIn, AOut: array of PSingle; AFrames: Integer);
     property Mode: TDistMode read FMode;
   end;
@@ -101,11 +103,10 @@ begin
   FMix := 1.0;
   FBits := 8.0;
   FDownsample := 1;
+  FOs := 2;
 end;
 
 procedure TDistortionProcessor.Configure(ASampleRate, AChannels: Integer);
-var
-  ch, k: Integer;
 begin
   if ASampleRate > 0 then FSampleRate := ASampleRate;
   if AChannels > 0 then FChannels := AChannels;
@@ -115,16 +116,24 @@ begin
   SetLength(FDcX, FChannels);
   SetLength(FDcY, FChannels);
   FDcR := 1.0 - 2.0 * DSP_PI * 10.0 / FSampleRate;     // ~10 Hz high-pass
+  BuildOsFilters;
+  Reset;
+end;
+
+{ anti-image / anti-alias filters at FOs times the sample rate }
+procedure TDistortionProcessor.BuildOsFilters;
+var
+  ch, k: Integer;
+begin
   for ch := 0 to FChannels - 1 do
     for k := 0 to 1 do
     begin
-      FUp[ch][k].Init(FSampleRate * 2.0);
-      FDn[ch][k].Init(FSampleRate * 2.0);
+      FUp[ch][k].Init(FSampleRate * FOs);
+      FDn[ch][k].Init(FSampleRate * FOs);
       { 4th-order Butterworth = two sections, Q 0.5412 and 1.3066 }
       FUp[ch][k].SetParams(bqLowpass, FSampleRate * 0.45, IfThen(k = 0, 0.5412, 1.3066));
       FDn[ch][k].SetParams(bqLowpass, FSampleRate * 0.45, IfThen(k = 0, 0.5412, 1.3066));
     end;
-  Reset;
 end;
 
 procedure TDistortionProcessor.Reset;
@@ -147,8 +156,19 @@ begin
 end;
 
 procedure TDistortionProcessor.SetParams(AMode: TDistMode; ADrive, ATrimDb, AMix,
-  ABits: Double; ADownsample: Integer);
+  ABits: Double; ADownsample: Integer; AOversample: Integer);
 begin
+  if AOversample >= 8 then AOversample := 8
+  else if AOversample >= 4 then AOversample := 4
+  else AOversample := 2;
+  if (AOversample <> FOs) and (Length(FUp) > 0) then
+  begin
+    FOs := AOversample;
+    BuildOsFilters;
+    Reset;
+  end
+  else
+    FOs := AOversample;
   FMode := AMode;
   FDrive := Max(0.01, ADrive);
   FTrim := DbToLinear(ATrimDb);
@@ -210,16 +230,21 @@ begin
   Result := FMode in [distSaturation, distFoldback, distTube, distSoftClip];
 end;
 
-{ 2x oversampled shaping: zero-stuff + anti-image, shape both samples,
-  anti-alias, keep the second (decimate). }
+{ 2x / 4x / 8x oversampled shaping: zero-stuff + anti-image, shape every
+  sample, anti-alias, keep the last (decimate). }
 function TDistortionProcessor.ShapeOversampled(ACh: Integer; AX: Double): Double;
 var
-  a, b: Double;
+  j: Integer;
+  u, v: Double;
 begin
-  a := FUp[ACh][1].ProcessSample(FUp[ACh][0].ProcessSample(Single(2.0 * AX)));
-  b := FUp[ACh][1].ProcessSample(FUp[ACh][0].ProcessSample(0.0));
-  FDn[ACh][1].ProcessSample(FDn[ACh][0].ProcessSample(Single(Shape(a))));
-  Result := FDn[ACh][1].ProcessSample(FDn[ACh][0].ProcessSample(Single(Shape(b))));
+  Result := 0.0;
+  for j := 0 to FOs - 1 do
+  begin
+    if j = 0 then u := FOs * AX else u := 0.0;
+    u := FUp[ACh][1].ProcessSample(FUp[ACh][0].ProcessSample(Single(u)));
+    v := FDn[ACh][1].ProcessSample(FDn[ACh][0].ProcessSample(Single(Shape(u))));
+    Result := v;
+  end;
   if Result > 1.0 then Result := 1.0 else if Result < -1.0 then Result := -1.0;
 end;
 

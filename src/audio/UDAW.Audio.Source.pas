@@ -107,6 +107,10 @@ type
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 const
   TWO_PI = 2.0 * Pi;
 
@@ -189,7 +193,7 @@ begin
   begin
     ph := FPhase;
     case FShape of
-      osSine:     v := Sin(ph * TWO_PI);
+      osSine:     v := FastSin(ph * TWO_PI);
       osTriangle:
         begin
           frac := ph - Floor(ph);
@@ -219,7 +223,7 @@ begin
       if (ch = 0) or (FPhaseSpread = 0) or (FShape in [osWhiteNoise, osPinkNoise]) then
         d^ := FAmp * Single(v)
       else
-        d^ := FAmp * Single(Sin((ph * TWO_PI) + FPhaseSpread * ch));
+        d^ := FAmp * Single(FastSin((ph * TWO_PI) + FPhaseSpread * ch));
     end;
 
     FPhase := FPhase + FPhaseInc;
@@ -275,10 +279,10 @@ begin
     prog := FT / FDurationS;
     if prog > 1.0 then prog := 1.0;
     if FExp and (FF0 > 0) and (FF1 > 0) then
-      f := FF0 * Power(FF1 / FF0, prog)
+      f := FF0 * FastPow(FF1 / FF0, prog)
     else
       f := FF0 + (FF1 - FF0) * prog;
-    v := FAmp * Sin(FPhase);
+    v := FAmp * FastSin(FPhase);
     for ch := 0 to ABuffer.ChannelCount - 1 do
     begin
       d := ABuffer.ChannelPtr(ch);

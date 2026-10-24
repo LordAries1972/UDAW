@@ -12,3 +12,7 @@
 /.udaw-home/UDAW
 /.udaw-home/UDAW/Temp
 /.udaw-home/UDAW/Temp/phase5-tests
+/build/dcu
+/buildbin-debug
+.mcp.json
+

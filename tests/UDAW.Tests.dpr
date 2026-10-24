@@ -27,6 +27,7 @@ uses
   UDAW.Audio.Backend.WASAPI in '..\src\audio\backend\UDAW.Audio.Backend.WASAPI.pas',
   UDAW.Audio.Backend.Factory in '..\src\audio\UDAW.Audio.Backend.Factory.pas',
   UDAW.Audio.Engine in '..\src\audio\UDAW.Audio.Engine.pas',
+  UDAW.DSP.MathTables in '..\src\audio\dsp\UDAW.DSP.MathTables.pas',
   UDAW.DSP.Math in '..\src\audio\dsp\UDAW.DSP.Math.pas',
   UDAW.DSP.Interpolation in '..\src\audio\dsp\UDAW.DSP.Interpolation.pas',
   UDAW.DSP.Filters in '..\src\audio\dsp\UDAW.DSP.Filters.pas',
@@ -35,6 +36,7 @@ uses
   UDAW.DSP.Envelope in '..\src\audio\dsp\UDAW.DSP.Envelope.pas',
   UDAW.DSP.Meter in '..\src\audio\dsp\UDAW.DSP.Meter.pas',
   UDAW.DSP.Dynamics in '..\src\audio\dsp\UDAW.DSP.Dynamics.pas',
+  UDAW.DSP.CurveMath in '..\src\audio\dsp\UDAW.DSP.CurveMath.pas',
   UDAW.DSP.Modulation in '..\src\audio\dsp\UDAW.DSP.Modulation.pas',
   UDAW.DSP.Distortion in '..\src\audio\dsp\UDAW.DSP.Distortion.pas',
   UDAW.DSP.Reverb in '..\src\audio\dsp\UDAW.DSP.Reverb.pas',
@@ -52,11 +54,15 @@ uses
   UDAW.DSP.Dither in '..\src\audio\dsp\UDAW.DSP.Dither.pas',
   UDAW.DSP.Spectral in '..\src\audio\dsp\UDAW.DSP.Spectral.pas',
   UDAW.Sequencer.Patterns in '..\src\sequencer\UDAW.Sequencer.Patterns.pas',
+  UDAW.Pattern.Model in '..\src\sequencer\UDAW.Pattern.Model.pas',
+  UDAW.Pattern.Commands in '..\src\sequencer\UDAW.Pattern.Commands.pas',
+  UDAW.Drum.KitModel in '..\src\sequencer\UDAW.Drum.KitModel.pas',
   UDAW.Synth.Instruments in '..\src\synth\UDAW.Synth.Instruments.pas',
   UDAW.Mixer.Modulation in '..\src\mixer\UDAW.Mixer.Modulation.pas',
   UDAW.Mixer.CLAP in '..\src\mixer\UDAW.Mixer.CLAP.pas',
   UDAW.Mixer.VST3 in '..\src\mixer\UDAW.Mixer.VST3.pas',
   UDAW.DSP.AudioToMidi in '..\src\audio\dsp\UDAW.DSP.AudioToMidi.pas',
+  UDAW.Timeline.ExtraFx in '..\src\timeline\UDAW.Timeline.ExtraFx.pas',
   UDAW.Timeline.SpectralFx in '..\src\timeline\UDAW.Timeline.SpectralFx.pas',
   UDAW.Timeline.Warp in '..\src\timeline\UDAW.Timeline.Warp.pas',
   UDAW.DSP.Exciter in '..\src\audio\dsp\UDAW.DSP.Exciter.pas',
@@ -116,10 +122,12 @@ uses
   UDAW.Tracker.Instrument in '..\src\tracker\UDAW.Tracker.Instrument.pas',
   UDAW.Tracker.Pattern in '..\src\tracker\UDAW.Tracker.Pattern.pas',
   UDAW.Tracker.Player in '..\src\tracker\UDAW.Tracker.Player.pas',
+  UDAW.Tracker.ScoreNotes in '..\src\tracker\UDAW.Tracker.ScoreNotes.pas',
   UDAW.Tracker.Serialization in '..\src\tracker\UDAW.Tracker.Serialization.pas',
   UDAW.Codec.ProTracker in '..\src\codecs\tracker\UDAW.Codec.ProTracker.pas',
   UDAW.Codec.XM in '..\src\codecs\tracker\UDAW.Codec.XM.pas',
   UDAW.Codec.MPTM in '..\src\codecs\tracker\UDAW.Codec.MPTM.pas',
+  UDAW.Codec.TrackerLegacy in '..\src\codecs\tracker\UDAW.Codec.TrackerLegacy.pas',
   UDAW.Codec.FLStudio in '..\src\codecs\flstudio\UDAW.Codec.FLStudio.pas',
   UDAW.Codec.FLStudio.Timeline in '..\src\codecs\flstudio\UDAW.Codec.FLStudio.Timeline.pas',
   UDAW.Project.Document in '..\src\project\UDAW.Project.Document.pas',
@@ -161,6 +169,7 @@ uses
   Tests.TimelineExport in 'Tests.TimelineExport.pas',
   Tests.VideoExport in 'Tests.VideoExport.pas',
   Tests.VideoEffects in 'Tests.VideoEffects.pas',
+  Tests.ExtraFx in 'Tests.ExtraFx.pas',
   Tests.MediaDecode in 'Tests.MediaDecode.pas',
   Tests.Phase7 in 'Tests.Phase7.pas',
   Tests.Phase8 in 'Tests.Phase8.pas',
@@ -194,6 +203,8 @@ uses
   Tests.Phase36 in 'Tests.Phase36.pas',
   Tests.Phase37 in 'Tests.Phase37.pas',
   Tests.Phase39 in 'Tests.Phase39.pas',
+  Tests.Drum in 'Tests.Drum.pas',
+  Tests.Pattern in 'Tests.Pattern.pas',
   Tests.Phase38 in 'Tests.Phase38.pas',
   Tests.DAWImportAbleton in 'Tests.DAWImportAbleton.pas',
   Tests.DAWImportFLStudio in 'Tests.DAWImportFLStudio.pas';
@@ -210,6 +221,7 @@ begin
     RegisterTimelineExportTests;
     RegisterVideoExportTests;
     RegisterVideoEffectsTests;
+    RegisterExtraFxTests;
     RegisterPhase8Tests;
     RegisterPhase9Tests;
     RegisterPhase10Tests;
@@ -243,6 +255,8 @@ begin
     RegisterPhase37Tests;
     RegisterPhase38Tests;
     RegisterPhase39Tests;
+    RegisterDrumTests;
+    RegisterPatternTests;
     RegisterDAWImportAbletonTests;
     RegisterDAWImportFLStudioTests;
     ExitCode := RunRegisteredTests;

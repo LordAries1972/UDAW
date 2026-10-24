@@ -101,6 +101,7 @@ type
     FOutputTargetId: Integer;     // strip id of the bus/aux/master this feeds; 0 for master
     FVCAGroupId: Integer;         // id of a skVCA strip, or 0
     FColor: Integer;
+    FCollapsed: Boolean;          // view state: the strip is shown as a slim bar
     { live meter scalars: written by the RT mix thread, read by the UI thread.
       Plain scalar reads/writes are atomic on every architecture UDAW targets
       and a torn value on a moving meter is harmless (same convention as
@@ -110,6 +111,9 @@ type
     FMeterRmsDb: Double;
     FMeterLufs: Double;
     FMeterLufsIntegrated: Double;
+    FMeterLufsShort: Double;
+    FMeterTruePeakDb: Double;
+    FMeterCorrelation: Double;
     FMeterHoldDbL: Double;
     FMeterHoldDbR: Double;
     FClipL: Boolean;
@@ -165,6 +169,7 @@ type
     property OutputTargetId: Integer read FOutputTargetId write FOutputTargetId;
     property VCAGroupId: Integer read FVCAGroupId write FVCAGroupId;
     property Color: Integer read FColor write FColor;
+    property Collapsed: Boolean read FCollapsed write FCollapsed;
 
     property MeterPeakDbL: Double read FMeterPeakDbL write FMeterPeakDbL;
     property MeterPeakDbR: Double read FMeterPeakDbR write FMeterPeakDbR;
@@ -175,6 +180,12 @@ type
       block; reads METER_MIN_DB until then. Shown prominently for the master
       strip (Mixer tab's loudness readout). }
     property MeterLufsIntegrated: Double read FMeterLufsIntegrated write FMeterLufsIntegrated;
+    { Master strip only (the engine skips them elsewhere to save CPU): short-term
+      (3 s) LUFS, inter-sample true peak in dBTP, and the L/R phase correlation
+      -1..+1 (+1 = mono, below 0 = out-of-phase trouble). }
+    property MeterLufsShort: Double read FMeterLufsShort write FMeterLufsShort;
+    property MeterTruePeakDb: Double read FMeterTruePeakDb write FMeterTruePeakDb;
+    property MeterCorrelation: Double read FMeterCorrelation write FMeterCorrelation;
     { Peak-hold value (dB), decaying per UDAW.DSP.Meter.TPeakMeter.HoldDb. }
     property MeterHoldDbL: Double read FMeterHoldDbL write FMeterHoldDbL;
     property MeterHoldDbR: Double read FMeterHoldDbR write FMeterHoldDbR;
@@ -192,6 +203,7 @@ type
     FModulation: TModulationSet;
     FMeterHoldMs: Double;
     FMeterHoldDecayDbPerSec: Double;
+    FEqCollapsed: Boolean;
     procedure SetMeterHoldMs(AValue: Double);
     procedure SetMeterHoldDecayDbPerSec(AValue: Double);
     function IndexOfStrip(AId: Integer): Integer;
@@ -206,6 +218,8 @@ type
       always non-nil. }
     property Automation: TAutomationSet read FAutomation;
     property Modulation: TModulationSet read FModulation;
+    { view state: the master equaliser panel is folded }
+    property EqCollapsed: Boolean read FEqCollapsed write FEqCollapsed;
     property MeterHoldMs: Double read FMeterHoldMs write SetMeterHoldMs;
     property MeterHoldDecayDbPerSec: Double read FMeterHoldDecayDbPerSec
       write SetMeterHoldDecayDbPerSec;
@@ -430,6 +444,7 @@ begin
   FOutputTargetId := ASrc.FOutputTargetId;
   FVCAGroupId := ASrc.FVCAGroupId;
   FColor := ASrc.FColor;
+  FCollapsed := ASrc.FCollapsed;
   FInserts.Clear;
   for i := 0 to ASrc.FInserts.Count - 1 do
     FInserts.Add(ASrc.FInserts[i]);
@@ -547,6 +562,9 @@ begin
   FMeterRmsDb := MIX_MIN_DB;
   FMeterLufs := -70.0;
   FMeterLufsIntegrated := -70.0;
+  FMeterLufsShort := -70.0;
+  FMeterTruePeakDb := MIX_MIN_DB;
+  FMeterCorrelation := 1.0;
   FMeterHoldDbL := MIX_MIN_DB;
   FMeterHoldDbR := MIX_MIN_DB;
   FClipL := False;
@@ -613,6 +631,7 @@ begin
   FModulation.Clear;
   FMeterHoldMs := MIX_METER_HOLD_MS_DEFAULT;
   FMeterHoldDecayDbPerSec := MIX_METER_HOLD_DECAY_DEFAULT;
+  FEqCollapsed := False;
 end;
 
 procedure TMixerModel.SetMeterHoldMs(AValue: Double);
@@ -638,6 +657,7 @@ begin
   Result.FNextId := FNextId;
   Result.FMeterHoldMs := FMeterHoldMs;
   Result.FMeterHoldDecayDbPerSec := FMeterHoldDecayDbPerSec;
+  Result.FEqCollapsed := FEqCollapsed;
   for i := 0 to FStrips.Count - 1 do
   begin
     s := FStrips[i];

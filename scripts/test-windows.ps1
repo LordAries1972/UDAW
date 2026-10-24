@@ -39,7 +39,7 @@ Write-Host "==> Building UDAW.Tests.exe"
 & $dcc -B '-NSSystem;System.Win;Winapi;Vcl;Vcl.Imaging' "-U$rtl" `
     '-$R+' '-$Q+' '-$O-' '-$W+' `
     '-Ebuild\bin' '-NUbuild\dcu' `
-    '-Usrc\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\video;src\project;src\recording;src\mixer;src\tracker;src\ai;src\voice;src\ui;src\composer;src\browser;src\sequencer;src\synth;src\input;src\application;src\web;ThirdParty\TaurusTLS\Source' '-Isrc\common' `
+    '-Usrc\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\video;src\project;src\recording;src\mixer;src\tracker;src\ai;src\voice;src\ui;src\composer;src\browser;src\sequencer;src\synth;src\input;src\application;src\web;ThirdParty\TaurusTLS\Source;ThirdParty\dglOpenGL' '-Isrc\common' `
     'tests\UDAW.Tests.dpr'
 if ($LASTEXITCODE -ne 0) { throw "dcc64 failed ($LASTEXITCODE)" }
 

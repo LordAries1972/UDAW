@@ -16,7 +16,7 @@ function EstimateTempoBPM(const AChannel0, AChannel1: array of Single;
 
 implementation
 
-uses Math;
+uses UDAW.DSP.MathTables, Math;
 
 const
   ENV_RATE = 200;            // envelope frames per second
@@ -66,7 +66,7 @@ begin
   m := 0;
   for i := 0 to frames - 1 do
   begin
-    e := Ln(1 + 100 * env[i]);
+    e := FastLn(1 + 100 * env[i]);
     if e > prevE then flux[i] := e - prevE else flux[i] := 0;
     prevE := e;
     m := m + flux[i];

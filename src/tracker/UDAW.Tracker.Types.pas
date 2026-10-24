@@ -78,7 +78,19 @@ type
     tfxFineVolUp,     // U   0x  add x to volume once (row scope)
     tfxFineVolDown,   // V   0x  subtract x from volume once
     tfxVibratoWaveform,  // I   0x  x&3 = vibrato waveform: sine/ramp-down/square/random
-    tfxTremoloWaveform   // Z   0x  x&3 = tremolo waveform: sine/ramp-down/square/random
+    tfxTremoloWaveform,  // Z   0x  x&3 = tremolo waveform: sine/ramp-down/square/random
+    tfxFinePortaUp,      // L   0x  slide up once on tick 0 by x/16 semitone (XM E1x, MOD E1x)
+    tfxFinePortaDown,    // M   0x  slide down once on tick 0 by x/16 semitone (XM E2x, MOD E2x)
+    tfxXFinePortaUp,     // N   0x  extra-fine: slide up once by x/64 semitone (XM X1x)
+    tfxXFinePortaDown,   // S   0x  extra-fine: slide down once by x/64 semitone (XM X2x)
+    tfxGlobalVol,        // g   xx  set global volume 00..40 (XM Gxx)
+    tfxGlobalVolSlide,   // h   xy  x up / y down per tick (XM Hxy)
+    tfxKeyOff,           // k   xx  release the note on tick xx (XM Kxx)
+    tfxTremor,           // t   xy  sound x+1 ticks, silent y+1 ticks (XM Txy)
+    tfxPatternLoop,      // l   0x  x=0 mark loop start, x>0 loop back x times (E6x)
+    tfxPatternDelay,     // d   0x  repeat this row x extra times (EEx)
+    tfxTonePortaVolSlide, // p  xy  continue tone portamento + volume slide (XM 5xy)
+    tfxVibratoVolSlide   // b   xy  continue vibrato + volume slide (XM 6xy)
   );
 
   { One pattern cell. Instrument 0 = "keep current"; Volume 255 = "no volume
@@ -96,7 +108,8 @@ type
 const
   EFFECT_LETTERS: array[TTrackerEffect] of Char = (
     '.', 'J', 'F', 'E', 'G', 'H', 'R', 'D', 'C', 'O', 'B', 'K',
-    'A', 'T', 'W', 'X', 'Q', 'P', 'Y', 'U', 'V', 'I', 'Z');
+    'A', 'T', 'W', 'X', 'Q', 'P', 'Y', 'U', 'V', 'I', 'Z', 'L', 'M', 'N', 'S',
+    'g', 'h', 'k', 't', 'l', 'd', 'p', 'b');
 
 function EffectFromLetter(ALetter: Char; out AEffect: TTrackerEffect): Boolean;
 function EffectLetter(AEffect: TTrackerEffect): Char;
@@ -110,6 +123,10 @@ function NoteToHz(ANote: Double): Double;
 function ClampInt(AValue, ALo, AHi: Integer): Integer;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 const
   SEMI: array[0..11] of string =
@@ -150,6 +167,13 @@ function EffectFromLetter(ALetter: Char; out AEffect: TTrackerEffect): Boolean;
 var
   e: TTrackerEffect;
 begin
+  { exact match first: the lower-case letters are distinct effects (g, h, k, t, l, d, p, b) }
+  for e := Low(TTrackerEffect) to High(TTrackerEffect) do
+    if EFFECT_LETTERS[e] = ALetter then
+    begin
+      AEffect := e;
+      Exit(True);
+    end;
   ALetter := UpCase(ALetter);
   for e := Low(TTrackerEffect) to High(TTrackerEffect) do
     if EFFECT_LETTERS[e] = ALetter then
@@ -202,7 +226,7 @@ end;
 
 function NoteToHz(ANote: Double): Double;
 begin
-  Result := A4_HZ * Power(2.0, (ANote - A4_NOTE_VALUE) / 12.0);
+  Result := A4_HZ * SemitoneRatio(ANote - A4_NOTE_VALUE);
 end;
 
 end.

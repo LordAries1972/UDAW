@@ -86,6 +86,10 @@ function ModKindId(AKind: TModKind): string;
 function ModKindFromId(const AId: string; out AKind: TModKind): Boolean;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 const
   KIND_IDS: array[TModKind] of string = ('lfo', 'random', 'steps', 'follower', 'macro');
@@ -150,7 +154,7 @@ begin
         ph := Frac(ATimeSeconds * rate + Phase);
         if ph < 0 then ph := ph + 1.0;
         case Shape of
-          lsSine: Result := Sin(2.0 * Pi * ph);
+          lsSine: Result := FastSin(2.0 * Pi * ph);
           lsTriangle: Result := 1.0 - 4.0 * Abs(ph - 0.5);
           lsSaw: Result := 2.0 * ph - 1.0;
           lsSquare: if ph < 0.5 then Result := 1.0 else Result := -1.0;
@@ -186,7 +190,7 @@ var
   coef, t: Double;
 begin
   if ALinear > FEnv then t := Attack else t := Release;
-  if t < 1e-4 then coef := 1.0 else coef := 1.0 - Exp(-ABlockSec / t);
+  if t < 1e-4 then coef := 1.0 else coef := 1.0 - FastExp(-ABlockSec / t);
   FEnv := FEnv + (Min(ALinear, 1.0) - FEnv) * coef;
 end;
 

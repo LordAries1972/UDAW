@@ -130,6 +130,10 @@ function BPMToTempo(ABPM: Double): Cardinal;
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 { ============================ TMidiMessage ========================= }
 
 function TMidiMessage.StatusHi: Byte;
@@ -322,7 +326,7 @@ end;
 
 function MidiFrequency(ANote: Integer): Double;
 begin
-  Result := 440.0 * Power(2.0, (ANote - 69) / 12.0);
+  if (ANote >= 0) and (ANote <= 127) then Result := MidiKeyHz(ANote) else Result := 440.0 * SemitoneRatio(ANote - 69);
 end;
 
 function TempoToBPM(AMicrosPerQuarter: Cardinal): Double;

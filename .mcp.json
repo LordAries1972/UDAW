@@ -6,6 +6,13 @@
         "c:/Users/hobso/.vscode/extensions/ultimaniumdesigns.agent-coder-1.4.3/dist/mcp-server.js",
         "--workspace=f:/Projects/Delphi12/UDAW"
       ]
+    },
+    "udaw": {
+      "type": "http",
+      "url": "http://127.0.0.1:8765/mcp",
+      "headers": {
+        "Authorization": "Bearer udaw_2CAC51BD463D4451BDE2DBF51222A64BABBE3BAD4B0D4C5D8883DA0FD7FBE4EF"
+      }
     }
   }
 }

@@ -24,7 +24,7 @@ interface
 uses
   SysUtils, Math,
   UDAW.Errors, UDAW.Audio.Types,
-  UDAW.DSP.Math, UDAW.DSP.Interpolation;
+  UDAW.DSP.Math, UDAW.DSP.Interpolation, UDAW.DSP.MathTables;
 
 type
   TResampleQuality = (rqLinear, rqCubic, rqSinc);
@@ -45,7 +45,7 @@ type
     FPos: Double;               // read position within FPending (frames)
     FStarted: Boolean;
     procedure BuildKernel;
-    function KernelAt(AX: Double): Double; {$IFDEF FPC}inline;{$ENDIF}
+    function KernelAt(AX: Double): Double; inline;
     procedure EnsurePendingShape;
   public
     constructor Create(AChannels: Integer; AQuality: TResampleQuality = rqSinc;
@@ -222,9 +222,13 @@ end;
 function TResampler.Process(const AIn: TAudioPlanar; AInFrames: Integer;
   var AOut: TAudioPlanar; AMaxOutFrames: Integer): Integer;
 var
-  ch, produced, avail, i0, k, kmin, kmax, shift, keep, i: Integer;
+  ch, produced, avail, i0, k, shift, keep: Integer;
   work: array of array of Single;
   pos, frac, acc, wsum, wt: Double;
+  wts: array of Double;          // sinc weights for the current output frame
+  klo, khi: Integer;
+  wk: PDouble;
+  src: PSingle;
 begin
   { Result is assigned unconditionally at the end (= produced). }
   if (AInFrames < 0) then AInFrames := 0;
@@ -238,8 +242,8 @@ begin
     SetLength(work[ch], avail + AInFrames);
     if avail > 0 then
       Move(FPending[ch][0], work[ch][0], avail * SizeOf(Single));
-    for i := 0 to AInFrames - 1 do
-      work[ch][avail + i] := AIn[ch][i];
+    if AInFrames > 0 then
+      Move(AIn[ch][0], work[ch][avail], AInFrames * SizeOf(Single));
   end;
   avail := Length(work[0]);
 
@@ -249,6 +253,13 @@ begin
     if Length(AOut[ch]) < AMaxOutFrames then
       SetLength(AOut[ch], AMaxOutFrames);
 
+  if FQuality = rqSinc then
+    SetLength(wts, 2 * FZeroCross)
+  else
+    wts := nil;
+  wsum := 0;
+  klo := 0;
+  khi := -1;
   produced := 0;
   pos := FPos;
   while produced < AMaxOutFrames do
@@ -256,6 +267,23 @@ begin
     i0 := Trunc(pos);
     if i0 + FGuardR > avail - 1 then Break;   // not enough look-ahead yet
     frac := pos - i0;
+
+    if FQuality = rqSinc then
+    begin
+      { taps at i0+k, k = -(ZC-1) .. ZC, weight h(frac - k). The weights do not
+        depend on the channel, so they are built once per output frame. }
+      klo := -(FZeroCross - 1);
+      khi := FZeroCross;
+      if i0 + klo < 0 then klo := -i0;
+      if i0 + khi > avail - 1 then khi := avail - 1 - i0;
+      wsum := 0;
+      for k := klo to khi do
+      begin
+        wt := KernelAt(frac - k);
+        wts[k - klo] := wt;
+        wsum := wsum + wt;
+      end;
+    end;
 
     for ch := 0 to FChannels - 1 do
     begin
@@ -272,18 +300,13 @@ begin
           end;
       else
         begin
-          { windowed-sinc: taps at i0+k, k = -(ZC-1) .. ZC, weight h(frac - k) }
-          kmin := -(FZeroCross - 1);
-          kmax := FZeroCross;
           acc := 0;
-          wsum := 0;
-          for k := kmin to kmax do
+          if khi >= klo then
           begin
-            i := i0 + k;
-            if (i < 0) or (i > avail - 1) then Continue;
-            wt := KernelAt(frac - k);
-            acc := acc + wt * work[ch][i];
-            wsum := wsum + wt;
+            wk := @wts[0];
+            src := @work[ch][i0 + klo];
+            for k := 0 to khi - klo do
+              acc := acc + wk[k] * src[k];
           end;
           if wsum <> 0 then
             AOut[ch][produced] := acc / wsum

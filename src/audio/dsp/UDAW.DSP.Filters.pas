@@ -21,7 +21,7 @@ interface
 
 uses
   SysUtils, Math,
-  UDAW.Errors, UDAW.Audio.Types, UDAW.DSP.Math;
+  UDAW.Errors, UDAW.Audio.Types, UDAW.DSP.Math, UDAW.DSP.MathTables;
 
 type
   TBiquadKind = (
@@ -44,7 +44,7 @@ type
     procedure SetParams(AKind: TBiquadKind; AFreqHz, AQ: Double; AGainDb: Double = 0.0);
     { Set already-computed transfer-function coefficients (a0-normalised or not). }
     procedure SetCoeffs(Ab0, Ab1, Ab2, Aa0, Aa1, Aa2: Double);
-    function ProcessSample(AX: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+    function ProcessSample(AX: Single): Single; inline;
     procedure ProcessBlock(ABuf: PSingle; AFrames: Integer);
     procedure ProcessBlockTo(ASrc, ADst: PSingle; AFrames: Integer);
     { |H(f)| in dB - for EQ curve drawing, not on the audio path. }
@@ -85,7 +85,7 @@ type
     procedure Init(ASampleRate: Double);
     procedure Reset;
     procedure SetCutoff(AKind: TOnePoleKind; AFreqHz: Double);
-    function ProcessSample(AX: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+    function ProcessSample(AX: Single): Single; inline;
     procedure ProcessBlock(ABuf: PSingle; AFrames: Integer);
   end;
 
@@ -96,7 +96,7 @@ type
   public
     procedure Init(ASampleRate: Double; ACornerHz: Double = 20.0);
     procedure Reset;
-    function ProcessSample(AX: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+    function ProcessSample(AX: Single): Single; inline;
     procedure ProcessBlock(ABuf: PSingle; AFrames: Integer);
   end;
 
@@ -113,8 +113,8 @@ type
     procedure Init(ASampleRate: Double);
     procedure Reset;
     procedure SetParams(AFreqHz, AQ: Double);
-    function ProcessSample(AX: Single): TSVFOutputs; {$IFDEF FPC}inline;{$ENDIF}
-    function ProcessLowpass(AX: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+    function ProcessSample(AX: Single): TSVFOutputs; inline;
+    function ProcessLowpass(AX: Single): Single; inline;
     procedure ProcessBlockLowpass(ABuf: PSingle; AFrames: Integer);
   end;
 
@@ -259,19 +259,29 @@ begin
 end;
 
 procedure TBiquad.ProcessBlock(ABuf: PSingle; AFrames: Integer);
-var
-  i: Integer;
 begin
-  for i := 0 to AFrames - 1 do
-    ABuf[i] := ProcessSample(ABuf[i]);
+  ProcessBlockTo(ABuf, ABuf, AFrames);
 end;
 
 procedure TBiquad.ProcessBlockTo(ASrc, ADst: PSingle; AFrames: Integer);
 var
   i: Integer;
+  x, y, z1, z2, b0, b1, b2, a1, a2: Double;
 begin
+  { coefficients and state live in locals for the whole block }
+  b0 := Fb0; b1 := Fb1; b2 := Fb2; a1 := Fa1; a2 := Fa2;
+  z1 := Fz1; z2 := Fz2;
   for i := 0 to AFrames - 1 do
-    ADst[i] := ProcessSample(ASrc[i]);
+  begin
+    x := ASrc[i];
+    y := b0 * x + z1;
+    z1 := b1 * x - a1 * y + z2;
+    z2 := b2 * x - a2 * y;
+    if Abs(z1) < DSP_DENORMAL_FLOOR then z1 := 0;
+    if Abs(z2) < DSP_DENORMAL_FLOOR then z2 := 0;
+    ADst[i] := y;
+  end;
+  Fz1 := z1; Fz2 := z2;
 end;
 
 function TBiquad.MagnitudeDb(AFreqHz: Double): Double;
@@ -280,8 +290,8 @@ var
   nr, ni, dr, di, num, den: Double;
 begin
   w := DSP_TWO_PI * AFreqHz / FSampleRate;
-  cw := Cos(w);   sw := Sin(w);
-  c2 := Cos(2 * w); s2 := Sin(2 * w);
+  cw := FastCos(w);   sw := FastSin(w);
+  c2 := FastCos(2 * w); s2 := FastSin(2 * w);
   { z^-1 = e^-jw => real = cos, imag = -sin }
   nr := Fb0 + Fb1 * cw + Fb2 * c2;
   ni :=     - Fb1 * sw - Fb2 * s2;
@@ -290,7 +300,7 @@ begin
   num := Sqrt(nr * nr + ni * ni);
   den := Sqrt(dr * dr + di * di);
   if den < 1.0E-30 then den := 1.0E-30;
-  Result := 20.0 * Log10(num / den);
+  Result := FastLinToDb(num / den);
 end;
 
 function TBiquad.PhaseDeg(AFreqHz: Double): Double;
@@ -299,8 +309,8 @@ var
   nr, ni, dr, di, pr, pi_: Double;
 begin
   w := DSP_TWO_PI * AFreqHz / FSampleRate;
-  cw := Cos(w);   sw := Sin(w);
-  c2 := Cos(2 * w); s2 := Sin(2 * w);
+  cw := FastCos(w);   sw := FastSin(w);
+  c2 := FastCos(2 * w); s2 := FastSin(2 * w);
   nr := Fb0 + Fb1 * cw + Fb2 * c2;
   ni :=     - Fb1 * sw - Fb2 * s2;
   dr := 1.0 + Fa1 * cw + Fa2 * c2;
@@ -308,7 +318,7 @@ begin
   { (nr+jni)/(dr+jdi) }
   pr := (nr * dr + ni * di) / (dr * dr + di * di);
   pi_ := (ni * dr - nr * di) / (dr * dr + di * di);
-  Result := ArcTan2(pi_, pr) * 180.0 / DSP_PI;
+  Result := FastArcTan2(pi_, pr) * 180.0 / DSP_PI;
 end;
 
 { ---------------- TBiquadChain ---------------- }

@@ -397,8 +397,8 @@ var
 begin
   if ACount <= 0 then Exit;
   total := Int64(FBitPos) + ACount;
-  Inc(FBytePos, total div 8);
-  FBitPos := total mod 8;
+  Inc(FBytePos, total shr 3);   // total > 0
+  FBitPos := total and 7;
   if FBytePos >= FLen then
   begin
     FOverrun := True;
@@ -415,8 +415,8 @@ end;
 procedure TBitReader.SetBitPosition(ABit: Int64);
 begin
   if ABit < 0 then ABit := 0;
-  FBytePos := ABit div 8;
-  FBitPos := ABit mod 8;
+  FBytePos := ABit shr 3;   // ABit clamped >= 0
+  FBitPos := ABit and 7;
   if FBytePos > FLen then
   begin
     FBytePos := FLen;

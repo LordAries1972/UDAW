@@ -119,13 +119,15 @@ type
     FJunkTagPos: Int64;
     FDataSizePos: Int64;
     FFactValuePos: Int64;   // 0 when there is no fact chunk
+    FArtist: string;        // written to the LIST/INFO IART chunk when non-empty
     procedure WriteHeader;
   public
     constructor Create(const AFileName: string; AFormat: TWavSampleFormat;
-      AChannels, ASampleRate: Integer; AForceRF64: Boolean = False); overload;
+      AChannels, ASampleRate: Integer; AForceRF64: Boolean = False;
+      const AArtist: string = ''); overload;
     constructor Create(AStream: TStream; AOwnsStream: Boolean;
       AFormat: TWavSampleFormat; AChannels, ASampleRate: Integer;
-      AForceRF64: Boolean = False); overload;
+      AForceRF64: Boolean = False; const AArtist: string = ''); overload;
     destructor Destroy; override;
 
     procedure WriteFrames(const ASrc: TAudioPlanar; AFrameCount: Integer);
@@ -826,7 +828,7 @@ end;
 { ============================ TWavWriter =============================== }
 
 constructor TWavWriter.Create(const AFileName: string; AFormat: TWavSampleFormat;
-  AChannels, ASampleRate: Integer; AForceRF64: Boolean);
+  AChannels, ASampleRate: Integer; AForceRF64: Boolean; const AArtist: string);
 var
   dir: string;
   fs: TFileStream;
@@ -835,11 +837,12 @@ begin
   if dir <> '' then
     ForceDirectories(dir);
   fs := TFileStream.Create(AFileName, fmCreate);
-  Create(fs, True, AFormat, AChannels, ASampleRate, AForceRF64);
+  Create(fs, True, AFormat, AChannels, ASampleRate, AForceRF64, AArtist);
 end;
 
 constructor TWavWriter.Create(AStream: TStream; AOwnsStream: Boolean;
-  AFormat: TWavSampleFormat; AChannels, ASampleRate: Integer; AForceRF64: Boolean);
+  AFormat: TWavSampleFormat; AChannels, ASampleRate: Integer; AForceRF64: Boolean;
+  const AArtist: string);
 begin
   inherited Create;
   if AStream = nil then
@@ -857,6 +860,7 @@ begin
   FChannels := AChannels;
   FSampleRate := ASampleRate;
   FForceRF64 := AForceRF64;
+  FArtist := Trim(AArtist);
   WriteHeader;
 end;
 
@@ -877,7 +881,7 @@ var
   useExt: Boolean;
   blockAlign, fmtSize: Integer;
   effTag: Word;
-  stamp: AnsiString;
+  stamp, artistStamp: AnsiString;
   zero: Byte;
 begin
   useExt := FChannels > 2;
@@ -941,10 +945,20 @@ begin
     FFactValuePos := 0;
 
   stamp := AnsiString(UDAW_MEDIA_COPYRIGHT) + #0;
+  artistStamp := UTF8Encode(FArtist);
+  if artistStamp <> '' then artistStamp := artistStamp + #0;
   zero := 0;
   WrTag(FStream, 'LIST');
-  WrU32(FStream, 12 + Length(stamp) + (Length(stamp) and 1));
+  WrU32(FStream, 12 + Length(stamp) + (Length(stamp) and 1) +
+    IfThen(artistStamp <> '', 8 + Length(artistStamp) + (Length(artistStamp) and 1), 0));
   WrTag(FStream, 'INFO');
+  if artistStamp <> '' then
+  begin
+    WrTag(FStream, 'IART');
+    WrU32(FStream, Length(artistStamp));
+    FStream.WriteBuffer(artistStamp[1], Length(artistStamp));
+    if Odd(Length(artistStamp)) then FStream.WriteBuffer(zero, 1);
+  end;
   WrTag(FStream, 'ICOP');
   WrU32(FStream, Length(stamp));
   FStream.WriteBuffer(stamp[1], Length(stamp));

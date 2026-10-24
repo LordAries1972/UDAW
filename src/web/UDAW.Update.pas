@@ -75,7 +75,7 @@ uses
   System.SysUtils, System.Classes, System.JSON, System.Hash, System.IOUtils,
   System.Generics.Collections, System.Math, System.Net.HttpClient, System.Zip, Winapi.Windows,
   Winapi.ShellAPI, Vcl.Forms,
-  UDAW.Types, UDAW.Version, UDAW.Licensing, UDAW.Paths;
+  UDAW.Types, UDAW.Version, UDAW.Licensing, UDAW.Paths;   // Licensing: shared server-access constants only; registration itself is disabled
 
 const
   UDAW_VERSION_URL_WIN64 = UDAW_WEB_DOMAIN + '/udaw-version-win64.json';
@@ -264,8 +264,9 @@ begin
         end;
         AInfo.FilesMismatch := not FilesMatch(TJSONObject(FilesVal));
         {$IFDEF RELEASE}
-        if AInfo.ExeMismatch or AInfo.FilesMismatch then
-          TUDAWLicense.TamperDetected := True;
+        // registration disabled: no licence edition to downgrade on a mismatch
+        // if AInfo.ExeMismatch or AInfo.FilesMismatch then
+        //   TUDAWLicense.TamperDetected := True;
         {$ENDIF}
       end;
       Result := True;

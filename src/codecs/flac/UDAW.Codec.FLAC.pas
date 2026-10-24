@@ -90,7 +90,7 @@ end;
 
 procedure FlacEncodeToFile(const AWavFile, AOutputFile: string; AProgress: TProc<Double>);
 begin
-  FlacEncodeFile(AWavFile, AOutputFile, AProgress);
+  FlacEncodeFile(AWavFile, AOutputFile, AProgress, '');
 end;
 
 end.

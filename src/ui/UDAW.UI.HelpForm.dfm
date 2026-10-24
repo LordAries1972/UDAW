@@ -29,6 +29,7 @@ object frmHelp: TfrmHelp
       Height = 25
       Anchors = [akTop, akRight]
       Caption = 'Refresh'
+      Hint = 'Reload the Help Centre page.'
       TabOrder = 0
       OnClick = btnRefreshClick
     end

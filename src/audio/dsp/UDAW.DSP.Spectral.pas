@@ -51,6 +51,14 @@ procedure SpectralDenoise(const AIn: array of Single; ASampleRate: Integer;
 procedure SplitStems(const AL, AR: array of Single; ASampleRate: Integer;
   out AStems: TStemSet);
 
+{ Classical (non-neural) speech / music separation.  Time-frequency masking from
+  four cues: how far a bin rises above its own long-term level (speech is
+  modulated, pads / hum / room tone are steady), the speech band, how centred
+  the bin is between the channels, and the bass crossover.  AStrength 0..1
+  sharpens the mask.  Voice + music add back up to the input. }
+procedure SeparateSpeechMusic(const AL, AR: array of Single; ASampleRate: Integer;
+  AStrength: Double; out AVoiceL, AVoiceR, AMusicL, AMusicR: TAudioSampleArray);
+
 { AIR: impulse response (mono). Output length = Length(AIn) + Length(AIR) - 1. }
 procedure ConvolveIR(const AIn, AIR: array of Single; out AOut: TAudioSampleArray);
 
@@ -70,6 +78,10 @@ type
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 { ---------------------------- STFT ---------------------------- }
 
 constructor TSTFT.Create(AFFTSize: Integer);
@@ -82,7 +94,7 @@ begin
   FFFT := TFFT.Create(FN);
   SetLength(FWin, FN);
   for i := 0 to FN - 1 do
-    FWin[i] := Sqrt(0.5 - 0.5 * Cos(2.0 * Pi * i / FN));
+    FWin[i] := Sqrt(0.5 - 0.5 * FastCos(2.0 * Pi * i / FN));
 end;
 
 destructor TSTFT.Destroy;
@@ -173,7 +185,7 @@ begin
       Inc(cnt);
     end;
     for k := 0 to bins - 1 do noise[k] := noise[k] / Max(cnt, 1);
-    floorG := Power(10.0, -EnsureRange(AReductionDb, 0.0, 60.0) / 20.0);
+    floorG := FastExp10(-EnsureRange(AReductionDb, 0.0, 60.0) / 20.0);
     alpha := 1.5; { over-subtraction }
     for k := 0 to bins - 1 do prev[k] := 1.0;
     for f := 0 to High(re) do
@@ -314,6 +326,132 @@ begin
       AStems.Vocals[c] := stft.Synthesize(outRe[2, c], outIm[2, c], n);
       AStems.Other[c] := stft.Synthesize(outRe[3, c], outIm[3, c], n);
     end;
+  finally
+    stft.Free;
+  end;
+end;
+
+{ ---------------------------- speech / music ---------------------------- }
+
+procedure SeparateSpeechMusic(const AL, AR: array of Single; ASampleRate: Integer;
+  AStrength: Double; out AVoiceL, AVoiceR, AMusicL, AMusicR: TAudioSampleArray);
+const
+  LONG_W = 40;   { +/- frames of the long-term level (about 0.9 s at 44.1 kHz) }
+var
+  stft: TSTFT;
+  lr, li, rr, ri, mask, sm: TSpecFrames;
+  vr, vi, wr, wi: array[0..1] of TSpecFrames;
+  logPre: TSpecFrames;       { running sums of ln(magnitude) along time, per bin }
+  frames, bins, f, k, n, c, f0, f1, cnt, df, dk, ff, kk: Integer;
+  binHz, hz, mag, longLvl, r, t, act, band, a, b, sim, cm, p, acc, m: Double;
+begin
+  n := Min(Length(AL), Length(AR));
+  SetLength(AVoiceL, n); SetLength(AVoiceR, n);
+  SetLength(AMusicL, n); SetLength(AMusicR, n);
+  if n < 2048 then
+  begin
+    { too short to analyse: everything counts as voice }
+    for f := 0 to n - 1 do
+    begin
+      AVoiceL[f] := AL[f]; AVoiceR[f] := AR[f];
+      AMusicL[f] := 0; AMusicR[f] := 0;
+    end;
+    Exit;
+  end;
+  AStrength := EnsureRange(AStrength, 0.0, 1.0);
+  p := 1.0 + 2.0 * AStrength;
+  stft := TSTFT.Create(2048);
+  try
+    stft.Analyze(Slice(AL, n), lr, li);
+    stft.Analyze(Slice(AR, n), rr, ri);
+    frames := Length(lr);
+    bins := stft.Bins;
+    binHz := ASampleRate / stft.Size;
+    SetLength(logPre, frames + 1);
+    for f := 0 to frames do SetLength(logPre[f], bins);
+    for k := 0 to bins - 1 do logPre[0][k] := 0;
+    for f := 0 to frames - 1 do
+      for k := 0 to bins - 1 do
+      begin
+        mag := 0.5 * Sqrt(Sqr(lr[f][k] + rr[f][k]) + Sqr(li[f][k] + ri[f][k]));
+        logPre[f + 1][k] := logPre[f][k] + FastLn(mag + 1E-9);
+      end;
+    SetLength(mask, frames);
+    for f := 0 to frames - 1 do
+    begin
+      SetLength(mask[f], bins);
+      f0 := Max(0, f - LONG_W);
+      f1 := Min(frames - 1, f + LONG_W);
+      cnt := f1 - f0 + 1;
+      for k := 0 to bins - 1 do
+      begin
+        mag := 0.5 * Sqrt(Sqr(lr[f][k] + rr[f][k]) + Sqr(li[f][k] + ri[f][k]));
+        longLvl := FastExp((logPre[f1 + 1][k] - logPre[f0][k]) / cnt);
+        r := (mag + 1E-9) / (longLvl + 1E-9);
+        t := EnsureRange((r - 1.0) / 2.5, 0.0, 1.0);
+        act := t * t * (3.0 - 2.0 * t);
+        hz := k * binHz;
+        if hz < 60 then band := 0.0
+        else if hz < 110 then band := (hz - 60) / 50
+        else if hz < 4500 then band := 1.0
+        else if hz < 9000 then band := 1.0 - (hz - 4500) / 4500 * 0.65
+        else band := 0.2;
+        a := Sqrt(Sqr(lr[f][k] - rr[f][k]) + Sqr(li[f][k] - ri[f][k]));
+        b := Sqrt(Sqr(lr[f][k] + rr[f][k]) + Sqr(li[f][k] + ri[f][k]));
+        if b < 1E-12 then sim := 0 else sim := EnsureRange(1.0 - a / b, 0.0, 1.0);
+        cm := sim * sim;
+        m := band * (0.25 + 0.75 * act) * (0.35 + 0.65 * cm);
+        mask[f][k] := FastPow(EnsureRange(m, 0.0, 1.0), p);
+      end;
+    end;
+    { 3 x 3 box smoothing of the mask: removes isolated "musical noise" bins }
+    SetLength(sm, frames);
+    for f := 0 to frames - 1 do
+    begin
+      SetLength(sm[f], bins);
+      for k := 0 to bins - 1 do
+      begin
+        acc := 0;
+        cnt := 0;
+        for df := -1 to 1 do
+          for dk := -1 to 1 do
+          begin
+            ff := f + df;
+            kk := k + dk;
+            if (ff >= 0) and (ff < frames) and (kk >= 0) and (kk < bins) then
+            begin
+              acc := acc + mask[ff][kk];
+              Inc(cnt);
+            end;
+          end;
+        sm[f][k] := acc / cnt;
+      end;
+    end;
+    for c := 0 to 1 do
+    begin
+      SetLength(vr[c], frames); SetLength(vi[c], frames);
+      SetLength(wr[c], frames); SetLength(wi[c], frames);
+    end;
+    for f := 0 to frames - 1 do
+    begin
+      for c := 0 to 1 do
+      begin
+        SetLength(vr[c][f], bins); SetLength(vi[c][f], bins);
+        SetLength(wr[c][f], bins); SetLength(wi[c][f], bins);
+      end;
+      for k := 0 to bins - 1 do
+      begin
+        m := sm[f][k];
+        vr[0][f][k] := lr[f][k] * m;       vi[0][f][k] := li[f][k] * m;
+        vr[1][f][k] := rr[f][k] * m;       vi[1][f][k] := ri[f][k] * m;
+        wr[0][f][k] := lr[f][k] * (1 - m); wi[0][f][k] := li[f][k] * (1 - m);
+        wr[1][f][k] := rr[f][k] * (1 - m); wi[1][f][k] := ri[f][k] * (1 - m);
+      end;
+    end;
+    AVoiceL := stft.Synthesize(vr[0], vi[0], n);
+    AVoiceR := stft.Synthesize(vr[1], vi[1], n);
+    AMusicL := stft.Synthesize(wr[0], wi[0], n);
+    AMusicR := stft.Synthesize(wr[1], wi[1], n);
   finally
     stft.Free;
   end;
@@ -536,7 +674,7 @@ begin
       for i := 0 to WIN - 1 do
         if (pos + d + i >= 0) and (pos + d + i < n) then
         begin
-          w := 0.5 - 0.5 * Cos(2.0 * Pi * i / WIN);
+          w := 0.5 - 0.5 * FastCos(2.0 * Pi * i / WIN);
           acc[pos + d + i] := acc[pos + d + i] + shifted[i] * w;
           wsum[pos + d + i] := wsum[pos + d + i] + w;
         end;

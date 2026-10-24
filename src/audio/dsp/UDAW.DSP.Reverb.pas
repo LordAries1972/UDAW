@@ -40,7 +40,7 @@ type
     Damp2: Double;
     procedure SetSize(ALen: Integer);
     procedure Reset;
-    function Process(AInput: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+    function Process(AInput: Single): Single; inline;
   end;
 
   TReverbAllpass = record
@@ -50,7 +50,7 @@ type
     Feedback: Double;
     procedure SetSize(ALen: Integer);
     procedure Reset;
-    function Process(AInput: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+    function Process(AInput: Single): Single; inline;
   end;
 
   TAlgoReverb = class

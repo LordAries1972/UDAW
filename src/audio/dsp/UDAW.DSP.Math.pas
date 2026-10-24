@@ -20,7 +20,7 @@ unit UDAW.DSP.Math;
 interface
 
 uses
-  SysUtils, Math,
+  SysUtils, Math, UDAW.DSP.MathTables,
   UDAW.Audio.Types;
 
 const
@@ -51,9 +51,9 @@ type
   public
     procedure Init(ASampleRate: Double; ATimeMs: Double; AInitial: Double = 0.0);
     procedure SetTimeMs(ATimeMs: Double);
-    procedure SetTarget(AValue: Double);       {$IFDEF FPC}inline;{$ENDIF}
-    procedure SetImmediate(AValue: Double);    {$IFDEF FPC}inline;{$ENDIF}
-    function  Process: Double;                  {$IFDEF FPC}inline;{$ENDIF}
+    procedure SetTarget(AValue: Double);       inline;
+    procedure SetImmediate(AValue: Double);    inline;
+    function  Process: Double;                  inline;
     function  Settled(AEps: Double = 1.0E-6): Boolean;
     property  Current: Double read FCurrent;
     property  Target: Double read FTarget;
@@ -61,9 +61,9 @@ type
 
 { ---- denormal / finite guards ---- }
 
-function FlushDenorm(AValue: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
-function IsFiniteSample(AValue: Single): Boolean; {$IFDEF FPC}inline;{$ENDIF}
-function SanitizeSample(AValue: Single): Single; {$IFDEF FPC}inline;{$ENDIF}
+function FlushDenorm(AValue: Single): Single; inline;
+function IsFiniteSample(AValue: Single): Boolean; inline;
+function SanitizeSample(AValue: Single): Single; inline;
 
 { ---- block operations (length = AFrames Singles) ---- }
 
@@ -100,12 +100,12 @@ function WindowCoherentGain(AKind: TWindowKind; ALength: Integer): Double;
 
 { ---- power-of-two helpers ---- }
 
-function IsPow2(AValue: Integer): Boolean; {$IFDEF FPC}inline;{$ENDIF}
+function IsPow2(AValue: Integer): Boolean; inline;
 function NextPow2(AValue: Integer): Integer;
 function IntLog2(AValue: Integer): Integer;
 
 { Normalised sinc: sin(pi x)/(pi x), sinc(0)=1. }
-function SincNorm(AX: Double): Double; {$IFDEF FPC}inline;{$ENDIF}
+function SincNorm(AX: Double): Double; inline;
 
 implementation
 
@@ -317,15 +317,15 @@ begin
     plConstantPower:
       begin
         ang := x * (DSP_PI * 0.5);
-        ALeft := Cos(ang);
-        ARight := Sin(ang);
+        ALeft := FastCos(ang);
+        ARight := FastSin(ang);
       end;
     plCompromise45:
       begin
         { geometric mean of the linear and constant-power laws: -4.5 dB centre }
         ang := x * (DSP_PI * 0.5);
-        ALeft := Sqrt((1.0 - x) * Cos(ang));
-        ARight := Sqrt(x * Sin(ang));
+        ALeft := Sqrt((1.0 - x) * FastCos(ang));
+        ARight := Sqrt(x * FastSin(ang));
       end;
   else
     ALeft := 1; ARight := 1;
@@ -338,8 +338,8 @@ var
 begin
   if APos < 0 then APos := 0 else if APos > 1 then APos := 1;
   ang := APos * (DSP_PI * 0.5);
-  AGainA := Cos(ang);
-  AGainB := Sin(ang);
+  AGainA := FastCos(ang);
+  AGainB := FastSin(ang);
 end;
 
 { ---------------- windows ---------------- }
@@ -353,16 +353,16 @@ begin
   n := AIndex / (ALength - 1);   // 0..1
   case AKind of
     wkHann:
-      Result := 0.5 - 0.5 * Cos(DSP_TWO_PI * n);
+      Result := 0.5 - 0.5 * FastCosTurns(n);
     wkHamming:
-      Result := 0.54 - 0.46 * Cos(DSP_TWO_PI * n);
+      Result := 0.54 - 0.46 * FastCosTurns(n);
     wkBlackman:
-      Result := 0.42 - 0.5 * Cos(DSP_TWO_PI * n) + 0.08 * Cos(2 * DSP_TWO_PI * n);
+      Result := 0.42 - 0.5 * FastCosTurns(n) + 0.08 * FastCosTurns(2 * n);
     wkBlackmanHarris:
       Result := 0.35875
-              - 0.48829 * Cos(DSP_TWO_PI * n)
-              + 0.14128 * Cos(2 * DSP_TWO_PI * n)
-              - 0.01168 * Cos(3 * DSP_TWO_PI * n);
+              - 0.48829 * FastCosTurns(n)
+              + 0.14128 * FastCosTurns(2 * n)
+              - 0.01168 * FastCosTurns(3 * n);
   else
     Result := 1.0;   // wkRect
   end;
@@ -423,7 +423,7 @@ begin
   else
   begin
     px := DSP_PI * AX;
-    Result := Sin(px) / px;
+    Result := FastSin(px) / px;
   end;
 end;
 

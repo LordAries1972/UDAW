@@ -5,7 +5,7 @@ unit UDAW.Version;
 
   The product's version scheme is "1.0.<build>.<ddmmyyyy>" - a build number
   that auto-increments on every successful compile (scripts\build-windows.ps1
-  bumps resources\UDAW.rc and UDAW_FALLBACK_BUILD_NUMBER below together,
+  bumps resources\UDAW.rc and UDAW_FALLBACK_BUILD_NUMBER below together (scripts\build.ps1),
   before compiling, and only keeps the bump if dcc64 actually succeeds),
   followed by the date that build was actually produced. That is NOT a shape
   the Win32
@@ -13,7 +13,7 @@ unit UDAW.Version;
   no date), so the approach here is:
 
     1. resources/UDAW.rc carries the numeric Major.Minor.Release.Build quad
-       (currently 1.0.0.179), which is embedded by the Windows build script.
+       (the build component is bumped on every compile), which is embedded by the Windows build script.
     2. At runtime, UDAWBuildNumber reads that quad back out of the running
        .exe's own version resource (GetFileVersionInfo/VerQueryValue) and
        UDAWBuildDate reads the .exe's PE header link timestamp (the actual
@@ -32,7 +32,7 @@ unit UDAW.Version;
 interface
 
 uses
-  SysUtils, Classes
+  SysUtils, Classes, DateUtils
   {$IFDEF UDAW_WINDOWS}
   , Winapi.Windows
   {$ENDIF}
@@ -66,7 +66,7 @@ const
     compile. Used only as a fallback when the running binary has no readable
     version resource yet (e.g. a quick FPC/debug build without a compiled-in
     .res), so the splash screen never shows "build 0". }
-  UDAW_FALLBACK_BUILD_NUMBER = 328;
+  UDAW_FALLBACK_BUILD_NUMBER = 590;
 
 {$IFDEF UDAW_WINDOWS}
 
@@ -112,7 +112,8 @@ begin
       if peSignature <> IMAGE_NT_SIGNATURE then Exit;
       fs.ReadBuffer(fileHeader, SizeOf(fileHeader));
       if fileHeader.TimeDateStamp = 0 then Exit;
-      Result := UNIX_EPOCH_DELPHI + (fileHeader.TimeDateStamp / 86400.0);
+      { the stamp is UTC; the displayed date is the local day the build was made }
+      Result := TTimeZone.Local.ToLocalTime(UNIX_EPOCH_DELPHI + (fileHeader.TimeDateStamp / 86400.0));
     finally
       fs.Free;
     end;

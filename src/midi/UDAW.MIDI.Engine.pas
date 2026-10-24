@@ -28,7 +28,7 @@ uses
   SysUtils, Math,
   UDAW.Errors, UDAW.Audio.Types, UDAW.Audio.Buffer, UDAW.Audio.Source,
   UDAW.DSP.Envelope,
-  UDAW.MIDI.Types, UDAW.MIDI.Sequence;
+  UDAW.MIDI.Types, UDAW.MIDI.Sequence, UDAW.Drum.Machine;
 
 const
   MIDI_SYNTH_VOICES = 64;
@@ -76,6 +76,7 @@ type
     FSampleRate: Integer;
     FMasterGain: Single;
     FAgeCounter: Int64;
+    FDrum: TDrumMachine;          // not owned: channel-10 notes on its pads play samples
     function AllocVoice(AChannel, ANote: Integer): Integer;
     procedure StartVoice(AIdx, AChannel, ANote, AVelocity: Integer);
     procedure RecalcVoicePitch(AIdx: Integer);
@@ -102,6 +103,11 @@ type
     function ActiveVoiceCount: Integer;
     property SampleRate: Integer read FSampleRate;
     property MasterGain: Single read FMasterGain write FMasterGain;
+    { when set, channel-10 notes 36..51 on a pad that holds a sample play that sample }
+    property DrumMachine: TDrumMachine read FDrum write FDrum;
+    { the project's drum kit: every synth made after it is set plays its pads (the live
+      monitor synth clears it, since the kit is auditioned stand-alone) }
+    class var SharedDrum: TDrumMachine;
   end;
 
   { one flattened, tick-ordered event the engine dispatches }
@@ -122,6 +128,7 @@ type
     FPlaying: Boolean;
     FSeconds: Double;          // musical seconds consumed
     FTempoScale: Double;
+    FRate: Double;             // sequence seconds consumed per real second (tempo-map following)
     FLoop: Boolean;
     FLoopStartSec, FLoopEndSec: Double;
     FEndTick: Int64;
@@ -153,6 +160,10 @@ type
     property Playing: Boolean read FPlaying;
     property PositionSeconds: Double read FSeconds;
     property TempoScale: Double read FTempoScale write FTempoScale;
+    { how fast the sequence advances compared with real time; 1.0 = as written. Unlike
+      TempoScale it is applied to the time consumed per block, so it can change while
+      the sequence is playing (a tempo change on the timeline). }
+    property Rate: Double read FRate write FRate;
     property Loop: Boolean read FLoop write FLoop;
     property LoopStartSeconds: Double read FLoopStartSec write FLoopStartSec;
     property LoopEndSeconds: Double read FLoopEndSec write FLoopEndSec;
@@ -161,6 +172,10 @@ type
 function MidiProgramShape(AProgram: Integer): TMidiWaveShape;
 
 implementation
+
+
+uses
+  UDAW.DSP.MathTables;
 
 const
   ENGINE_SUBSYS = 'MIDI.Engine';
@@ -207,6 +222,7 @@ begin
   if ASampleRate > 0 then FSampleRate := ASampleRate;
   for i := 0 to High(FVoices) do
     FVoices[i].Env.Init(FSampleRate);
+  FDrum := SharedDrum;
   Reset;
 end;
 
@@ -277,7 +293,7 @@ var
 begin
   ch := FVoices[AIdx].Channel;
   hz := FVoices[AIdx].BaseHz *
-        Power(2.0, FChannels[ch].PitchBendSemis / 12.0);
+        SemitoneRatio(FChannels[ch].PitchBendSemis);
   FVoices[AIdx].PhaseInc := hz / FSampleRate;
 end;
 
@@ -325,7 +341,7 @@ begin
     { tone filter: brighter for higher notes and higher velocity }
     cutoff := 800.0 + FVoices[AIdx].BaseHz * 6.0 + AVelocity * 20.0;
     if cutoff > FSampleRate * 0.45 then cutoff := FSampleRate * 0.45;
-    x := Exp(-TWO_PI * cutoff / FSampleRate);
+    x := FastExp(-TWO_PI * cutoff / FSampleRate);
     FVoices[AIdx].LpCoef := x;
     { envelope by family: pads slow, plucks fast }
     case FVoices[AIdx].Shape of
@@ -351,6 +367,7 @@ begin
     NoteOff(AChannel, ANote, 0);
     Exit;
   end;
+  if (AChannel = MIDI_DRUM_CHANNEL) and (FDrum <> nil) and FDrum.HitNote(ANote, AVelocity) then Exit;
   idx := AllocVoice(AChannel, ANote);
   StartVoice(idx, AChannel, ANote, AVelocity);
 end;
@@ -360,6 +377,7 @@ var
   i: Integer;
 begin
   AChannel := AChannel and $0F;
+  if (AChannel = MIDI_DRUM_CHANNEL) and (FDrum <> nil) then FDrum.ReleaseNote(ANote);
   for i := 0 to High(FVoices) do
     if FVoices[i].Active and (FVoices[i].Channel = AChannel) and
        (FVoices[i].Note = ANote) and FVoices[i].Held then
@@ -490,7 +508,7 @@ begin
   dt := V.PhaseInc;
   case V.Shape of
     mwsSine:
-      v0 := Sin(t * TWO_PI);
+      v0 := FastSin(t * TWO_PI);
     mwsTriangle:
       begin
         if t < 0.5 then v0 := 4.0 * t - 1.0 else v0 := 3.0 - 4.0 * t;
@@ -549,6 +567,7 @@ var
 begin
   nch := ABuffer.ChannelCount;
   if (nch <= 0) or (AFrameCount <= 0) then Exit;
+  if FDrum <> nil then FDrum.RenderAdd(ABuffer, AFrameCount);
   L := ABuffer.ChannelPtr(0);
   if nch >= 2 then R := ABuffer.ChannelPtr(1) else R := L;
 
@@ -561,8 +580,8 @@ begin
     pan := FVoices[vi].Pan;
     if pan < -1 then pan := -1 else if pan > 1 then pan := 1;
     { equal-power pan }
-    lg := Cos((pan + 1.0) * (Pi / 4.0));
-    rg := Sin((pan + 1.0) * (Pi / 4.0));
+    lg := FastCos((pan + 1.0) * (Pi / 4.0));
+    rg := FastSin((pan + 1.0) * (Pi / 4.0));
 
     for f := 0 to AFrameCount - 1 do
     begin
@@ -627,6 +646,7 @@ begin
   FSampleRate := UDAW_DEFAULT_SAMPLE_RATE;
   FChannels := 2;
   FTempoScale := 1.0;
+  FRate := 1.0;
 end;
 
 destructor TMidiPlaybackEngine.Destroy;
@@ -788,7 +808,7 @@ begin
   end;
 
   blockSeconds := n / FSampleRate;
-  endSeconds := FSeconds + blockSeconds;
+  endSeconds := FSeconds + blockSeconds * Max(0.01, FRate);
 
   { dispatch every event whose tick falls before the END of this block.  Sample-
     accurate scheduling within the block is approximated to the block edge -

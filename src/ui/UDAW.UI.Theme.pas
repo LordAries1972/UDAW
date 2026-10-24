@@ -54,7 +54,7 @@ function ThemeStylesDir: string;
 implementation
 
 uses IniFiles, UDAW.Paths
-  {$IFNDEF FPC}, IOUtils, Vcl.Themes, Vcl.Styles{$ENDIF};
+  {$IFNDEF FPC}, IOUtils, Vcl.Themes, Vcl.Styles, Vcl.Forms, Winapi.Windows{$ENDIF};
 
 
 var
@@ -176,6 +176,55 @@ begin
   if Result = '' then Result := THEME_DEFAULT;
 end;
 
+{ Swapping a VCL style recreates the main window, and the new window shows
+  blank (white) until it has painted - a flash across the whole form. The form
+  is made fully transparent for the swap, repainted while still invisible, then
+  faded back in. }
+procedure SwitchStyle(const AStyle: string);
+var
+  f: TForm;
+  wasBlend: Boolean;
+  wasValue: Byte;
+  t0: Cardinal;
+  i: Integer;
+begin
+  f := nil;
+  if (Application <> nil) and (Application.MainForm <> nil) and Application.MainForm.HandleAllocated
+     and IsWindowVisible(Application.MainForm.Handle) then
+    f := Application.MainForm;
+  if f = nil then
+  begin
+    TStyleManager.SetStyle(AStyle);
+    Exit;
+  end;
+  wasBlend := f.AlphaBlend;
+  wasValue := f.AlphaBlendValue;
+  f.AlphaBlendValue := 0;
+  f.AlphaBlend := True;
+  try
+    TStyleManager.SetStyle(AStyle);
+    { the page / tab / scroll controls repaint through queued messages after the
+      swap; keep the form hidden until they have run }
+    t0 := GetTickCount;
+    repeat
+      if f.HandleAllocated then
+        RedrawWindow(f.Handle, nil, 0, RDW_INVALIDATE or RDW_ALLCHILDREN or RDW_FRAME or RDW_UPDATENOW);
+      Application.ProcessMessages;
+      Sleep(10);
+    until GetTickCount - t0 >= 250;
+  finally
+    { fade back in rather than popping }
+    for i := 1 to 6 do
+    begin
+      f.AlphaBlendValue := i * 255 div 6;
+      Application.ProcessMessages;
+      Sleep(12);
+    end;
+    f.AlphaBlendValue := wasValue;
+    f.AlphaBlend := wasBlend;
+  end;
+end;
+
 function ThemeApply(const AName: string): Boolean;
 var
   s: string;
@@ -183,13 +232,13 @@ begin
   Result := False;
   if (AName = '') or SameText(AName, THEME_DEFAULT) then
   begin
-    TStyleManager.SetStyle(THEME_DEFAULT);
+    SwitchStyle(THEME_DEFAULT);
     Exit(True);
   end;
   for s in TStyleManager.StyleNames do
     if SameText(s, AName) then
     begin
-      TStyleManager.SetStyle(s);
+      SwitchStyle(s);
       Exit(True);
     end;
 end;

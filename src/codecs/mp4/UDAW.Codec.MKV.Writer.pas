@@ -542,7 +542,7 @@ begin
       WriteBlock(trackNo, tMs, isKey, data);
 
       Inc(done);
-      if Assigned(AProgress) and (done mod 256 = 0) then AProgress(done / total);
+      if Assigned(AProgress) and (done and 255 = 0) then AProgress(done / total);
     end;
     FlushCluster;
 

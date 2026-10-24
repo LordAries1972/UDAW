@@ -73,6 +73,8 @@ type
     FPeakL, FPeakR: TPeakMeter;
     FRms: TRmsMeter;
     FLoud: TLoudnessMeter;
+    FTpL, FTpR: TTruePeakMeter;     // master only
+    FCorr: TCorrelationMeter;       // master only
   public
     constructor Create(AStrip: TMixStrip; AChannels, AMaxFrames, ASampleRate: Integer);
     destructor Destroy; override;
@@ -121,6 +123,10 @@ type
       (errInvalidState / errConfig) on an invalid model. Off the RT thread. }
     procedure Prepare(ASampleRate, AMaxFrames, AChannels: Integer);
     procedure Reset;
+    { Pushes an edited graphic-EQ insert (gains and bypass) into the running plan without a
+      re-Prepare, so a slider moved during playback is heard at once. }
+    procedure UpdateGraphicEqLive(AStripId, AInsertIndex: Integer; const AParams: string;
+      ABypass: Boolean);
 
     { RT: render one block of the master mix into AOut. Silence until Prepare. }
     procedure ProcessBlock(AOut: TAudioBuffer);
@@ -138,6 +144,8 @@ type
     property LastError: string read FLastError;
   end;
 
+function MixerInsertKindAllowed(AKind: TNodeKind): Boolean;
+
 implementation
 
 const
@@ -154,6 +162,11 @@ begin
                       nkParametricEQ, nkStereoWidth, nkTransientShaper,
                       nkExciter, nkPitchShift, nkLookaheadLimiter,
                       nkMultibandComp, nkMastering];
+end;
+
+function MixerInsertKindAllowed(AKind: TNodeKind): Boolean;
+begin
+  Result := InsertKindAllowed(AKind);
 end;
 
 { Placement law: a mono-ish source (input / audio track) is positioned with a
@@ -197,6 +210,12 @@ begin
     MIX_METER_HOLD_DECAY_DEFAULT);
   FRms.Init(ASampleRate, 300.0);
   FLoud := TLoudnessMeter.Create(ASampleRate, 2);
+  if AStrip.Kind = skMaster then
+  begin
+    FTpL.Init(ASampleRate);
+    FTpR.Init(ASampleRate);
+    FCorr.Init(ASampleRate);
+  end;
   FScTap := TAudioBuffer.Create(AChannels, AMaxFrames, ASampleRate);
   FScTap.Clear;
   FOutputPlanIndex := -1;
@@ -480,6 +499,29 @@ begin
   end;
 end;
 
+procedure TMixerProcessor.UpdateGraphicEqLive(AStripId, AInsertIndex: Integer;
+  const AParams: string; ABypass: Boolean);
+var
+  i: Integer;
+begin
+  FLock.Enter;
+  try
+    for i := 0 to High(FPlan) do
+      if FPlan[i].FStrip.Id = AStripId then
+      begin
+        if (AInsertIndex >= 0) and (AInsertIndex <= High(FPlan[i].FInserts)) and
+           (FPlan[i].FInserts[AInsertIndex] is TGraphicEQNode) then
+        begin
+          TGraphicEQNode(FPlan[i].FInserts[AInsertIndex]).ApplyGainsLive(AParams);
+          FPlan[i].FInserts[AInsertIndex].Bypass := ABypass;
+        end;
+        Break;
+      end;
+  finally
+    FLock.Leave;
+  end;
+end;
+
 procedure TMixerProcessor.Reset;
 var
   i, k: Integer;
@@ -499,6 +541,12 @@ begin
       FPlan[i].FPeakR.Reset;
       FPlan[i].FRms.Reset;
       FPlan[i].FLoud.Reset;
+      if FPlan[i].FIsMaster then
+      begin
+        FPlan[i].FTpL.Reset;
+        FPlan[i].FTpR.Reset;
+        FPlan[i].FCorr.Reset;
+      end;
       FPlan[i].FStrip.ResetMeters;
       for k := 0 to High(FPlan[i].FInserts) do
         FPlan[i].FInserts[k].Reset;
@@ -738,6 +786,23 @@ begin
   s.MeterRmsDb := ARt.FRms.ValueDb;
   s.MeterLufs := ARt.FLoud.Momentary;
   s.MeterLufsIntegrated := ARt.FLoud.Integrated;
+  if ARt.FIsMaster then
+  begin
+    ARt.FTpL.PushBlock(PSingle(cur.ChannelPtr(0)), n);
+    if cur.ChannelCount >= 2 then
+    begin
+      ARt.FTpR.PushBlock(PSingle(cur.ChannelPtr(1)), n);
+      ARt.FCorr.PushBlock(PSingle(cur.ChannelPtr(0)), PSingle(cur.ChannelPtr(1)), n);
+    end
+    else
+    begin
+      ARt.FTpR.PushBlock(PSingle(cur.ChannelPtr(0)), n);
+      ARt.FCorr.PushBlock(PSingle(cur.ChannelPtr(0)), PSingle(cur.ChannelPtr(0)), n);
+    end;
+    s.MeterTruePeakDb := Max(ARt.FTpL.ValueDb, ARt.FTpR.ValueDb);
+    s.MeterCorrelation := ARt.FCorr.Value;
+    s.MeterLufsShort := ARt.FLoud.ShortTerm;
+  end;
   s.MeterHoldDbL := ARt.FPeakL.HoldDb;
   s.MeterHoldDbR := ARt.FPeakR.HoldDb;
   { latching clip LEDs: only the engine ever sets these True - see

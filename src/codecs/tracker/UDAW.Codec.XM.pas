@@ -165,8 +165,8 @@ begin
     $2: begin AEffect := tfxPortaDown;    AOutParam := AParam; end;
     $3: begin AEffect := tfxTonePorta;    AOutParam := AParam; end;
     $4: begin AEffect := tfxVibrato;      AOutParam := AParam; end;
-    $5: begin AEffect := tfxTonePorta;    AOutParam := 0; end;   // + volslide: lost
-    $6: begin AEffect := tfxVibrato;      AOutParam := 0; end;    // + volslide: lost
+    $5: begin AEffect := tfxTonePortaVolSlide; AOutParam := AParam; end;
+    $6: begin AEffect := tfxVibratoVolSlide;   AOutParam := AParam; end;
     $7: begin AEffect := tfxTremolo;      AOutParam := AParam; end;
     $8: begin AEffect := tfxSetPanning;   AOutParam := AParam; end;
     $9: begin AEffect := tfxSampleOffset; AOutParam := AParam; end;
@@ -183,8 +183,10 @@ begin
         sub := AParam shr 4;
         lo := AParam and $0F;
         case sub of
-          $1: begin AEffect := tfxPortaUp;     AOutParam := lo; end;   // fine porta up
-          $2: begin AEffect := tfxPortaDown;   AOutParam := lo; end;   // fine porta down
+          $1: begin AEffect := tfxFinePortaUp;   AOutParam := lo; end;   // fine porta up (tick 0 only)
+          $2: begin AEffect := tfxFinePortaDown; AOutParam := lo; end;   // fine porta down
+          $6: begin AEffect := tfxPatternLoop;  AOutParam := lo; end;
+          $E: begin AEffect := tfxPatternDelay; AOutParam := lo; end;
           $9: begin AEffect := tfxRetrigger;   AOutParam := lo; end;
           $A: begin AEffect := tfxFineVolUp;   AOutParam := lo; end;
           $B: begin AEffect := tfxFineVolDown; AOutParam := lo; end;
@@ -201,8 +203,9 @@ begin
     $F:
       if AParam = 0 then Result := False
       else begin AEffect := tfxSetSpeed; AOutParam := AParam; end;  // <$20 speed, >=$20 BPM
-    $10 { G }: Result := False;                                     // set global volume
-    $11 { H }: Result := False;                                     // global volume slide
+    $10 { G }: begin AEffect := tfxGlobalVol;      AOutParam := Byte(ClampInt(AParam, 0, 64)); end;
+    $11 { H }: begin AEffect := tfxGlobalVolSlide; AOutParam := AParam; end;
+    $14 { K }: begin AEffect := tfxKeyOff;         AOutParam := AParam; end;
     $15 { L }: Result := False;                                     // set envelope position
     { high nibble = slide right, low nibble = slide left - same nibble layout
       as Axy volume slide and as the volume-column D0-DF/E0-EF pan-slide
@@ -211,14 +214,14 @@ begin
       using Pxy panned in the opposite direction to FT2/OpenMPT/MilkyTracker. }
     $19 { P }: begin AEffect := tfxPanSlide;  AOutParam := AParam; end;
     $1B { R }: begin AEffect := tfxRetrigger; AOutParam := Byte(AParam and $0F); end;
-    $1D { T }: Result := False;                                     // tremor
+    $1D { T }: begin AEffect := tfxTremor; AOutParam := AParam; end;
     $21 { X }:
       begin
         sub := AParam shr 4;
         lo := AParam and $0F;
         case sub of
-          $1: begin AEffect := tfxPortaUp;   AOutParam := lo; end;  // extra-fine porta up
-          $2: begin AEffect := tfxPortaDown; AOutParam := lo; end;  // extra-fine porta down
+          $1: begin AEffect := tfxXFinePortaUp;   AOutParam := lo; end;  // extra-fine porta up
+          $2: begin AEffect := tfxXFinePortaDown; AOutParam := lo; end;  // extra-fine porta down
         else
           Result := False;
         end;
@@ -272,6 +275,18 @@ begin
     tfxArpeggio:     begin ACmd := $0; AOutParam := AParam; end;
     tfxPortaUp:      begin ACmd := $1; AOutParam := AParam; end;
     tfxPortaDown:    begin ACmd := $2; AOutParam := AParam; end;
+    tfxTonePortaVolSlide: begin ACmd := $5; AOutParam := AParam; end;
+    tfxVibratoVolSlide:   begin ACmd := $6; AOutParam := AParam; end;
+    tfxGlobalVol:         begin ACmd := $10; AOutParam := Byte(ClampInt(AParam, 0, 64)); end;
+    tfxGlobalVolSlide:    begin ACmd := $11; AOutParam := AParam; end;
+    tfxKeyOff:            begin ACmd := $14; AOutParam := AParam; end;
+    tfxTremor:            begin ACmd := $1D; AOutParam := AParam; end;
+    tfxPatternLoop:       begin ACmd := $E; AOutParam := Byte($60 or (AParam and $0F)); end;
+    tfxPatternDelay:      begin ACmd := $E; AOutParam := Byte($E0 or (AParam and $0F)); end;
+    tfxFinePortaUp:  begin ACmd := $E; AOutParam := Byte($10 or (AParam and $0F)); end;
+    tfxFinePortaDown: begin ACmd := $E; AOutParam := Byte($20 or (AParam and $0F)); end;
+    tfxXFinePortaUp: begin ACmd := $21; AOutParam := Byte($10 or (AParam and $0F)); end;
+    tfxXFinePortaDown: begin ACmd := $21; AOutParam := Byte($20 or (AParam and $0F)); end;
     tfxTonePorta:    begin ACmd := $3; AOutParam := AParam; end;
     tfxVibrato:      begin ACmd := $4; AOutParam := AParam; end;
     tfxTremolo:      begin ACmd := $7; AOutParam := AParam; end;
@@ -412,6 +427,8 @@ var
   cur16: SmallInt;
   n: Integer;
   totalSamplesSeen: Integer;
+  tgt: TTrackerInstrument;     // the sample slot being filled: the instrument itself or one of its layers
+  layerIdx: array of Integer;  // sample number -> 1-based layer of ins, 0 = the instrument's own sample
 begin
   FillChar(AInfo, SizeOf(AInfo), 0);
   if Length(AData) > XM_MAX_FILE then
@@ -673,6 +690,8 @@ begin
       if ins.Name = '' then ins.Name := Format('Instrument %d', [i]);
       ins.RootNote := XM_C4_NOTE;
       firstSampleForInstr := True;
+      SetLength(layerIdx, numSamples);
+      for k := 0 to numSamples - 1 do layerIdx[k] := 0;
 
       for k := 0 to numSamples - 1 do
       begin
@@ -688,8 +707,16 @@ begin
           AInfo.Truncated := True;
         end;
 
-        if k = chosenSample then
+        { every sample is kept: the keymap's C-4 sample is the instrument itself, the others
+          are layers it switches to per note (each with its own relative note / finetune) }
         begin
+          if k = chosenSample then tgt := ins
+          else
+          begin
+            tgt := ins.AddLayer;
+            tgt.RootNote := XM_C4_NOTE;
+            layerIdx[k] := ins.LayerCount;
+          end;
           SetLength(pcm, sTotalFrames);
           cur8 := 0; cur16 := 0;
           if smp[k].Is16Bit then
@@ -714,10 +741,11 @@ begin
             end;
           end;
 
-          ins.SampleRate := XmSampleRate(smp[k].RelativeNote, smp[k].Finetune);
-          ins.Volume := smp[k].Volume / 64.0;
-          ins.Pan := smp[k].Panning / 127.5 - 1.0;
-          ins.SetData(pcm, ins.SampleRate);
+          tgt.SampleRate := XmSampleRate(smp[k].RelativeNote, smp[k].Finetune);
+          tgt.Volume := smp[k].Volume / 64.0;
+          tgt.Pan := smp[k].Panning / 127.5 - 1.0;
+          tgt.SetData(pcm, tgt.SampleRate);
+          tgt.Name := smp[k].Name;
           ins.Fadeout := volFadeout / 32768.0;
 
           if smp[k].Is16Bit then
@@ -728,21 +756,23 @@ begin
           case smp[k].LoopKind of
             1:
               begin
-                ins.LoopMode := tlmForward;
-                ins.LoopStart := ClampInt(smp[k].LoopStart, 0, sTotalFrames);
-                ins.LoopEnd := ClampInt(smp[k].LoopStart + smp[k].LoopLength, ins.LoopStart + 1, sTotalFrames);
+                tgt.LoopMode := tlmForward;
+                tgt.LoopStart := ClampInt(smp[k].LoopStart, 0, sTotalFrames);
+                tgt.LoopEnd := ClampInt(smp[k].LoopStart + smp[k].LoopLength, tgt.LoopStart + 1, sTotalFrames);
               end;
             2:
               begin
-                ins.LoopMode := tlmPingPong;
-                ins.LoopStart := ClampInt(smp[k].LoopStart, 0, sTotalFrames);
-                ins.LoopEnd := ClampInt(smp[k].LoopStart + smp[k].LoopLength, ins.LoopStart + 1, sTotalFrames);
+                tgt.LoopMode := tlmPingPong;
+                tgt.LoopStart := ClampInt(smp[k].LoopStart, 0, sTotalFrames);
+                tgt.LoopEnd := ClampInt(smp[k].LoopStart + smp[k].LoopLength, tgt.LoopStart + 1, sTotalFrames);
               end;
           else
-            ins.LoopMode := tlmOff;
+            tgt.LoopMode := tlmOff;
           end;
 
-          { envelopes }
+          { envelopes belong to the instrument, not to a sample layer }
+          if tgt = ins then
+          begin
           if (volType and 1) <> 0 then
           begin
             env := ins.VolEnv;
@@ -770,12 +800,18 @@ begin
             else env.SustainPoint := -1;
             ins.PanEnv := env;
           end;
+          end;
 
           firstSampleForInstr := False;
         end;
 
         ofs := ofs + Integer(smp[k].LengthBytes);
       end;
+
+      { keymap: note n+1 plays sample keymap[n] }
+      for k := 0 to 95 do
+        if (numSamples > 1) and (keymap[k] < numSamples) then
+          ins.SetKeyMap(k + 1, layerIdx[keymap[k]]);
 
       if firstSampleForInstr and (numSamples = 0) then
         ; { instrument with no samples: leave it empty }

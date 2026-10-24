@@ -57,6 +57,10 @@ procedure RenderWarp(const AIn: TAudioPlanar; AChannels, AFrames, ASampleRate: I
 
 implementation
 
+
+uses
+  UDAW.DSP.MathTables;
+
 procedure NormalizeWarpMarkers(var AMarkers: TWarpMarkers);
 var
   i, n: Integer;
@@ -145,7 +149,7 @@ begin
     SetLength(im, bins);
     SetLength(prev, bins);
     SetLength(win, N);
-    for i := 0 to N - 1 do win[i] := 0.5 - 0.5 * Cos(2.0 * Pi * i / N);
+    for i := 0 to N - 1 do win[i] := 0.5 - 0.5 * FastCos(2.0 * Pi * i / N);
     frames := (Length(AMono) - N) div HOP;
     SetLength(flux, frames);
     for f := 0 to frames - 1 do
