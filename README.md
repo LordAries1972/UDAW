@@ -8,6 +8,18 @@
 
 ---
 
+## Just want to use UDAW? Download a release, not the repository
+
+> **If you only want to run the program, do not download or clone this repository.** The repository is the source code for people who want to build or change UDAW, and it contains no ready-to-run program.
+>
+> 1. Open the **[Releases page](https://github.com/LordAries1972/UDAW/releases)**.
+> 2. Download the release file for your platform (today that is the **Windows** `.zip`).
+> 3. Unzip it to a folder you can write to and run `UDAW.exe`.
+>
+> See [Installing and getting started](#installing-and-getting-started) for first-run steps. Only continue to [Contributing](#contributing--building-udaw-from-source) if you want to work on the code.
+
+---
+
 ## Contents
 
 1. [What UDAW is](#what-udaw-is)
@@ -18,7 +30,8 @@
 6. [System Requirements](#system-requirements)
 7. [Installing and getting started](#installing-and-getting-started)
 8. [Help system](#help-system)
-9. [License, EULA and your responsibilities](#license-eula-and-your-responsibilities)
+9. [Contributing – building UDAW from source](#contributing--building-udaw-from-source)
+10. [License, EULA and your responsibilities](#license-eula-and-your-responsibilities)
 
 ---
 
@@ -265,6 +278,176 @@ Everything is built into the **Help** menu:
 - **UDAW Help Centre** – full user guide.
 - **License and EULA (Read the Agreement)** – the full license text, shown in the same style as the Help Centre.
 - **About Ultimanium UDAW** – version information.
+
+---
+
+## Contributing – building UDAW from source
+
+Contributions are welcome. This section lists everything you need to get the code compiling, running and tested. Read it top to bottom the first time; the [checklist](#quick-start-checklist) at the end is the short version.
+
+Before you start, read the [License](LICENSE.md). It restricts commercial distribution of UDAW and of anything derived from it, and by contributing you agree your work is covered by it.
+
+### What you can build today
+
+| Target | Toolchain | Status |
+| --- | --- | --- |
+| **Windows 64-bit** (`UDAW.exe`, `UDAWUpdater.exe`) | Embarcadero Delphi 12 | **The supported, tested build. Use this.** |
+| Linux / macOS | Lazarus + Free Pascal (`udaw.lpi`, `scripts/build-linux.sh`, `scripts/build-macos.sh`) | Project files exist, but these ports are **not released and not kept in step** with the Windows build. Expect them not to compile yet. Do not rely on them, and please ask on Discord before investing time here. |
+
+All contributor instructions below are for the Windows build.
+
+### 1. Required software
+
+| Requirement | Details |
+| --- | --- |
+| **Windows** | Windows 10 or 11, 64-bit. The program and its tests only run on Windows. |
+| **Delphi 12** | Embarcadero **RAD Studio / Delphi 12 Athens (Studio 23.0)**. The Community Edition is enough to compile, but check Embarcadero's current Community licence terms for your use. Older Delphi versions will not work; the code relies on Delphi 12 language and library features. |
+| **Delphi components** | The **Windows 64-bit** compiler and platform. The **VCL** and its **Windows VCL styles** (the app ships 35 `.vsf` themes). The **Indy** components (`IndySystem`, `IndyProtocols`, `IndyCore`), which install with Delphi. Resource compiler (`brcc32`), included with Delphi. |
+| **Git** | To clone, branch and submit changes. |
+| **PowerShell** | Windows PowerShell 5.1 (already on Windows) or PowerShell 7 to run the build and test scripts. |
+| **Python 3.14 or newer** (optional) | Only if you work on Python plug-ins or run the helper scripts in `scripts/` that are written in Python. See [Installing Python](#installing-python). |
+| **A working audio output device** | Needed to run the program and to hear what you are changing. The tests do not need one. |
+
+You do **not** need any third-party audio, DSP, codec or GUI package, and you must not add one (see [Coding rules](#4-coding-rules-the-short-version)). Everything UDAW needs, apart from the items under "Bundled third-party code" below, is in this repository or ships with Delphi.
+
+### 2. Getting the source and what is in it
+
+```
+git clone <the repository URL>
+cd UDAW
+```
+
+| Folder / file | Purpose |
+| --- | --- |
+| `UDAW.dpr`, `UDAW.dproj` | The main application project (Delphi) |
+| `UDAWUpdater.dpr` | The small helper program that applies downloaded updates |
+| `src/` | All application source, split by subsystem: `common`, `audio`, `codecs`, `midi`, `timeline`, `project`, `recording`, `mixer`, `tracker`, `sequencer`, `synth`, `composer`, `ai`, `voice`, `video`, `browser`, `input`, `web`, `application`, `ui` |
+| `tests/` | The regression test suite (`UDAW.Tests.dpr` and the `Tests.*.pas` units) |
+| `scripts/` | Build, clean, test and packaging scripts |
+| `resources/` | The version resource (`UDAW.rc`) and the VCL style files |
+| `Plugins/` | Example and bundled Python plug-ins |
+| `ThirdParty/` | Bundled third-party code (see below) |
+| `docs/` | Design notes per subsystem, and the **[coding rules](docs/CodingRules.md)** |
+| `about-udaw.dat` | The built-in Help Centre page |
+
+**Bundled third-party code.** These are already in `ThirdParty/`; you do not install them:
+
+| Folder | What it is | Why it is there |
+| --- | --- | --- |
+| `ThirdParty/TaurusTLS` | The TaurusTLS TLS layer for Indy | Secure connections for the AI services and update checks |
+| `ThirdParty/OpenSSL/Win64` | The 64-bit OpenSSL runtime DLLs (`libssl`, `libcrypto`) | Loaded at run time by TaurusTLS. They must sit beside `UDAW.exe` |
+| `ThirdParty/dglOpenGL` | An OpenGL header translation | Used by the hardware-accelerated interface controls |
+
+Each carries its own licence file; keep those intact.
+
+### 3. Building
+
+Run everything from the repository root. **Use the scripts rather than the IDE for your first build**, because they define the search paths, conditionals and output folders exactly as the project expects.
+
+```powershell
+# Everyday debug build (recommended for contributors)
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Config Debug
+
+# Full clean rebuild: use this if a change does not seem to "take"
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Config Debug -Clean
+
+# List every option and use case
+powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Help
+```
+
+**What the script does:**
+
+1. Finds Delphi 12 using the `BDS` environment variable, else the default `Program Files\Embarcadero\Studio\23.0` location. If you installed Delphi somewhere else, set it first:
+   `$env:BDS = 'D:\Embarcadero\Studio\23.0'`
+2. Raises the build number in `resources\UDAW.rc` and `src\common\UDAW.Version.pas`. If the compile fails it puts both files back, so a failed build does not change your working tree. **If the build succeeds, those two files show up as modified in `git status`. Do not include that build-number change in your pull request** (see [Submitting changes](#7-submitting-changes)).
+3. Compiles the version resource, then `UDAW.exe` and `UDAWUpdater.exe` with the 64-bit compiler (`dcc64`).
+4. Copies the VCL styles, the icon, the licence files and the Help page into the output folder.
+
+**Output** goes to `build\bin` (compiled units to `build\dcu`). Both are git-ignored.
+
+**Important points:**
+
+- **Always build Debug unless a maintainer has asked for a Release build.** The Release configuration additionally packages an over-the-air update and writes it to a maintainer-only location; it is not intended for contributor machines and will fail or do nothing useful without that set-up. A Debug build is unoptimised and has `DEBUG` defined, which is what you want for development.
+- **OpenSSL DLLs.** The IDE project copies `ThirdParty\OpenSSL\Win64\*.dll` beside the executable after a build. If you build with the script into your own `-OutputDir`, or the DLLs are missing, copy them there by hand. Without them the AI features, online licence checks and update checks cannot make secure connections, but the rest of UDAW still runs.
+- **Runtime files.** The scripts point UDAW's configuration, logs, cache and scratch files at `.udaw-home` inside the repository (git-ignored) by setting `UDAW_HOME`, so test runs do not touch your real UDAW settings. Set `UDAW_HOME` yourself to move it elsewhere.
+- **Stale builds.** The compiler caches compiled units. If you change a shared include or a unit's interface and see odd link or access violations, run with `-Clean` or `scripts\clean.ps1` before assuming your code is wrong.
+
+**Building in the IDE.** Open `UDAW.dproj`, choose **Win64** and the **Debug** configuration, then **Project → Build**. The project is a VCL application. The main window and all panels are real design-time forms (`.dfm`), so you can open and edit them in the Form Designer. If the IDE reports missing units, check **Tools → Options → Language → Delphi → Library** is not overriding the project's own search path (the project already lists every `src\` subfolder and the `ThirdParty` folders). Do not install the TaurusTLS design-time packages from the bundled copy; the project compiles the source directly.
+
+**Command-line compiler settings**, for anyone driving the build from another tool: 64-bit target (`dcc64`), unit scopes `System;System.Win;Winapi;Vcl;Vcl.Imaging`, conditional `DEBUG` or `RELEASE`, include path `src\common`, resource path `src\ui`, and every `src\` subfolder plus `ThirdParty\TaurusTLS\Source` and `ThirdParty\dglOpenGL` on the unit path. `scripts\build.ps1` is the reference.
+
+**Windows-only parts of the code.** The Windows build uses native Windows interfaces for audio (WASAPI and DirectSound), video and media playback (including DirectShow), the VCL, and secure storage. None needs a separate SDK: the declarations are in the repository or in Delphi's own `Winapi.*` units.
+
+### 4. Coding rules (the short version)
+
+The full list is **[docs/CodingRules.md](docs/CodingRules.md)**; read it before writing code. The points that most often cause a change to be rejected:
+
+1. **No UI code touches audio processing,** and **nothing on the real-time audio thread** may allocate unboundedly, do file or network I/O, or wait on a lock held by UI or AI code.
+2. **No third-party audio, DSP, codec or GUI libraries.** Native operating-system APIs are fine; new package dependencies are not.
+3. **Design-time forms only.** New windows and panels must be real forms or frames with controls placed in the designer. Do not build static interfaces by calling `TControl.Create` at run time. Dynamic creation is acceptable only for genuinely data-driven repeaters, such as one strip per mixer channel.
+4. **No placeholders.** No `TODO` implementations, empty event handlers, fake progress bars, fake meters or unimplemented menu items. If a feature is not finished, it is not in the menu.
+5. **All project changes go through the command interfaces,** so that they take part in undo and redo.
+6. **Validate everything read from disk or the network** before allocating memory from it; never trust sizes from a file. Project files are versioned; never read raw object memory from disk.
+7. **Secrets** are kept only in OS secure storage. Never put keys, tokens or passwords in source, project files, logs or issue reports.
+8. **Raise `EUDAWError`** with a `TUDAWErrorCode` for expected failures instead of a bare `Exception.Create`, and never silently swallow errors.
+9. **Long operations** go through the job system, must honour cancellation, and must show **real** progress in the status bar. Never fake it.
+10. **Platform-specific code** stays behind the platform abstraction units. Shared units in `src\common` should stay free of Windows-only calls where practical.
+11. **Zero warnings and zero hints.** The build must be clean. Fix the ones your change introduces, and fix ones you touch in files you are already editing.
+12. **Keep the three copies of a GL control in step.** Where a user-interface change involves the hardware-accelerated controls, mirror it everywhere the control is defined (see the existing units for the pattern) rather than changing one place.
+
+### 5. Testing
+
+Every file-format reader or writer, engine feature and bug fix needs a regression test. Tests live in `tests\`, one `Tests.<Subject>.pas` unit per area, and are registered in `tests\UDAW.Tests.dpr`.
+
+```powershell
+# Builds tests\UDAW.Tests.dpr and runs the whole suite.
+# Exit code is 0 only if every test passes.
+powershell -ExecutionPolicy Bypass -File scripts\test-windows.ps1
+powershell -ExecutionPolicy Bypass -File scripts\test-windows.ps1 -Clean
+```
+
+- The test build turns range checking, overflow checking and warnings **on** (`$R+ $Q+ $W+`) and optimisation off, so it catches problems the normal build hides. Run it before every pull request.
+- The suite is a console program and needs no audio device. It copies the OpenSSL DLLs next to the test executable itself.
+- Tests may create temporary files; they do so under `UDAW_HOME` (`.udaw-home`), never in system folders.
+- If you add a new test unit, add it to the `uses` list of `tests\UDAW.Tests.dpr` and give the tests deterministic input. Do not depend on your own music files, network access or an API key.
+- A change is not finished until the **full suite passes**, not just the tests for the area you touched.
+
+### 6. Common problems
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| "Delphi 12 (Studio 23.0) not found" | Delphi is not installed in the default place. Set `$env:BDS` to the install root (the folder that contains `bin\dcc64.exe`). |
+| `dcc64` cannot find a unit named `UDAW.something` or `IdSomething` | You are compiling outside the script, so the search paths are missing. Use `scripts\build.ps1`, or the IDE with `UDAW.dproj`. A missing `Id…` unit means the Indy components were not installed with Delphi. |
+| "File not found: dglOpenGL" or TaurusTLS units | The `ThirdParty` folder is incomplete. Re-clone, or restore it. These are tracked in the repository. |
+| Build succeeds but AI, update or licence features fail to connect | The OpenSSL DLLs are not beside `UDAW.exe`. Copy `ThirdParty\OpenSSL\Win64\*.dll` there. |
+| Strange crashes or behaviour after changing a shared unit | A stale compiled unit. Rebuild with `-Clean`. |
+| Python plug-ins report that Python was not found | Install Python 3.14 or newer and tick **Add python.exe to PATH**, then restart UDAW. See [Installing Python](#installing-python). |
+| Release build fails near the end (packaging) | Expected on a contributor machine. Use `-Config Debug`. |
+| Your settings or recent projects are different from normal | The scripts use `.udaw-home`. Unset `UDAW_HOME` to use your normal profile. |
+
+### 7. Submitting changes
+
+1. **Talk first for anything large.** Open the topic on [Discord](#community-support-and-bug-reports) before starting a new subsystem, a new file format, a new third-party dependency or a big refactor, so effort is not wasted.
+2. Create a branch from `main`. Keep each pull request to one purpose.
+3. Match the surrounding code: naming, layout, comment density and idiom. Do not reformat files you are not changing.
+4. Build with **zero warnings and zero hints**, and run the **whole test suite**.
+5. Add or update tests for what you changed.
+6. **Update the documentation that users read.** A user-visible change must also be reflected in the built-in Help Centre page (`about-udaw.dat`) and, if it adds a feature, in the "What UDAW can do today" list above. Keep these pages free of implementation detail: describe what a feature does for the user, not how it is built.
+7. **Do not commit build output or generated files:** `build\`, `.udaw-home\`, `*.dcu`, `*.exe`, `*.zip`, the IDE's `.identcache` and local settings files, or the version bump the build script makes to `resources\UDAW.rc` and `src\common\UDAW.Version.pas`. Run `git status` before committing and `git restore` those two files if the build changed them.
+8. **Never commit secrets,** such as API keys, tokens, signing keys, passwords or private certificates, even test ones.
+9. In the pull request, explain what changed and why, how you tested it, and anything you could not test (for example hardware you do not have).
+
+Reviewers check against the [coding rules](docs/CodingRules.md). A change is complete when it has: working implementation, user interface where needed, saving and loading where needed, error handling, cancellation for long work, tests, documentation, and a clean build.
+
+### Quick-start checklist
+
+- [ ] Windows 10/11 64-bit with **Delphi 12 (Studio 23.0)** installed, including the Win64 compiler and VCL.
+- [ ] Repository cloned with the `ThirdParty` folder intact.
+- [ ] `scripts\build.ps1 -Config Debug` completes with no warnings or hints.
+- [ ] `ThirdParty\OpenSSL\Win64\*.dll` sit beside `UDAW.exe` in `build\bin`.
+- [ ] `scripts\test-windows.ps1` finishes with exit code 0.
+- [ ] (Optional) Python 3.14 or newer installed, for Python plug-in work.
+- [ ] You have read [docs/CodingRules.md](docs/CodingRules.md).
 
 ---
 
