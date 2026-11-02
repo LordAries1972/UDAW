@@ -57,14 +57,13 @@ UDAW is free software and support is community-driven.
 > ### 💬 Discord
 > **Join our Discord channel to report problems, ask questions and share your music:**
 >
-> **`DISCORD INVITE LINK GOES HERE`**
+> **[Discord Invite Link](https://discord.gg/ESFenhtz4K)**
 >
-> *(The maintainers must replace the line above with the real invite link before publishing this file – the License and the in-app help point users to this README for the link.)*
 
 When you report a problem please include:
 
 1. Your UDAW version (shown at the top of the Help Centre page and in **Help → About**).
-2. Your version of Windows.
+2. Your version you are using and Platform (ie. Windows).
 3. Exactly what you did, step by step.
 4. What you expected to happen, and what happened instead (copy any error text word for word).
 5. If UDAW showed its **crash window**, press **Copy** and paste the report.
