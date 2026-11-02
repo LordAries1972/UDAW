@@ -143,7 +143,7 @@ begin
 
   if FProvider = nil then
   begin
-    FLastError := 'no AI provider configured';
+    FLastError := 'no AI/SI provider configured';
     Exit;
   end;
 
@@ -153,7 +153,7 @@ begin
   if revisedSpec = nil then
   begin
     FLastError := FProvider.GetLastError;
-    if FLastError = '' then FLastError := 'the AI did not return a usable revision';
+    if FLastError = '' then FLastError := 'the AI/SI did not return a usable revision';
     Exit;
   end;
 
@@ -168,7 +168,7 @@ begin
     does that. TSetSongSpecCommand adopts revisedSpec/revisedLyrics and
     frees them on destruction whether or not it was ever performed. }
   FPendingCommand := TSetSongSpecCommand.Create(FDoc, revisedSpec, revisedLyrics,
-    Format('AI revision: %s', [AInstruction]));
+    Format('AI/SI revision: %s', [AInstruction]));
 
   Result := True;
 end;

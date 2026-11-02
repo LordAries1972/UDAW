@@ -198,6 +198,7 @@ type
   private
     FData: TBytes;
     FLabel: string;
+    FSampleFolder: string;
   protected
     function Mutate: Boolean; override;
     function ResetsMixer: Boolean; override;
@@ -685,10 +686,12 @@ begin
   inherited Create(ADoc);
   FData := Copy(AData);
   FLabel := ALabel;
+  FSampleFolder := MptmSampleFolder;   // external samples resolve beside the module on redo too
 end;
 
 function TImportMptmCommand.Mutate: Boolean;
 begin
+  MptmSetSampleFolder(FSampleFolder);
   FDoc.ReplaceTracker(MptmToModule(FData));   // raises EUDAWError on a bad file
   Result := True;
 end;

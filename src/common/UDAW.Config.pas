@@ -97,6 +97,7 @@ const
   CFG_PATH_PLUGINS     = 'plugins_dir';        // VST/VST3 plug-in folder
   CFG_PATH_SOUNDFONTS  = 'soundfonts_dir';     // SoundFont (.sf2/.sfz) folder
   CFG_PATH_VOCALS      = 'vocals_dir';         // vocal recording folder
+  CFG_PATH_PYPLUGINS   = 'python_plugins_dir'; // folder of Python plug-ins (empty = plugins next to UDAW.exe)
   CFG_PATH_SCRIPTS     = 'scripts_dir';        // default folder for Python scripts (empty = Scripts under the config folder)
 
 implementation

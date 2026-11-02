@@ -2,6 +2,7 @@ object frmVST2Editor: TfrmVST2Editor
   Left = 0
   Top = 0
   Caption = 'VST Plugin'
+  BorderIcons = [biSystemMenu]
   ClientHeight = 440
   ClientWidth = 560
   Color = clBtnFace

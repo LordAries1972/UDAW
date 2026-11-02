@@ -45,7 +45,7 @@
         display: flex;
         align-items: flex-start;
         gap: 28px;
-        max-width: 1280px;
+        max-width: 1500px;
         margin: 0 auto;
         padding: 28px 20px 64px 20px;
     }
@@ -186,6 +186,14 @@
         white-space: pre;
     }
 
+
+    /* nothing may be wider than its container: long words, code and images wrap or scroll inside the page */
+    .udaw-main { overflow-wrap: break-word; }
+    .udaw-main img, .udaw-main video, .udaw-main iframe { max-width: 100%; height: auto; }
+    table.udaw-table td, table.udaw-table th { overflow-wrap: anywhere; word-break: break-word; }
+    table.udaw-table code, .udaw-main p code, .udaw-main li code { overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+    .udaw-code { max-width: 100%; box-sizing: border-box; }
+    .udaw-note { overflow-wrap: break-word; }
     table.udaw-table { width: 100%; max-width: 100%; border-collapse: collapse; margin: 12px 0; table-layout: fixed; }
     table.udaw-table th, table.udaw-table td {
         text-align: left;
@@ -258,6 +266,7 @@
         margin-bottom: 8px;
         border-bottom: 1px solid #2C3341;
         display: flex;
+        flex-wrap: wrap;
         gap: 8px;
         align-items: center;
     }
@@ -283,6 +292,22 @@
     }
     .udaw-search button:hover { background: #262C38; color: #60A5FA; }
     .udaw-search .udaw-count { color: #7A7F87; font-size: 12.5px; min-width: 54px; text-align: right; }
+
+    /* Google Translate widget in the header bar: dark, compact, and without Google's top banner */
+    .udaw-translate { margin-left: auto; display: flex; align-items: center; gap: 6px; min-height: 30px; }
+    .udaw-translate .udaw-translate-label { color: #7A7F87; font-size: 12.5px; white-space: nowrap; }
+    .udaw-translate .goog-te-gadget { font-size: 0; color: transparent; }
+    .udaw-translate .goog-te-gadget span { display: none; }
+    .udaw-translate .goog-te-gadget .goog-te-combo {
+        display: inline-block; margin: 0; padding: 5px 8px; min-width: 150px;
+        background: #1B2029; color: #E5E7EB; border: 1px solid #2C3341; border-radius: 6px;
+        font-family: inherit; font-size: 13px; cursor: pointer;
+    }
+    .udaw-translate .goog-te-gadget .goog-te-combo:focus { outline: none; border-color: #3B82F6; }
+    .goog-te-banner-frame, iframe.goog-te-banner-frame, .skiptranslate > iframe { display: none !important; }
+    body { top: 0 !important; }
+    .goog-tooltip, .goog-tooltip:hover { display: none !important; }
+    .goog-text-highlight { background: none !important; box-shadow: none !important; }
     mark.udaw-hit { background: #3B3410; color: #FDE68A; border-radius: 2px; }
     mark.udaw-hit.udaw-current { background: #B45309; color: #fff; }
 
@@ -299,10 +324,15 @@
         <h3>UDAW Help</h3>
         <ul>
             <li><a href="#overview">1. Overview</a></li>
-            <li><a href="#start">2. Getting Started</a></li>
+            <li><a href="#start">2. Getting Started</a>
+                <ul class="udaw-nav-sub">
+                    <li><a href="#welcome">The Welcome screen</a></li>
+                    <li><a href="#start-output">Choosing where sound comes out</a></li>
+                </ul>
+            </li>
             <li><a href="#workspace">3. The Workspace</a>
                 <ul class="udaw-nav-sub">
-                    <li><a href="#tab-platform">Platform &amp; Devices</a></li>
+                    <li><a href="#tab-platform">Audio devices &amp; diagnostics</a></li>
                     <li><a href="#tab-dsp">DSP</a></li>
                     <li><a href="#tab-graph">Graph</a></li>
                     <li><a href="#tab-project">Project</a></li>
@@ -314,16 +344,26 @@
                     <li><a href="#tab-mp3">MP3</a></li>
                     <li><a href="#tab-mp4">MP4</a></li>
                     <li><a href="#tab-midi">MIDI</a></li>
-                    <li><a href="#tab-ai">AI Assistant</a></li>
+                    <li><a href="#tab-foley">Foley Sampler</a></li>
+                    <li><a href="#tab-ai">AI/SI Assistant</a></li>
                     <li><a href="#tab-settings">Settings</a></li>
                 </ul>
             </li>
             <li><a href="#project-doc">4. Projects, Undo &amp; Recovery</a></li>
-            <li><a href="#timeline">5. Timeline &amp; Non-Destructive Editing</a></li>
+            <li><a href="#timeline">5. Timeline &amp; Non-Destructive Editing</a>
+                <ul class="udaw-nav-sub">
+                    <li><a href="#timeline-transport">Transport buttons &amp; readouts</a></li>
+                    <li><a href="#timeline-modes">Modes</a></li>
+                    <li><a href="#timeline-foley">Foley Sampler</a></li>
+                    <li><a href="#timeline-video">Video: import, effects &amp; export</a></li>
+                </ul>
+            </li>
             <li><a href="#recording">6. Recording</a></li>
             <li><a href="#mixer">7. Mixer &amp; Routing</a>
                 <ul class="udaw-nav-sub">
                     <li><a href="#mixer-plugins">VST2 Plugin Hosting</a></li>
+                    <li><a href="#mixer-plugin-scan">Scanning for Plug-ins</a></li>
+                    <li><a href="#python-plugins">Python Plug-ins (write your own)</a></li>
                     <li><a href="#mixer-automation">Automation Lanes</a></li>
                     <li><a href="#mixer-editing">Strip Reordering &amp; Editing</a></li>
                     <li><a href="#mixer-metering">Metering</a></li>
@@ -350,10 +390,10 @@
                     <li><a href="#midi-devices">Recording from a Real MIDI Device</a></li>
                 </ul>
             </li>
-            <li><a href="#ai">13. AI Assistant &amp; Voice Control</a>
+            <li><a href="#ai">13. AI/SI Assistant &amp; Voice Control</a>
                 <ul class="udaw-nav-sub">
                     <li><a href="#ai-keys">Getting API Keys</a></li>
-                    <li><a href="#ai-cost">AI Cost: Plans vs API Keys</a></li>
+                    <li><a href="#ai-cost">AI/SI Cost: Plans vs API Keys</a></li>
                     <li><a href="#ai-compose">Samples and Loops Before MIDI</a></li>
                     <li><a href="#ai-chat">Chat &amp; Tool Commands</a></li>
                     <li><a href="#ai-mixmaster">Mixing &amp; Mastering Assistants</a></li>
@@ -362,14 +402,24 @@
                     <li><a href="#ai-voice">Voice Commands</a></li>
                     <li><a href="#ai-luma">Video &amp; Image Generation (Luma)</a></li>
                     <li><a href="#ai-mcp">Model Context Protocol (MCP)</a></li>
-                    <li><a href="#ai-rights">Using AI: Copyright &amp; AI-Generated Vocals</a></li>
+                    <li><a href="#ai-rights">Using AI/SI: Copyright &amp; AI/SI-Generated Vocals</a></li>
                 </ul>
             </li>
-            <li><a href="#settings">14. Settings &amp; Themes</a></li>
+            <li><a href="#settings">14. Settings &amp; Themes</a>
+                <ul class="udaw-nav-sub">
+                    <li><a href="#audio-output">Audio output, backend &amp; exclusive mode</a></li>
+                    <li><a href="#system-sounds">Warning &amp; system sounds</a></li>
+                </ul>
+            </li>
             <li><a href="#platform-support">15. Platform Support</a></li>
             <li><a href="#faq">16. FAQ</a></li>
-            <li><a href="#report-bugs">17. Reporting Problems &amp; Bugs</a></li>
+            <li><a href="#report-bugs">17. Reporting Problems &amp; Bugs</a>
+                <ul class="udaw-nav-sub">
+                    <li><a href="#crash-window">If UDAW shows the crash window</a></li>
+                </ul>
+            </li>
             <li><a href="#about">18. About &amp; Version</a></li>
+            <li><a href="#license">19. License &amp; EULA</a></li>
         </ul>
     </aside>
 
@@ -380,15 +430,19 @@
             <button id="udaw-prev" type="button" title="Previous match">&uarr;</button>
             <button id="udaw-next" type="button" title="Next match">&darr;</button>
             <span class="udaw-count" id="udaw-count"></span>
+            <div class="udaw-translate" id="udaw-translate" title="Translate this help into another language" style="display:none">
+                <span class="udaw-translate-label">Language:</span>
+                <div id="google_translate_element"></div>
+            </div>
         </div>
 
         <header class="udaw-hero">
-            <span class="udaw-mark">AI-Assisted Digital Audio Workstation</span>
+            <span class="udaw-mark">AI/SI-Assisted Digital Audio Workstation</span>
             <h1>UDAW Help Centre</h1>
-            <p>Recording &middot; Timeline &middot; Mixing &middot; DSP &middot; Tracker &middot; MIDI &middot; AI Composition</p>
+            <p>Recording &middot; Timeline &middot; Mixing &middot; DSP &middot; Tracker &middot; MIDI &middot; AI/SI Composition</p>
             <p class="udaw-build-info">
-                Version <!--UDAW_VERSION-->1.0.590<!--/UDAW_VERSION--> &middot;
-                Built <!--UDAW_BUILDDATE-->24/10/2026<!--/UDAW_BUILDDATE-->
+                Version <!--UDAW_VERSION-->1.0.659<!--/UDAW_VERSION--> &middot;
+                Built <!--UDAW_BUILDDATE-->01/11/2026<!--/UDAW_BUILDDATE-->
             </p>
         </header>
 
@@ -413,7 +467,7 @@
                 <li><strong>Linear multitrack recording and editing</strong> (the <a href="#tab-timeline">Timeline</a>) &ndash; use this for recorded vocals/instruments, arranging audio clips, and comping takes, the way a conventional DAW works.</li>
                 <li><strong>A native tracker</strong> (the <a href="#tab-tracker">Tracker</a>) &ndash; use this for chiptune/tracker-style composition: patterns of notes typed directly into a grid, classic MOD/XM/IT effect commands, and sample-based instruments.</li>
                 <li><strong>MIDI sequencing</strong> (the <a href="#tab-midi">Piano Roll</a>) &ndash; use this to compose with an internal polyphonic synth by drawing notes, or to import a Standard MIDI File and hear it immediately with no external instrument needed.</li>
-                <li><strong>An AI assistant</strong> (the <a href="#tab-ai">AI tab</a>) &ndash; use this to ask questions about your project, have the assistant make mix/mastering moves for you (with Preview/Compare/Apply/Reject safety rails), generate new musical material via Suno, control UDAW by voice, and - via <a href="#ai-mcp">MCP</a> - connect external tool servers into the same conversation.</li>
+                <li><strong>An AI/SI assistant</strong> (the <a href="#tab-ai">AI/SI tab</a>) &ndash; use this to ask questions about your project, have the assistant make mix/mastering moves for you (with Preview/Compare/Apply/Reject safety rails), generate new musical material via Suno, control UDAW by voice, and - via <a href="#ai-mcp">MCP</a> - connect external tool servers into the same conversation.</li>
             </ul>
             <p>
                 A practical example of mixing workflows: build a drum-and-bass pattern in the Tracker,
@@ -423,7 +477,7 @@
             </p>
             <div class="udaw-note">
                 UDAW brings together a complete audio engine, DSP, project format, WAV codec, timeline,
-                recording, mixer, effects, tracker, MOD/XM/MPTM import-export, MP3, MP4, MIDI, AI
+                recording, mixer, effects, tracker, MOD/XM/MPTM import-export, MP3, MP4, MIDI, AI/SI
                 providers and MCP. See
                 <a href="#about">About &amp; Version</a> for the current build's feature set.
             </div>
@@ -439,16 +493,15 @@
             <h3>First run</h3>
             <p>
                 On first launch, a startup screen identifies UDAW, its build version and author while a
-                determinate progress bar reports the modules being loaded. UDAW then opens with an empty
-                project. Use the <a href="#tab-platform">Platform</a>
-                tab to confirm your audio device and sample rate, then use <strong>Project &rarr; New</strong>
+                determinate progress bar reports the modules being loaded. UDAW then opens on the Timeline - with an empty project, or the one you last used - and, after a short pause, shows the <a href="#welcome">Welcome screen</a>. Use the <strong>Settings</strong> page
+                to confirm your audio device and sample rate, then use <strong>Project &rarr; New</strong>
                 (or just start recording/importing) to begin working. A project is a single file that
                 embeds the graph, mixer, timeline, tracker module and MIDI sequence together, so there
                 is nothing else to configure before you can record or import audio.
             </p>
             <h3>Choosing an audio device</h3>
             <p>
-                The <a href="#tab-platform">Platform</a> tab lists available output/input devices. On
+                The Output and Input device lists on <strong>Settings &gt; General</strong> show the available output/input devices. On
                 Windows, UDAW talks to the hardware directly for low-latency playback and
                 recording; if no suitable device is found it falls back to a portable software audio
                 backend so the application still runs. Pick the smallest buffer size your machine can
@@ -461,9 +514,52 @@
                 treats as the default recording device, pick it explicitly from the <strong>Input
                 device</strong> list on the <a href="#tab-settings">Settings</a> tab's General page (next
                 to Input channels). The choice is saved with your other audio settings and re-selected
-                automatically the next time UDAW starts; like every other change on that page, click
-                <strong>Reopen Audio</strong> afterwards (or restart UDAW) so the running audio engine
-                actually switches to it.
+                automatically the next time UDAW starts. Every setting on that page is saved and applied
+                the moment you change it, so there is nothing to confirm; if something is playing at that
+                instant, the change takes effect the next time the audio stream opens.
+            </p>
+            <h3 id="welcome">The Welcome screen</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Start work in one click: a new or recent project, the help, or straight into the editor you want.</p>
+                <p><b>Why</b> Most sessions begin the same few ways - carry on with yesterday's song, start a new one, or jump into one tool (the tracker, the drum pads) to try an idea. The Welcome screen puts all of those in one place so you never have to hunt through menus first.</p>
+            </div>
+            <p>
+                A short time after UDAW's main window appears (long enough for the Timeline to finish drawing
+                behind it), the Welcome screen opens over it. It is a round-cornered window with a large
+                title; drag the title area to move it. Nothing happens until you choose, and nothing is
+                changed by closing it.
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><td>START &ndash; New Project</td><td>Begins a new, empty project. <em>Why:</em> a clean slate for a new song. If the open project has unsaved changes you are asked first.</td></tr>
+                <tr><td>START &ndash; Open Project...</td><td>Shows the Open dialog for a saved project file. <em>Why:</em> carry on with work that is not in the recent list.</td></tr>
+                <tr><td>RECENT PROJECTS</td><td>The last five projects you opened or saved, newest first, shown by file name only (hover for the full path). <em>Why:</em> the quickest way back into what you were doing. A project that was open when UDAW last closed unexpectedly is recovered from its newest autosave automatically.</td></tr>
+                <tr><td>LEARN &ndash; Help</td><td>Opens this Help Centre.</td></tr>
+                <tr><td>LEARN &ndash; About UDAW</td><td>Version, publisher and credits.</td></tr>
+                <tr><td>FUNCTIONS &ndash; Tracker</td><td>Opens the <a href="#tracker">Tracker</a> full-page. <em>Why:</em> type notes into a pattern grid for chiptune/tracker music, or to load a MOD / XM / IT module.</td></tr>
+                <tr><td>FUNCTIONS &ndash; Foley</td><td>Opens the <a href="#timeline-foley">Foley Sampler</a>. <em>Why:</em> play sound effects live against a picture or a song and have them placed on the Timeline for you.</td></tr>
+                <tr><td>FUNCTIONS &ndash; Drum Pad (Pattern)</td><td>Opens the <a href="#timeline-patterns">Pattern editor</a>, the step sequencer. <em>Why:</em> build a drum or rhythm loop by switching steps on, without recording anything.</td></tr>
+                <tr><td>FUNCTIONS &ndash; Piano Roll</td><td>Opens the <a href="#midi">Piano Roll</a>. <em>Why:</em> compose melodies, chords and bass lines by drawing notes, played by UDAW's built-in synth.</td></tr>
+                <tr><td>FUNCTIONS &ndash; Instrument</td><td>Opens the drum machine (the <b>Inst</b> mode): sample pads on every MIDI note. <em>Why:</em> load your own drum and percussion sounds onto pads and play or edit them.</td></tr>
+                <tr><td>FUNCTIONS &ndash; Open AI/SI</td><td>Opens the <a href="#tab-ai">AI/SI tab</a>. <em>Why:</em> go straight to the chat, composition, mixing and mastering help and music generation.</td></tr>
+                <tr><td>SETTINGS &ndash; Open Settings</td><td>Opens the <a href="#settings">Settings</a> tab. <em>Why:</em> choose your audio output and input devices, sample rate and buffer, folders and theme before you start, without closing the Welcome screen first and hunting for the tab.</td></tr>
+                <tr><td>Show on Startup</td><td>Untick to stop the Welcome screen appearing when UDAW starts. It is the same setting as <em>Show the Project Startup screen on startup</em> on the Settings page, so changing either changes both.</td></tr>
+            </table>
+            <p>
+                Press <span class="kbd">Esc</span> or click the round close icon at the top right to dismiss
+                the screen and go straight to the Timeline. The FUNCTIONS buttons are shortcuts to the same
+                editors the mode bar under the Timeline transport gives you (see
+                <a href="#timeline-modes">Modes</a>); you can switch between them at any time.
+            </p>
+
+            <h3 id="start-output">Choosing where sound comes out</h3>
+            <p>
+                Everything UDAW plays - the Timeline, the WAV editor, the Tracker, the Piano Roll and drum
+                machine, the Foley pads, previews, and even the warning sounds - leaves through one
+                <strong>Output device</strong> that you choose on the <a href="#tab-settings">Settings</a>
+                tab's General page (next to Output channels). Leave it on <em>Default (system)</em> to follow
+                whatever Windows uses, or pick a specific interface or speakers. The <strong>Out</strong> entry in the status box at the right of the menu bar always shows the
+                device UDAW is really using right now. Full details, including the audio backend and
+                exclusive mode, are in <a href="#audio-output">Settings &amp; Themes</a>.
             </p>
             <h3>Opening vs. importing</h3>
             <p>
@@ -484,7 +580,7 @@
             </p>
             <h4>A first project, start to finish</h4>
             <ol>
-                <li>Open the <a href="#tab-platform">Platform</a> tab and confirm your audio device.</li>
+                <li>Open <strong>Settings</strong> and confirm your <a href="#audio-output">Output device</a> (and Input device if you will record).</li>
                 <li>Go to the <a href="#tab-timeline">Timeline</a> tab and add an audio track, or the
                     <a href="#tab-tracker">Tracker</a> tab to start a pattern, or import an existing
                     WAV/MP3/MOD/MIDI file to build on top of.</li>
@@ -501,85 +597,123 @@
         <section id="workspace">
             <h2>3. The Workspace</h2>
             <div class="udaw-purpose">
-                <p><b>Purpose</b> A one-line map of every tab, with a pointer to the full section for each.</p>
-                <p><b>Why</b> UDAW's tabs are real design-time forms, not a dynamically-built UI - each one is a dedicated workspace for one job, so knowing what lives where matters more than in a single-window DAW.</p>
+                <p><b>Purpose</b> A one-line map of where everything lives, with a pointer to the full section for each part.</p>
+                <p><b>Why</b> Each mode and page is a dedicated workspace for one job, so knowing what lives where gets you to the right tool faster.</p>
             </div>
             <p>
-                Not every project uses every tab &ndash; a purely tracker-based project may never touch
-                Recording or MIDI, and a purely linear recording project may never touch Tracker. Jump
-                straight to a tab's full section using the links below or the sidebar.
+                UDAW keeps almost everything on two main pages. The <strong>Timeline</strong> page is where you
+                make music: the lanes are always the starting point, and the <strong>mode bar</strong> under the
+                transport (Timeline, Piano, Score, Inst, Pattern, Mix, Tracker, Rec, AI/SI and Foley) turns the same
+                page into the piano roll, the mixer, the tracker and so on - or the <strong>Editor</strong>
+                switch docks one of them under the lanes so you can work on it while still seeing the
+                arrangement. The <strong>Settings</strong> page holds everything you configure once and then
+                forget: your audio devices, folders, look, keyboard shortcuts and the diagnostic pages.
+                Not every project uses every part &ndash; a purely tracker-based song may never touch Rec or
+                Piano. Jump straight to a section with the links below or the sidebar.
             </p>
 
-            <h3 id="tab-platform">Platform &amp; Devices</h3>
-            <p>Device selection, sample rate/buffer configuration, and low-level engine diagnostics. Start here on a new machine before recording anything - see <a href="#start">Getting Started</a>.</p>
+            <h3 id="tab-platform">Audio devices &amp; diagnostics</h3>
+            <p>
+                You choose your devices on <strong>Settings &gt; General</strong>: the <strong>Output device</strong>
+                everything plays through, the <strong>Input device</strong> you record from, the audio backend,
+                sample rate, buffer size and exclusive mode - all described in
+                <a href="#audio-output">Settings &amp; Themes</a>. The low-level engine diagnostics (device
+                list, stream statistics, drop-outs) are on <strong>Settings &gt; Diagnostics &gt; Audio</strong>.
+                <em>Why start here:</em> on a new machine, set the output and input once before recording
+                anything, so you know sound and microphone work.
+            </p>
 
             <h3 id="tab-dsp">DSP</h3>
             <p>
-                A workbench for the internal DSP building blocks &ndash; interpolation, filters, FFT,
-                resamplers, envelopes and level/loudness metering (including BS.1770 loudness). Use it to
-                audition a signal chain or check a track's loudness before you commit the same processing
-                on the <a href="#tab-mixer">Mixer</a>. Choose <em>Project mix (current timeline)</em> as the signal to run the filters, FFT and loudness meters against one second of your actual song instead of a test tone. See <a href="#dsp">DSP &amp; Effects</a>.
+                <strong>Settings &gt; Diagnostics &gt; DSP</strong> (and <strong>Advanced DSP</strong>) is a workbench
+                for the internal DSP building blocks &ndash; interpolation, filters, FFT, resamplers, envelopes and
+                level/loudness metering (including BS.1770 loudness). <em>Why:</em> audition a signal chain or check
+                a track's loudness before you commit the same processing on the <a href="#tab-mixer">Mixer</a>. Choose
+                <em>Project mix (current timeline)</em> as the signal to run the filters, FFT and loudness meters against one
+                second of your actual song instead of a test tone. See <a href="#dsp">DSP &amp; Effects</a>.
             </p>
 
             <h3 id="tab-graph">Graph</h3>
             <p>
-                The node-based audio graph editor. Effects, sources and utility nodes are wired
-                together here; the graph can be saved/loaded as its own versioned text format, and is
-                also embedded directly inside mixer insert slots. Use it to build a reusable custom
-                effect chain (e.g. a parallel-compression rig) once and drop it wherever you need it. See
+                <strong>Settings &gt; Diagnostics &gt; Graph</strong> is the node-based audio graph editor. Effects, sources
+                and utility nodes are wired together here; the graph can be saved/loaded as its own versioned text format,
+                and is also embedded directly inside mixer insert slots. <em>Why:</em> build a reusable custom effect chain
+                (for example a parallel-compression rig) once and drop it wherever you need it. See
                 <a href="#graph">Audio Graph</a>.
             </p>
 
             <h3 id="tab-project">Project</h3>
-            <p>Project-level metadata, undo/redo history, and autosave/crash-recovery status. See <a href="#project-doc">Projects, Undo &amp; Recovery</a>.</p>
+            <p>
+                <strong>Settings &gt; Project</strong> shows project-level details, the undo/redo history and the
+                autosave / crash-recovery status. <em>Why:</em> check what UDAW has saved for you before you rely on it.
+                See <a href="#project-doc">Projects, Undo &amp; Recovery</a>.
+            </p>
 
-            <h3 id="tab-wav">WAV</h3>
-            <p>Import/export and inspection of PCM/float WAV and RF64 (64-bit WAV) files. See <a href="#codec-wav">WAV / RF64</a>.</p>
+            <h3 id="tab-wav">Supported SFX (WAV)</h3>
+            <p>
+                <strong>Settings &gt; Diagnostics &gt; Supported SFX</strong> imports, exports and inspects PCM/float WAV and RF64
+                (64-bit WAV) files; sounds can also be opened in the WAV editor from the Browser or the Timeline.
+                See <a href="#codec-wav">WAV / RF64</a>.
+            </p>
 
             <h3 id="tab-timeline">Timeline</h3>
             <p>
-                The main multitrack view &ndash; tracks, clips, waveforms, grid/snap and playback
-                transport for linear recording-style projects. This is where you arrange, trim, move and
-                fade audio. See <a href="#timeline">Timeline &amp; Non-Destructive Editing</a>.
+                The main multitrack view &ndash; tracks, clips, waveforms, grid/snap and the playback transport
+                (with its icon buttons). This is where you arrange, trim, move and
+                fade audio, and where the mode bar switches to every other editor. See
+                <a href="#timeline">Timeline &amp; Non-Destructive Editing</a>. The
+                <a href="#welcome">Welcome screen</a> that opens when UDAW starts gets you to the right one in a click.
             </p>
 
             <h3 id="tab-recording">Recording</h3>
             <p>
-                Punch-in/out, loop recording, pre-roll, count-in, latency compensation, input
-                monitoring, take management/comping, and commit-to-timeline. Use this to actually capture
-                a live vocal/instrument performance. See <a href="#recording">Recording</a>.
+                The <strong>Rec</strong> mode (or the Record icon): punch-in/out, loop recording, pre-roll, count-in,
+                latency compensation, input monitoring, take management/comping, and commit-to-timeline.
+                <em>Why:</em> capture a live vocal/instrument performance and pick the best parts of several takes.
+                See <a href="#recording">Recording</a>.
             </p>
 
             <h3 id="tab-mixer">Mixer</h3>
             <p>
-                Channel strips, sends, buses, aux and VCA groups, insert effect chains (hosting Graph
-                nodes), pan/width/fader controls and metering. This is where the whole project gets
-                balanced and glued together. See <a href="#mixer">Mixer &amp; Routing</a>.
+                The <strong>Mix</strong> mode: channel strips, sends, buses, aux and VCA groups, insert effect chains
+                (hosting Graph nodes), pan/width/fader controls and metering. <em>Why:</em> this is where the whole
+                project gets balanced and glued together. See <a href="#mixer">Mixer &amp; Routing</a>.
             </p>
 
             <h3 id="tab-tracker">Tracker</h3>
             <p>
-                The pattern-grid editor for the native tracker engine, with sequence/order-list
-                navigation and MOD/XM/MPTM(IT) import/export buttons. See <a href="#tracker">Tracker Module</a>.
+                The <strong>Tracker</strong> mode: the pattern-grid editor for the native tracker engine, with
+                sequence/order-list navigation and MOD/XM/MPTM(IT) import/export. <em>Why:</em> compose by typing
+                notes straight into a grid, the classic chiptune way. See <a href="#tracker">Tracker Module</a>.
             </p>
 
             <h3 id="tab-mp3">MP3</h3>
-            <p>MP3 decode/encode inspection and ID3 tag handling. See <a href="#codec-mp3">MP3</a>.</p>
+            <p><strong>Settings &gt; Diagnostics &gt; MP3</strong>: MP3 decode/encode inspection and ID3 tag handling. See <a href="#codec-mp3">MP3</a>.</p>
 
             <h3 id="tab-mp4">MP4</h3>
-            <p>MP4 container inspection (sample table, codec detection/report), plus play/stop auditioning and Import to Timeline for AAC-, MP3- and PCM-audio MP4/M4A/MKV files. See <a href="#codec-mp4">MP4</a>.</p>
+            <p><strong>Settings &gt; Diagnostics &gt; MP4</strong>: MP4 container inspection (sample table, codec detection/report), plus play/stop auditioning and Import to Timeline for AAC-, MP3- and PCM-audio MP4/M4A/MKV files. See <a href="#codec-mp4">MP4</a>.</p>
 
             <h3 id="tab-midi">MIDI</h3>
             <p>
-                Note editing with scale/chord helpers, tempo map, and playback through the internal
-                64-voice polyphonic synth. See <a href="#midi">MIDI &amp; Piano Roll</a>.
+                The <strong>Piano</strong> mode (with <strong>Score</strong>, <strong>Inst</strong> and <strong>Pattern</strong>
+                beside it): note editing with scale/chord helpers, tempo map, the drum machine and step sequencer, played
+                through the internal 64-voice polyphonic synth. <em>Why:</em> compose with an instrument without
+                recording one. See <a href="#midi">MIDI &amp; Piano Roll</a>.
             </p>
 
-            <h3 id="tab-ai">AI Assistant</h3>
+            <h3 id="tab-foley">Foley Sampler</h3>
             <p>
-                A chat panel wired to a selectable AI provider, plus mixing/mastering assistants, voice
-                capture/command support, Suno-based music generation, and MCP for connecting external
-                tool servers. See <a href="#ai">AI Assistant &amp; Voice Control</a>.
+                The <strong>Foley</strong> mode, dock page and transport icon: sixteen sound-effect pads that you play
+                live and that place themselves on the Timeline. <em>Why:</em> add footsteps, impacts and other effects
+                in time with a picture or a song far faster than dragging files. See
+                <a href="#timeline-foley">Foley Sampler</a>.
+            </p>
+
+            <h3 id="tab-ai">AI/SI Assistant</h3>
+            <p>
+                The <strong>AI/SI</strong> mode: a chat panel wired to a selectable AI/SI provider, plus mixing/mastering
+                assistants, voice capture/command support, Suno-based music generation, and MCP for connecting external
+                tool servers. See <a href="#ai">AI/SI Assistant &amp; Voice Control</a>.
             </p>
 
             <h3 id="tab-secure">Secure Storage</h3>
@@ -592,7 +726,7 @@
             <ul>
                 <li><strong>Menus.</strong> Click a menu on the menu bar to open it; with one open, moving the pointer over the next menu name switches to it. Items with an arrow open a sub-menu when you point at them. Click an item to run it, or click anywhere else (or press <span class="kbd">Esc</span>) to close the menu. From the keyboard: <span class="kbd">Alt</span>+the underlined letter opens a menu, <span class="kbd">Up</span> / <span class="kbd">Down</span> move through the items, <span class="kbd">Right</span> / <span class="kbd">Left</span> enter and leave a sub-menu (or move to the next menu name), <span class="kbd">Enter</span> runs the highlighted item, and a letter picks the item with that underlined letter. Shortcut keys such as <span class="kbd">Ctrl+S</span> work whether or not the menu is open. Menu names that do not apply to the current tab are hidden, as before.</li>
                 <li><strong>Right-click menus</strong> (Timeline, Mixer, Settings pages, the lyrics box and so on) are the same kind of menu and open at the pointer.</li>
-                <li><strong>Drop-down lists.</strong> Click to open, click an entry to choose it, or click outside / press <span class="kbd">Esc</span> to leave the choice as it was. The mouse wheel over a closed list steps through its entries. A few lists (such as the AI model) also let you type your own text.</li>
+                <li><strong>Drop-down lists.</strong> Click to open, click an entry to choose it, or click outside / press <span class="kbd">Esc</span> to leave the choice as it was. The mouse wheel over a closed list steps through its entries. A few lists (such as the AI/SI model) also let you type your own text.</li>
                 <li><strong>Text boxes.</strong> Click to place the cursor, drag or hold <span class="kbd">Shift</span> to select, and use <span class="kbd">Ctrl+A</span>, <span class="kbd">Ctrl+C</span>, <span class="kbd">Ctrl+X</span> and <span class="kbd">Ctrl+V</span>. Letters and spaces you type in a box never trigger the global shortcuts.</li>
                 <li><strong>Log and readout text.</strong> UDAW no longer shows a log window or read-only readout panels. Messages, status readouts and diagnostics are written to text files in the <em>logs</em> folder instead: the main log (<span class="kbd">udaw-YYYYMMDD.log</span>) and one <span class="kbd">ui-&lt;name&gt;.log</span> file per readout. <strong>Log &gt; Open Log...</strong> (also on the right-click menus that had it) opens the newest log file in your default text viewer.</li>
                 <li><strong>Open / Save dialogs.</strong> Pick a drive or common folder from <em>Look in</em>, double-click a folder to enter it, type a path in the top box and press <span class="kbd">Enter</span>, and choose the file type from <em>Files of type</em>. Click a file (or <span class="kbd">Ctrl</span>/<span class="kbd">Shift</span>+click several where more than one is allowed) to put its name in the box, then <strong>Open</strong> / <strong>Save</strong>; type a pattern such as <span class="kbd">*.wav</span> and press <span class="kbd">Enter</span> to narrow the list. <strong>New folder</strong> creates a folder named like the text in the name box. Saving over an existing file asks first. <span class="kbd">Esc</span> cancels.</li>
@@ -625,14 +759,15 @@
                 <b>Settings &gt; General &gt; Export</b> sets the video <b>quality (bitrate)</b> and <b>size (maximum width)</b> used when a Timeline with video is exported as MP4 or MKV, the <b>audio quality (bitrate)</b> used for MP3, MP4, M4A and MKV exports, and shows the <b>Author</b> that is embedded in every exported file. <i>Automatic</i> picks a bitrate from the picture size and <i>Original size</i> keeps the source picture. These choices are saved in the project file and restored whenever that project is opened.
             </p>
             <h3>Undo / Redo</h3>
+            <p>Undo and Redo, with Cut, Copy, Paste and the other editing commands of the tab you are on, are in the <b>Edit</b> menu on the menu bar. It shows the group for the current tab (Timeline, Tracker, Mixer or MIDI); on other tabs it offers the project-wide Undo and Redo.</p>
             <p>
                 Almost every edit &ndash; timeline clip edits, mixer fader moves, tracker pattern edits,
-                MIDI note edits, graph changes, and even AI-driven changes (see
+                MIDI note edits, graph changes, and even AI/SI-driven changes (see
                 <a href="#ai-chat">Chat &amp; Tool Commands</a>) &ndash; goes through a command object on
                 a single undo stack, so it can be undone and redone uniformly across every tab. Rapid
                 repeated edits of the same kind (for example dragging a fader) are merged into one undo
                 step rather than flooding the stack. <strong>How to use it:</strong> don't be afraid to
-                try a mix move, an AI suggestion, or a tracker effect - <span class="kbd">Ctrl+Z</span>
+                try a mix move, an AI/SI suggestion, or a tracker effect - <span class="kbd">Ctrl+Z</span>
                 gets you back exactly where you were.
             </p>
             <h3>Autosave &amp; Crash Recovery</h3>
@@ -680,7 +815,40 @@
                 <strong>BPM ?</strong> chip appears on the primary audio
                 channel while its tempo is unknown &ndash; click it to enter the tempo.
             </p>
-            <h3 id="timeline-modes">Modes: Arrange, Piano, Score, Inst, Mix, Tracker, Rec and AI</h3>
+            <h3 id="timeline-transport">Transport buttons and status box</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Know what every icon in the strip above the Timeline does, and what the numbers beside it tell you.</p>
+                <p><b>Why</b> The strip is where you control playback and switch whole parts of the workspace on and off; the icons are small, so each one also shows a hint when you rest the pointer on it. A lit icon means the thing it controls is currently on.</p>
+            </div>
+            <table class="udaw-table udaw-col-22">
+                <tr><td>Go to start / Go to end</td><td>Move the playhead to the beginning, or to the end of the last clip. <em>Why:</em> restart a passage or jump to the tail without scrolling.</td></tr>
+                <tr><td>Play</td><td>Plays from the playhead; press again to stop (<span class="kbd">Space</span> does the same). Playing to the end rewinds the playhead to 0.</td></tr>
+                <tr><td>Stop</td><td>Stops playback.</td></tr>
+                <tr><td>Record</td><td>Opens the Recording view where you arm tracks and record takes. <em>Why:</em> capture vocals or instruments against what is already on the Timeline.</td></tr>
+                <tr><td>Loop</td><td>Repeats the loop region while playing (lit = on). <em>Why:</em> rehearse or edit a short passage over and over.</td></tr>
+                <tr><td>Video</td><td>Shows or hides the video playback panel (lit = shown). The sound of a video clip is its own audio lane and keeps playing when the panel is hidden. <em>Why:</em> give the lanes more room when you do not need to see the picture.</td></tr>
+                <tr><td>Editor</td><td>Shows or hides the editor docked under the Timeline lanes - piano roll, mixer, tracker, recording, AI/SI and Foley pages (lit = shown). <em>Why:</em> edit while still seeing the arrangement above.</td></tr>
+                <tr><td>Clip Stage</td><td>Shows or hides the Clip Stage, a launcher grid of patterns as scenes (lit = shown).</td></tr>
+                <tr><td>Browser</td><td>Shows or hides the browser panel on the right: instruments, effects, samples and presets (lit = shown).</td></tr>
+                <tr><td>Metronome</td><td>A click on every beat while the Timeline plays (lit = on). <em>Why:</em> keep time when recording without a drum track.</td></tr>
+                <tr><td>Lanes</td><td>Shows or hides the Markers, Tempo and Signature lanes under the ruler (lit = shown).</td></tr>
+                <tr><td>Chords</td><td>Shows or hides the Chords lane - chord symbols over the Timeline (lit = shown).</td></tr>
+                <tr><td>Foley</td><td>Shows the <a href="#timeline-foley">Foley Sampler</a> in the docked editor under the lanes, so you can play sound-effect pads while the Timeline stays in view (lit while the Foley page is showing). Click it again to hide the dock. <em>Why:</em> the quickest route to performing effects against the picture.</td></tr>
+                <tr><td>Delete Cache</td><td>Removes the files in the local cache folder that this project (and your recent projects) no longer use. <em>Why:</em> win back disk space; a progress bar shows the work.</td></tr>
+            </table>
+            <p>
+                To the right of the icons are the large <strong>Time</strong> and <strong>Bars</strong>
+                readouts of the playhead, the <strong>BPM</strong> box and the <strong>Snap</strong> choice. The
+                <strong>Master Vol</strong> slider and its level meter sit in the tab row at the very top of the
+                window, after the last tab and a separator, so they are always in reach. The status box at the right end of
+                the <strong>menu bar</strong> shows two things:
+            </p>
+            <ul>
+                <li><strong>FPS</strong> (when ticked in the Settings page that controls the screen mode) &ndash; how many times per second the busiest part of the display is being redrawn, how many draws per second in all, and whether UDAW is in a window or full screen. <em>Why:</em> if scrolling or playback looks jerky, this tells you whether the display is keeping up; a lower number while nothing moves is normal, because a surface only redraws when something on it changes.</li>
+                <li><strong>Out</strong> &ndash; the audio output device sound is really coming out of, taken from what the audio engine actually opened, with the audio backend in brackets. It reads <em>Audio: not open</em> when the engine is closed. <em>Why:</em> when you hear nothing (or hear it from the wrong speakers), this is the first place to look - it shows what UDAW is really using, not just what you asked for.</li>
+            </ul>
+
+            <h3 id="timeline-modes">Modes: Arrange, Piano, Score, Inst, Pattern, Mix, Tracker, Rec, AI/SI and Foley</h3>
             <div class="udaw-purpose">
                 <p><b>Purpose</b> Give the whole window to the editor you are working in, and get back to the arrangement in one click.</p>
             </div>
@@ -689,16 +857,58 @@
                 <b>Editor</b> switch opens an editor underneath it, and the splitter between them resizes
                 only the editor. <b>Piano</b> is the piano roll with a keyboard, a bar ruler, the chord lane
                 and a velocity lane; <b>Score</b> shows MIDI parts as music notation; <b>Inst</b> is the drum
-                machine; <b>Pattern</b> is the step sequencer for rhythm patterns; <b>Mix</b>, <b>Tracker</b>,
-                <b>Rec</b> and <b>AI</b> are the mixer, tracker, recording and AI pages. In Arrange the <b>tool</b> icons choose what a drag does: Select, Range (drag to
+                machine; <b>Pattern</b> is the step sequencer for rhythm patterns; <b>Mix</b>, <b>Tracker</b>, <b>Rec</b>, <b>AI/SI</b> and <b>Foley</b> are the mixer, tracker, recording, AI/SI and Foley Sampler pages. In Arrange the <b>tool</b> icons choose what a drag does: Select, Range (drag to
                 select a time range), Split (click a clip to cut it) and Erase (click a clip to delete it).
                 The <b>Browser</b> switch shows the panel on the right with four tabs: <b>Instruments</b>
-                (add a track, or a tracker instrument to the Timeline), <b>Effects</b> (double-click to add an
-                effect to the selected track), <b>Samples</b> (your library folders - double-click a sound to
-                import it at the playhead) and <b>Presets</b> (mix roles for the selected track). Every list in
+                (double-click to add a track, or double-click a tracker instrument to open it in the WAV editor; drag an instrument onto the Timeline to add it at the playhead, or drag a tracker module file onto the Timeline to be asked how to add it), <b>Effects</b> (double-click to add an
+                effect to the selected track), <b>Samples</b> (your library folders - drag a sound onto the Timeline to
+                add it at the playhead, or double-click it to open it in the WAV editor) and <b>Presets</b> (mix roles for the selected track). Every list in
                 the panel has a vertical and a horizontal scroll bar, so a long name can always be read in full
                 (hold <b>Shift</b> and use the wheel to scroll sideways).
             </p>
+            <h3 id="timeline-foley">Foley Sampler</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Play sound effects on sixteen pads - by mouse or keyboard - and put them on the Timeline exactly where you hit them.</p>
+                <p><b>Why</b> Foley is the craft of adding everyday sounds (footsteps, doors, impacts, risers) to a picture or a song. Dragging a file onto the Timeline for every single sound is slow and hard to time; performing the sounds live while the project plays is quicker, feels natural and lands them on the beat.</p>
+            </div>
+            <h4>Opening it</h4>
+            <p>
+                There are four ways, all showing the same pads: the <strong>Foley</strong> icon in the
+                Timeline's transport strip (shows it in the dock under the lanes, so the Timeline stays in view);
+                the <strong>FOLEY</strong> tab on the mode bar (gives the whole page to it); the
+                <strong>Foley</strong> tab of the docked editor when the <strong>Editor</strong> switch is on; and
+                <strong>Timeline &gt; Foley Sampler...</strong>. If the panel is too short to show everything,
+                it gets a vertical scroll bar, like the other docked pages.
+            </p>
+            <h4>Setting up the pads</h4>
+            <ol>
+                <li>Click a pad to select it (its key letter is on the pad: <b>1 2 3 4 / Q W E R / A S D F / Z X C V</b>). The line to the right names the selected pad and its sound.</li>
+                <li>Choose <strong>Load into pad...</strong> and pick a WAV or MP3 file. <em>Why:</em> each pad holds one sound, so load the sounds you will need before you perform.</li>
+                <li><strong>Clear pad</strong> empties the selected pad.</li>
+            </ol>
+            <p>
+                Your pad choices are remembered on this computer between sessions - they are not stored inside
+                the project file, so every project can use the same set. The clips you place on the Timeline do
+                refer to the sound files, so keep those files where they are.
+            </p>
+            <h4>Playing</h4>
+            <p>
+                Click a pad, or press its key while the Foley page is showing (and no text box has the
+                keyboard focus), to hear it. Several pads can ring at once, hitting a pad again restarts it,
+                and they sound on top of whatever the Timeline is playing. Pads play through the
+                <a href="#audio-output">Output device</a> chosen in Settings, so they come out of the same
+                speakers as everything else.
+            </p>
+            <h4>Getting sounds onto the Timeline - three ways</h4>
+            <table class="udaw-table udaw-col-22">
+                <tr><td>Pad key adds its sound at the playhead</td><td>Tick <em>A pad key adds its sound at the playhead</em>. Each pad <b>key</b> press puts that pad's sound on the selected audio lane (or a dedicated Foley lane if none is selected) at the playhead. If the playhead is inside a clip, the clip is split there and the sound goes between the two halves, pushing the rest later by the sound's length. When the Timeline is stopped the playhead moves to the end of the sound, so the next key follows on. <em>Why:</em> assemble a sequence of effects quickly, one key press each, with every step undoable.</td></tr>
+                <tr><td>Record hits while the Timeline plays</td><td>Tick <em>Record hits while the Timeline plays</em>, start playback, and hit pads in time with the picture or music. UDAW notes the playhead time of every hit (the counter shows how many). Choose <strong>Add hits to Timeline</strong> to lay them out as clips - one new track per pad used, each clip at the moment you struck it - or <strong>Discard hits</strong> to throw them away. <em>Why:</em> performing against moving picture gets the timing right in a way placing clips by hand rarely does.</td></tr>
+                <tr><td>Place pad at playhead</td><td>Drops the selected pad's sound at the playhead on a new track, without recording or playing it. <em>Why:</em> exact, deliberate placement of a single sound.</td></tr>
+            </table>
+            <div class="udaw-note">
+                <strong>Tip:</strong> hits are recorded only while the Timeline is playing, and a key press that inserts straight onto the Timeline is not also kept as a recorded hit.
+            </div>
+
             <h3 id="timeline-clip-icons">Clip icons</h3>
             <p>
                 Each clip carries a small icon at the left end of its header that says what it is: a waveform
@@ -821,7 +1031,7 @@
                 automatically when the floating window is closed. This is useful for keeping the
                 Browser visible - on a second monitor, for example - while dragging samples straight
                 onto the Timeline at the playhead; drag-and-drop from the floating window works exactly
-                the same as from the docked tab.
+                the same as from the docked tab. <strong>Right-click</strong> a file or folder in the tree for the Windows shell menu - the same Open, Open with, Send to, Copy, Delete, Rename and Properties choices Explorer offers (hold Shift for the extended entries).
             </p>
             <p>
                 Zoom In/Out, Start of Timeline, End of Timeline, and Next/Previous Grid Position are
@@ -1043,13 +1253,13 @@
                 <tr><td>Oversampled Saturation</td><td><b>Audio Effects &gt; Distortion &amp; Saturation</b>. Warm saturation computed at four times the sample rate, which avoids the harsh, gritty overtones ordinary digital distortion can produce.</td></tr>
                 <tr><td>Fade curves</td><td><b>Audio Effects &gt; Volume &amp; Fades</b>. Fade In and Fade Out in S-Curve, Equal Power (for crossfades), Exponential and Logarithmic shapes.</td></tr>
                 <tr><td>Loudness &amp; Phase Report</td><td><b>Audio Effects &gt; Tools</b>. Measures the marked range and lists, in the Timeline log: integrated, momentary and short-term loudness (LUFS), sample and true peak, RMS, stereo correlation (to spot phase problems), the balance between the middle and the sides, and any DC offset. Nothing in the project is changed.</td></tr>
-                <tr><td>Voice Isolation / Music Separator</td><td><b>Audio Effects &gt; Voice</b>. Voice Isolation keeps the voice and lowers steady background (music pads, hum, room tone). Music Separator does the opposite and keeps the background. They work by measuring which parts of the sound move like speech, sit in the voice range and are centred between the speakers; they are not an AI model, so busy mixes will not separate as cleanly as a single voice over steady noise.</td></tr>
+                <tr><td>Voice Isolation / Music Separator</td><td><b>Audio Effects &gt; Voice</b>. Voice Isolation keeps the voice and lowers steady background (music pads, hum, room tone). Music Separator does the opposite and keeps the background. They work by measuring which parts of the sound move like speech, sit in the voice range and are centred between the speakers; they are not an AI/SI model, so busy mixes will not separate as cleanly as a single voice over steady noise.</td></tr>
                 <tr><td>Split Speech / Music</td><td><b>Audio Effects &gt; Tools</b>. Select a clip and two new tracks are added, one with the speech and one with the music/background, so you can balance or process them separately. Undoable like any edit.</td></tr>
                 <tr><td>Ducker</td><td><b>Mixer &gt; Add insert &gt; Ducker (sidechain)</b>. Lowers a track whenever another track is loud, for example music that dips under a voice-over. Type the strip number of the track to listen to into the <b>sidechain</b> row; <b>range</b> is how far it dips (-12 dB by default), <b>attack</b>, <b>hold</b> and <b>release</b> shape the movement.</td></tr>
                 <tr><td>Apply mix role</td><td>Right-click the Mixer and choose <b>Apply mix role</b> for a ready starting chain on the selected track: Dialogue, Voice-over, Music, Sound Effects, Ambience or Master. Each effect is added as a normal insert you can change, bypass or remove.</td></tr>
                 <tr><td>Effect curves</td><td>The parameter window of an EQ, filter, compressor, gate, expander, ducker or limiter insert now shows a live graph below the list: the frequency response of EQs and filters, or the input-to-output curve of dynamics effects. It redraws as you change values.</td></tr>
                 <tr><td>Loudness and Phase Meters</td><td><b>Mixer &gt; Loudness and Phase Meters...</b> (also on the Timeline menu). A live window for the master output: momentary, short-term and integrated loudness against the -23 and -14 LUFS targets, peak and true peak, and a phase-correlation bar that turns red when the left and right channels cancel each other.</td></tr>
-                <tr><td>Foley Sampler</td><td><b>Timeline &gt; Foley Sampler...</b>. Sixteen pads that each hold a sound (WAV or MP3). Hit them with the mouse or the keyboard block 1234 / QWER / ASDF / ZXCV. Tick <b>Record hits while the Timeline plays</b>, perform the sounds against your picture or music, then choose <b>Add hits to Timeline</b> to lay each hit out as a clip at the moment you struck it. <b>Place pad at playhead</b> drops a single sound where the playhead is. The pads are remembered between sessions. Pad sounds are heard through the system output while you play them.</td></tr>
+                <tr><td>Foley Sampler</td><td><b>Timeline &gt; Foley Sampler...</b> or the <b>Foley</b> icon button beside the transport controls, which opens the Foley page under the Timeline so you can play it while the lanes stay in view (it scrolls when the panel is short). Sixteen pads that each hold a sound (WAV or MP3). Hit them with the mouse or the keyboard block 1234 / QWER / ASDF / ZXCV. Tick <b>Record hits while the Timeline plays</b>, perform the sounds against your picture or music, then choose <b>Add hits to Timeline</b> to lay each hit out as a clip at the moment you struck it. <b>Place pad at playhead</b> drops a single sound where the playhead is. The pads are remembered between sessions. Pad sounds are heard through the system output while you play them.</td></tr>
                 <tr><td>Ambisonics report</td><td>When the clip you measure with <b>Loudness &amp; Phase Report</b> has four or more channels (first-order Ambisonics, AmbiX order), the report adds the level of each channel and the direction the sound is coming from (angle, height and how much it is one source versus diffuse).</td></tr>
                 <tr><td>Hall / Room / Plate Reverb, Lo-Fi</td><td>Reverb presets of different size and decay; Lo-Fi reduces the bit depth and sample rate for a gritty, vintage sound.</td></tr>
                 <tr><td>Stereo Fixer / Mid-Side Balance</td><td><b>Audio Effects &gt; Stereo &amp; Bass</b>. Stereo Fixer corrects a polarity-flipped channel and an uneven left/right level in one step. Mid/Side Balance trims the centre versus the sides (the default narrows the sides by 3 dB for a firmer centre).</td></tr>
@@ -1063,11 +1273,141 @@
                 <tr><td>Trance Gate</td><td>Chops the sound on and off in time (8 times a second) with soft edges to avoid clicks.</td></tr>
                 <tr><td>Vinyl Crackle / Comb Filter</td><td>Vinyl Crackle rolls off the top end and adds clicks and surface hiss. Comb Filter adds a very short repeat that creates a hollow, ringing, pitched tone.</td></tr>
                 <tr><td>Peak Normalize</td><td><b>Audio Effects &gt; Volume &amp; Fades</b>. Raises or lowers the selection so its loudest peak sits at -1 dBFS.</td></tr>
-                <tr><td>Split Stems</td><td>Select a clip, then choose <b>Audio Effects &gt; Tools &gt; Split Stems (Drums/Bass/Vocals/Other)</b>. Four new tracks are added, one per stem. This is classical signal processing (percussive/harmonic separation, a bass crossover and a centre-channel mask for vocals), not a neural network: the four stems always add back to the original, but separation is less clean than dedicated AI tools on dense mixes.</td></tr>
+                <tr><td>Split Stems</td><td>Select a clip, then choose <b>Audio Effects &gt; Tools &gt; Split Stems (Drums/Bass/Vocals/Other)</b>. Four new tracks are added, one per stem. This is classical signal processing (percussive/harmonic separation, a bass crossover and a centre-channel mask for vocals), not a neural network: the four stems always add back to the original, but separation is less clean than dedicated AI/SI tools on dense mixes.</td></tr>
                 <tr><td>Audio to MIDI</td><td>Select a clip, then <b>Audio Effects &gt; Tools &gt; Audio to MIDI...</b> and type <b>mono</b> (a melody or bass line) or <b>poly</b> (chords). The notes are written to a new Piano Roll clip using the project tempo, with velocity taken from the audio level.</td></tr>
                 <tr><td>Warp markers</td><td>Select an audio clip. <b>Warp: Add Marker at Playhead</b> pins a point; <b>Warp: Snap Marker to Nearest Beat</b> moves the marker nearest the playhead onto the beat grid; <b>Warp: Auto-Detect Beats to Grid</b> finds the drum hits or note starts and pins each one that is close to a beat. <b>Warp: Apply Markers</b> time-stretches the audio between markers (pitch preserved) into a new file and swaps it into the clip, keeping the clip's length. Undo restores the original audio; <b>Warp: Clear Markers</b> discards pending markers.</td></tr>
                 <tr><td>Metronome</td><td>Tick <b>Metronome</b> beside the tempo field on the Timeline tab. An accented click plays on every beat during playback and follows loops and seeks. It is a monitoring aid and is never included in exports.</td></tr>
             </table>
+            <h3 id="timeline-video">Video: Import, Edit and Export</h3>
+            <p>
+                UDAW treats a video the way it treats sound: non-destructively. Your original file is never changed. The picture sits on its own <strong>VIDEO</strong> channel, its sound on a matching audio channel, and everything you do - cuts, effects, transitions, tempo, new music underneath - is saved as instructions in the project and only becomes a finished picture when you export. This section follows a clip from import to the final file, for two common jobs: <em>personal video</em> (holiday, family, social clips) and <em>production work</em> (a film, advert, trailer, game cut-scene or music video scored with the DAW's audio).
+            </p>
+
+            <h4>1. Bringing a video in</h4>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Way in</th><th>How</th></tr>
+                <tr><td>Import menu</td><td>Use <b>Import to Timeline &gt; MP4 / M4A File...</b> (Timeline menu or the Timeline right-click menu) and pick the file. The same command brings in sound-only M4A/MP4 files.</td></tr>
+                <tr><td>Drag and drop</td><td>Drag a video file from the Browser panel onto the Timeline. It lands where you drop it.</td></tr>
+                <tr><td>Add a channel first</td><td>Use the Timeline's add-channel menu and choose <b>Video track</b> to create an empty video channel, then drop clips onto it. Extra video channels let you layer clips (see <em>Stacking</em> below).</td></tr>
+            </table>
+            <p><strong>Supported files:</strong> <code>.mp4</code>, <code>.m4v</code>, <code>.mov</code>, <code>.mkv</code> and <code>.webm</code>. Common video and sound formats play and import; if your system cannot decode a particular format, installing a codec pack such as K-Lite extends the list. A file the system cannot display still imports its sound, but its video pane stays blank.</p>
+            <p><strong>What happens on import:</strong></p>
+            <ul>
+                <li>The <b>picture</b> is placed on a <b>VIDEO</b> channel.</li>
+                <li>The <b>sound</b> is decoded and placed on its own audio channel at exactly the same start time, so picture and sound begin together. The silent padding that encoders add to the start of a file is removed, so the sound starts on the first real sample.</li>
+                <li>A file with <b>several audio streams</b> (for example commentary, a second language or a surround mix) gets <b>one audio channel per stream</b>, so you can keep the one you want and mute or delete the rest.</li>
+                <li>Large files are handled without loading them whole into memory, and the decoded sound is kept in the project's cache so the next Play is quick.</li>
+                <li>A damaged stretch of sound becomes silence of the same length, so everything after it stays in time with the picture.</li>
+            </ul>
+
+            <h4>2. Looking at the picture</h4>
+            <ul>
+                <li><b>Video pane.</b> A pane beside the Timeline shows the picture in step with the sound while it plays and when you scrub. It appears whenever a video channel holds a clip. Use the <b>Video</b> button in the transport strip to hide or show it; hiding it does not silence the clip's sound.</li>
+                <li><b>Hover preview.</b> Rest the mouse over any video clip and a small frame appears with its time, so you can find a moment without playing. The first hover on a spot takes a moment while the frame is prepared.</li>
+                <li><b>Film strip.</b> Each video clip is drawn as a film strip labelled <b>VIDEO</b>, scrolling with the other channels, including while the Timeline follows the playhead.</li>
+                <li>The picture is always silent; the sound you hear comes from the audio channels, so picture and mix can never fight each other.</li>
+            </ul>
+
+            <h4>3. Editing the clip</h4>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Edit</th><th>What it does to the final clip</th></tr>
+                <tr><td>Move, trim, split, fade</td><td>Work like any other clip. Trimming the front or end of a clip shortens what is shown; splitting at the playhead makes two clips you can move, delete or put effects between.</td></tr>
+                <tr><td>Reverse</td><td>The clip plays backwards in the export. In the live pane a reversed clip is shown as a stepped preview of about ten pictures a second; the exported file is smooth.</td></tr>
+                <tr><td>Tempo / conform</td><td>When a clip is stretched to the project tempo, the picture is sped up or slowed down by the same amount so it stays in step with its sound. In the live pane this is also shown as a stepped preview; the export is smooth.</td></tr>
+                <tr><td>Mute</td><td>A muted video channel or clip is left out of the export entirely (it shows black, or reveals whatever is beneath it). Muting an audio channel removes only that sound.</td></tr>
+                <tr><td>Stacking</td><td>When video clips overlap on the Timeline, <b>the clip on the higher video channel is shown</b>. Use extra video channels for cutaways, titles and inserts over a base shot. Where no clip is under the playhead the picture is black.</td></tr>
+                <tr><td>Undo</td><td>Every video edit, including adding and removing effects, is an ordinary undoable edit and is saved with the project.</td></tr>
+            </table>
+
+            <h4>4. Effects and transitions - how they change the final clip</h4>
+            <p>
+                Effects are the heart of video editing in UDAW. <b>The picture in the pane while you edit is a preview; the exported file is rendered picture by picture, at full quality, with every effect and transition applied exactly where you put it.</b> An effect changes only the picture - the sound is never altered by a video effect, so your music and dialogue stay exactly as mixed.
+            </p>
+            <p><strong>Applying one:</strong> right-click a video channel (or open the <b>Edit</b> menu) and choose <b>Video Effects</b>. The submenu is only available on a video channel, just as <b>Audio Effects</b> is only available on audio channels.</p>
+            <ul>
+                <li><b>Mark a range</b> by dragging on the ruler, then choose an effect: the clip is split at both edges and the effect fills exactly that range. Use this to grade one scene, soften a few seconds, or add a flash on a beat.</li>
+                <li><b>No range, effect:</b> the effect covers the whole video clip under the playhead.</li>
+                <li><b>No range, transition:</b> put the playhead on the cut between two video clips (or anywhere on a clip, which splits it there) and choose a transition. It is laid one second wide across the cut: before the cut the incoming shot holds its first picture, after it the outgoing shot holds its last, so the change is smooth even if the clips were trimmed tight.</li>
+                <li>Effects appear as bars along the bottom of the channel - <b>orange for transitions, purple for effects</b>, with a white line marking the cut of a transition. <b>Remove Video Effect at Playhead</b> (last item of the submenu) removes the effects under the playhead or touching the marked range.</li>
+            </ul>
+            <p><strong>What the groups are for:</strong></p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Group</th><th>Typical use - and how it changes the result</th></tr>
+                <tr><td>Transitions</td><td>Join two shots. <em>Dissolve</em> (cross, dip to black or white) is the gentle general-purpose change; <em>Iris</em>, <em>Wipe</em> and <em>Shape</em> are graphic and playful; <em>Motion</em> (push, slide, spin, whip pan, zoom, glitch) adds energy for music videos and montages.</td></tr>
+                <tr><td>Fade</td><td>Fade in at the start of a film, fade out at the end, flashes and blur-ins for dramatic beats.</td></tr>
+                <tr><td>Colour</td><td>Set the mood of a scene: black and white or sepia for nostalgia, teal and orange or bleach bypass for a cinematic look, white balance, exposure and levels to repair footage shot in poor light, thermal, night vision and false colour for effect.</td></tr>
+                <tr><td>Light</td><td>Vignette, glow, bloom, haze, light rays, lens flare, light leaks, strobe and flicker - polish and atmosphere, or flashes in time with the music.</td></tr>
+                <tr><td>Blur and Sharpen</td><td>Soften a distracting background, hide a detail, add a dreamy look, or rescue soft footage with sharpen, unsharp mask and detail recovery.</td></tr>
+                <tr><td>Stylize and Texture</td><td>Turn footage into a sketch, cartoon, oil paint, halftone or 3D anaglyph; add film grain, scanlines, old-film damage or a CRT look for retro and lo-fi styles.</td></tr>
+                <tr><td>Transform and Warp</td><td>Mirror, flip, kaleidoscope, tile, rotate, crop and zoom, keystone; bulge, fisheye, swirl, ripple, heat haze and underwater distortion.</td></tr>
+                <tr><td>Glitch</td><td>RGB split, chromatic aberration, digital glitch, TV static and interlace tear - ideal for electronic music and title stings.</td></tr>
+                <tr><td>Revival</td><td>Repair: noise reduction, despeckle, dead-pixel fixer, deband and dehaze for old or poorly lit footage.</td></tr>
+                <tr><td>Beauty</td><td>Soften skin and glamour glow for portraits and interviews.</td></tr>
+                <tr><td>Generate</td><td>Letterbox bars, borders, gradients, grids, colour bars, checkerboards, solid colours and clouds - backgrounds, a cinematic frame, or test cards.</td></tr>
+                <tr><td>Camera Motion</td><td>Shake, handheld, earthquake, bounce, slow zoom in and out, pans, Ken Burns, dutch angle and spin - add life to a still, steady shot.</td></tr>
+            </table>
+            <p><strong>Combining effects.</strong> Effects can sit on the same clip in different ranges: a colour grade over the whole clip, a vignette on the last few seconds, a transition at the cut. Effects are tied to a time on the Timeline and do not follow a clip when you move it - after moving clips, remove and re-apply the effect.</p>
+
+            <h4>5. Playing with effects</h4>
+            <p>
+                When the video holds effects, pressing <b>Play</b> first <b>pre-renders</b> the picture so effects and transitions play smoothly. The status bar shows progress and an estimate of the time left while the sound is prepared at the same time; playback starts when both are ready and <b>Stop</b> cancels the wait. The pre-render is a lighter, silent preview copy (at most 960 pixels wide) - your files and exports are not changed. It is <b>kept and reused</b>: as long as the clips, their files and the effects are unchanged, the next Play starts at once. Any change renders a fresh copy. While stopped, scrubbing shows a quick preview of the effect in the video pane.
+            </p>
+
+            <h4>6. Adding and mixing the DAW audio</h4>
+            <p>This is where UDAW differs from a video editor: the whole studio is behind your picture.</p>
+            <ul>
+                <li><b>Score it.</b> Drop music, loops, MIDI parts, tracker modules or AI-generated music on audio channels beneath the picture. Set the project tempo and use snap so cuts, effects and music hits land on the beat.</li>
+                <li><b>Keep, replace or blend the original sound.</b> Keep the video's own audio channel for dialogue and ambience, mute it to replace the soundtrack entirely, or turn it down and layer music over it.</li>
+                <li><b>Add Foley and effects.</b> Use the Foley Sampler to play sound effects against the picture in time, then add the hits to the Timeline as clips.</li>
+                <li><b>Record a voice-over or live instruments</b> while the picture plays, then edit and mix the take like any other channel.</li>
+                <li><b>Mix and master.</b> Use the Mixer's levels, pan, effects and automation, and the mixing and mastering assistants, on all of it, so dialogue, music and effects sit together.</li>
+                <li><b>Use a range.</b> Mark a range on the ruler to export just one scene or a short social clip.</li>
+            </ul>
+
+            <h4>7. Exporting the finished clip</h4>
+            <ol>
+                <li>Choose <b>Timeline &gt; Export &gt; MP4...</b> or <b>MKV...</b> (also in the Timeline right-click menu). When the Timeline holds video these are the only formats offered, because other formats cannot carry a picture.</li>
+                <li>Pick a name and location. The picture and your <b>complete mix</b> - every unmuted audio channel with its effects, automation and master level - are written together as one file.</li>
+                <li>The status bar and Jobs show progress while the picture is rendered frame by frame with every effect and transition applied.</li>
+            </ol>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>What you get</th><th>Detail</th></tr>
+                <tr><td>Picture size</td><td>The largest video clip used. <b>Settings &gt; General &gt; Export &gt; Video size (max width)</b> can reduce it; <i>Original size</i> keeps the source.</td></tr>
+                <tr><td>Frame rate</td><td>Follows the first video clip.</td></tr>
+                <tr><td>Quality</td><td><b>Video quality (bitrate)</b> and <b>Audio quality (bitrate)</b> in the same Settings group; <i>Automatic</i> chooses a bitrate to suit the picture size. The choices are saved with the project.</td></tr>
+                <tr><td>Layers and gaps</td><td>The higher video channel wins where clips overlap; gaps are black; muted channels and clips are left out.</td></tr>
+                <tr><td>Range</td><td>With a range selected, only that range is exported.</td></tr>
+                <tr><td>Author and tempo</td><td>The <b>Author</b> name and the project tempo are written into the file.</td></tr>
+                <tr><td>Sound</td><td>48 kHz, at the audio quality you chose.</td></tr>
+            </table>
+
+            <h4>8. Two worked examples</h4>
+            <p><strong>Personal video - a holiday clip with music.</strong></p>
+            <ol>
+                <li>Import the clips (or drag them in from the Browser) and put them one after another on the video channel.</li>
+                <li>Trim the dull parts and split where you want a change of scene.</li>
+                <li>Put the playhead on each cut and add a <em>Cross Dissolve</em>; mark the sunset shot and add a warm <em>Colour</em> grade; add <em>Fade In</em> at the start and <em>Fade Out</em> at the end.</li>
+                <li>Mute the video's own audio if it is only wind noise, add a music clip on an audio channel, and lower it under any speech you want to keep.</li>
+                <li>Export as MP4 for your phone or social media.</li>
+            </ol>
+            <p><strong>Production work - a trailer or music video scored in UDAW.</strong></p>
+            <ol>
+                <li>Set the project tempo to the music first, so cuts and effects can snap to the beat.</li>
+                <li>Lay the main picture on video channel 1; put titles, cutaways and inserts on channels above it.</li>
+                <li>Cut on the beat; use <em>Push</em>, <em>Whip Pan</em> or <em>Glitch</em> transitions on the big hits and <em>Dip to Black</em> between scenes. Give the whole film one <em>Colour</em> look plus a light <em>Film Grain</em> or <em>Vignette</em> for a consistent feel.</li>
+                <li>Score the sound: music, effects, Foley and voice-over on separate channels; automate levels so dialogue always sits on top; finish with the mastering assistant.</li>
+                <li>Export a range to check a scene quickly, then the whole piece as MP4 or MKV at <i>Original size</i> and a high video quality.</li>
+            </ol>
+
+            <h4>9. Good to know</h4>
+            <ul>
+                <li>Your original video file is never modified; delete an export and export again at any time.</li>
+                <li>The live preview is for editing and may lag on very large pictures; the export is always full quality.</li>
+                <li>A video effect never changes the sound; use <b>Audio Effects</b> on the audio channels for that.</li>
+                <li>Moving a clip does not move the effects placed on it - remove and re-apply them afterwards.</li>
+                <li>Video editing and export are available on Windows. Only MP4 and MKV exports can carry a picture.</li>
+                <li>You are responsible for having the right to use the footage and music you import and publish.</li>
+            </ul>
             <h3 id="export-dither">Export quality: dither</h3>
             <p>Every Timeline export applies TPDF dither before the mix is rounded to 24-bit (or 16-bit for raw PCM), so quiet passages and fade tails stay smooth instead of gaining rounding distortion. There is nothing to configure.</p>
         </section>
@@ -1173,8 +1513,238 @@
 
             <h3 id="scripts-python">Python Scripts</h3>
             <p>
-                <b>Scripts &gt; Run Python script...</b> runs a Python 3 script that can drive UDAW (add tracks, edit clips, mix) through the same tools the AI assistants use, so every change is undoable. Python 3 must be installed, and <b>expose UDAW</b> must be switched on in the AI settings. Script output appears in the AI log and on the status bar; choose Run again to stop a running script. <b>Open scripts folder</b> opens the folder holding the generated <code>udaw.py</code> helper: <code>from udaw import UDAW; u = UDAW(); u.tools(); u.call("tool_name", arg=value)</code>.
+                <b>Scripts &gt; Run Python script...</b> runs a Python 3 script that can drive UDAW (add tracks, edit clips, mix) through the same tools the AI/SI assistants use, so every change is undoable. Python 3 must be installed, and <b>expose UDAW</b> must be switched on in the AI/SI settings. Script output appears in the AI/SI log and on the status bar; choose Run again to stop a running script. <b>Open scripts folder</b> opens the folder holding the generated <code>udaw.py</code> helper: <code>from udaw import UDAW; u = UDAW(); u.tools(); u.call("tool_name", arg=value)</code>.
             </p>
+
+            <h3 id="python-plugins">Python Plug-ins: Write Your Own Effects</h3>
+            <p>
+                A <b>Python plug-in</b> is a small text file that becomes a real effect on a Timeline lane, a bus or a Tracker channel. It can process the sound, show its own window with knobs, sliders, meters and pictures, be automated from the Mixer like any other insert, and its settings are saved <b>in your project</b>, which points at the script file and loads it again whenever the project opens. There is nothing to buy and nothing to install besides Python: if you can describe an effect in a few lines of code, you can have it on a guitar, a vocal or a whole mix.
+            </p>
+            <h4>Why use one?</h4>
+            <ul>
+                <li><b>Re-amp a clean guitar.</b> A DI recording sounds the same however you play it; a drive plug-in lets you try a crunch, a lead and a fuzz against the mix after the fact, and automate the drive for a solo. The bundled example does exactly this.</li>
+                <li><b>A tool that does not exist.</b> A mid/side balance, a tape-style wobble, a telephone filter, a bit-crusher for one drum bus, a gate keyed to your own rules - if no stock effect does it, write it in ten minutes.</li>
+                <li><b>Repeatable and shareable.</b> The whole effect is one file. Send it to a collaborator, keep it in a folder of favourites, or open an old project years later and hear exactly the same processing.</li>
+                <li><b>Learn by doing.</b> Every control you add moves a number you can see in the code, which makes it a gentle way to understand filters, distortion, envelopes and delays.</li>
+                <li><b>Project-specific fixes.</b> A de-hum for one noisy room, a high-pass tuned to one singer, a ducker with exactly the timing this song needs.</li>
+                <li><b>Look inside your sound.</b> A custom-drawn meter, transfer curve or spectrum on the plug-in window shows what an effect is doing while it does it.</li>
+            </ul>
+            <h4>What you need</h4>
+            <p>
+                <b>Python 3.14 or newer</b> from python.org (tick <i>Add python.exe to PATH</i> in the installer). Plug-ins use only what Python ships with; if you also have <code>numpy</code> installed (<code>pip install numpy</code>) a plug-in may use it for heavy maths such as vocoding or reverb; <code>up.HAS_NUMPY</code> tells a script whether it is there. UDAW finds Python by itself and tells you plainly if it is missing or too old. A faulty script can never stop or crash UDAW: at worst the plug-in passes the sound through untouched and says why.
+            </p>
+            <h4>The Plugins menu</h4>
+            <p>
+                The <b>Plugins</b> menu lists every plug-in UDAW can use, found automatically: your Python plug-ins (every script in the plug-ins folder, including sub-folders) and the VST2 / VST3 effects found by the last scan. New files appear in the menu by themselves within a few seconds. Choose a <b>Python plug-in</b> and its <b>window opens</b>, ready to try, listen to and add to the mixer; choose a VST entry and it is put on the strip selected in the <b>Mixer</b> tab.
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Menu item</th><th>What it does</th></tr>
+                <tr><td>Python Plug-ins</td><td>Your scripts; choosing one opens its window. A script in a sub-folder of the plug-ins folder is listed under a sub-menu named after that folder, so you can keep <i>Dynamics</i>, <i>Creative</i>, <i>Utilities</i> apart.</td></tr>
+                <tr><td>VST 3 Plug-ins / VST 2 Plug-ins</td><td>Effects found by the plug-in scan. A long list is sorted into sub-menus by maker when there are several makers, otherwise into alphabetical groups such as <i>A - D</i>, <i>E - K</i>, so no menu ever grows taller than the screen.</td></tr>
+                <tr><td>Load VST 2 Plug-in... / Load VST 3 Plug-in...</td><td>Pick a plug-in file yourself (for one that lives outside the standard folders) and put it on the selected strip.</td></tr>
+                <tr><td>Open Python Editor...</td><td>The plug-in editor described below.</td></tr>
+                <tr><td>New Python Plug-in...</td><td>Opens the editor with a small working template.</td></tr>
+                <tr><td>Open Example: Guitar Overdrive / Distortion</td><td>Opens the bundled example in the editor.</td></tr>
+                <tr><td>Rescan Plug-ins</td><td>Searches the VST folders again (with progress on the status bar) and refreshes the menu.</td></tr>
+                <tr><td>Open Plug-ins Folder</td><td>Opens the folder your Python plug-ins live in (choose it under <b>Settings &gt; Working Directories &gt; Python plug-ins folder</b>; the choice is remembered). UDAW keeps its helper module and the bundled plug-ins there. Projects point at the script files, so if you change the folder, move your plug-ins with it.</td></tr>
+            </table>
+            <h4>The editor</h4>
+            <p>
+                <b>Plugins &gt; Open Python Editor...</b> opens the plug-in editor: your script on top, <b>Problems</b> and <b>Output</b> below. The toolbar:
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Button</th><th>What it does</th></tr>
+                <tr><td>New / Open / Save / Save As</td><td>Start from the template, open a script, save it (<b>Ctrl+N</b>, <b>Ctrl+O</b>, <b>Ctrl+S</b>, <b>Ctrl+Shift+S</b>). Closing with unsaved changes asks first.</td></tr>
+                <tr><td>Validate (F6)</td><td>Checks the script without needing any audio: the file is read for syntax errors, loaded, its parameters and window are checked (duplicate names, controls bound to a parameter that does not exist, controls hanging off the window, <b>controls that overlap - the warning names both controls and their lines</b>, a missing <code>author</code>), and a test signal is run through <code>process()</code> to catch crashes, silence, non-finite numbers and code too slow for real time. Results are listed under <b>Problems</b> as errors, warnings and notes; click a line to jump to it.</td></tr>
+                <tr><td>Run (F5)</td><td>Validates, then starts the plug-in, opens its window and starts <b>Listen</b> so you hear it straight away (see below).</td></tr>
+                <tr><td>Stop</td><td>Stops the running plug-in.</td></tr>
+                <tr><td>Add to lane + Add to Mixer</td><td>Choose a Timeline lane or bus, or a Tracker channel, then press <b>Add to Mixer</b>: the plug-in goes on that strip with <b>the settings currently shown in its window</b>.</td></tr>
+            </table>
+            <p>
+                Anything the script prints appears under <b>Output</b>, together with load errors - the first place to look when something does not behave.
+            </p>
+            <h4>Hear it before you add it</h4>
+            <p>
+                Every plug-in window (from the Plugins menu or the editor's Run) has a <b>Hear it</b> row. <b>Listen</b> plays program material through the plug-in on your speakers, so you judge the sound before it goes anywhere near a lane:
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Control</th><th>What it does</th></tr>
+                <tr><td>Listen</td><td>Starts and stops the audition (it starts by itself when the window opens from the menu or from Run). The audition takes the speakers, so it stops Timeline playback first, and Timeline playback in turn ends the audition.</td></tr>
+                <tr><td>Source</td><td><b>Built-in guitar phrase</b>: a clean plucked-string riff that needs no files, the fallback that is always available. <b>Highlighted Timeline range</b>: the area you selected on the Timeline (up to 30 seconds, the lanes summed without their effects), played in a loop through the plug-in. With nothing highlighted UDAW says so and uses the guitar phrase.</td></tr>
+                <tr><td>Bypass</td><td>Plays the same material without the plug-in, to compare before and after while you turn the knobs.</td></tr>
+                <tr><td>Add to Mixer</td><td>When you like it, puts the plug-in with the settings you chose on the strip selected in the Mixer tab. The insert points at the script file, so the file must be saved (the editor offers to save it first).</td></tr>
+            </table>
+            <p>
+                Also in the window: <b>About</b> (name, version and <b>the author</b>), <b>Log</b>, <b>Defaults</b> and <b>Close</b>. The controls <b>scale with the window</b> when you resize it.
+            </p>
+            <h4>On the mixer</h4>
+            <p>
+                A Python plug-in is an ordinary insert. It sits in the strip's insert chain, can be bypassed, reordered and removed, and takes part in Undo. <b>Double-click</b> it to open its window; the settings are kept in the project when you press <b>Save settings</b> or close the window. While the project plays, the window is connected to the plug-in that is playing, so what you move is what you hear and meters show the real signal. Its parameters appear in the Mixer's <b>automation</b> list (named after the plug-in's parameters) and can be drawn as automation lanes or driven by modulators. Exports always wait for the plug-in, so a bounce is exact even if the script is slow. The project <b>remembers every Python plug-in it uses</b> (the script's location and its settings, on Timeline lanes and Tracker channels alike). When the project opens, each plug-in is located, loaded and put back on its Mixer strip, together with any plug-in windows you left open.
+            </p>
+            <div class="udaw-note">
+                The project does <b>not</b> contain a copy of the script: the insert <b>points at the script file</b> and loads it from there each time the project opens or plays. Keep the file where it is (or add the plug-in again from its new place). Edit the file and the insert uses the new version the next time it starts. If the file is missing when the project opens, UDAW lists the missing scripts and the insert passes the sound through unchanged until the file is back. Because the project holds only the path, give a plug-in that a collaborator needs a shared location (or send the <code>.py</code> file with the project).
+            </div>
+            <h4>Writing a plug-in</h4>
+            <p>
+                A plug-in is a class that derives from <code>udaw_plugin.Plugin</code>. Everything is optional except what you want it to do:
+            </p>
+            <div class="udaw-code">import udaw_plugin as up
+
+class Plugin(up.Plugin):
+    name = "Tremolo"
+    author = "Your Name"            # shown in the About box
+    description = "Wobbles the level, like an old amplifier."
+
+    def setup(self):                      # 1. declare the settings
+        self.add_param("rate",  "Rate",  min=0.5, max=12, default=4, unit="Hz", log=True)
+        self.add_param("depth", "Depth", min=0, max=100, default=60, unit="%", decimals=0)
+
+    def ui(self, ui):                     # 2. describe the window
+        ui.window(220, 150, "Tremolo")
+        ui.knob("k_rate",  20, 20, param="rate")
+        ui.knob("k_depth", 120, 20, param="depth")
+
+    def prepare(self, sample_rate, channels, max_frames):
+        self.lfo = up.LFO(sample_rate, 4.0)   # 3. get ready (filters, delay lines ...)
+
+    def process(self, block):             # 4. the audio
+        self.lfo.freq = self.p.rate
+        depth = self.p.depth * 0.01
+        for i in range(block.frames):
+            g = 1.0 - depth * (0.5 + 0.5 * self.lfo.tick())
+            for ch in range(block.channels):
+                block.out[ch][i] = block.inp[ch][i] * g</div>
+            <h4>Parameters</h4>
+            <p>
+                Parameters are the plug-in's settings. They are saved in the project, can be automated, and are read in <code>process()</code> as <code>self.p.name</code>.
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Call</th><th>Meaning</th></tr>
+                <tr><td><code>add_param(id, name, min, max, default, unit="", log=False, step=0, decimals=2)</code></td><td>A number. <code>log=True</code> gives a logarithmic scale (frequencies, times; needs <code>min &gt; 0</code>). <code>step</code> snaps to multiples.</td></tr>
+                <tr><td><code>add_param(..., kind="int")</code></td><td>A whole number.</td></tr>
+                <tr><td><code>add_bool(id, name, default=False)</code></td><td>An on/off switch; <code>self.p.id</code> is <code>True</code> or <code>False</code>.</td></tr>
+                <tr><td><code>add_choice(id, name, ["A", "B", ...], default=0)</code></td><td>One of a list; <code>self.p.id</code> is the chosen index.</td></tr>
+                <tr><td><code>self.set_param(id, value)</code></td><td>Changes a parameter from inside the plug-in (the control follows).</td></tr>
+            </table>
+            <h4>Audio</h4>
+            <p>
+                <code>process(self, block)</code> is called for each buffer. <code>block.inp[ch]</code> is what comes in, <code>block.out[ch]</code> is what you write (it starts as a copy of the input, so a channel you do not touch passes through). <code>block.frames</code>, <code>block.channels</code>, <code>block.sample_rate</code> and <code>block.peak()</code> are available. Because Python is slower than compiled code, keep loops tight: put values you use per sample into local variables, avoid creating objects inside the loop, and prefer simple formulas such as <code>up.soft_clip(x)</code> over many function calls. The Validate button reports how much of the real-time budget your <code>process()</code> uses.
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Helper</th><th>What it is</th></tr>
+                <tr><td><code>up.db_to_lin(db)</code>, <code>up.lin_to_db(x)</code>, <code>up.clamp</code>, <code>up.lerp</code>, <code>up.midi_to_hz</code>, <code>up.rgb</code></td><td>Small conversions.</td></tr>
+                <tr><td><code>up.Biquad(kind, sr, freq, q, gain_db)</code></td><td>Filters: lowpass, highpass, bandpass, notch, peak, lowshelf, highshelf, allpass. <code>f.tick(x)</code> filters one sample; <code>f.set(...)</code> retunes it.</td></tr>
+                <tr><td><code>up.OnePole</code>, <code>up.DCBlocker</code></td><td>Gentle one-pole filter; DC-offset remover (asymmetric distortion makes offset).</td></tr>
+                <tr><td><code>up.Smoother</code></td><td>Glides a value to its target to avoid clicks when a knob moves.</td></tr>
+                <tr><td><code>up.EnvelopeFollower</code></td><td>Follows the level with separate attack and release - the heart of gates and compressors.</td></tr>
+                <tr><td><code>up.DelayLine</code>, <code>up.LFO</code></td><td>Interpolating delay (echo, chorus, flange); sine / triangle / saw / square oscillator.</td></tr>
+            </table>
+            <h4>Timing and heavy plug-ins</h4>
+            <p>
+                UDAW sends each buffer to the plug-in and waits briefly for the answer. If the plug-in is ever late, that buffer plays <i>dry</i> instead of stalling the music; the window's status line shows the percentage of late buffers. If an effect is too heavy for real time, set <code>buffered = True</code> on the class: results then arrive one buffer late (a tiny, constant delay) and the effect always keeps up. Plug-ins that want numpy set <code>use_numpy = True</code>.
+            </p>
+            <h4>Building the window</h4>
+            <p>
+                The <code>ui(self, ui)</code> method places controls with <code>ui.&lt;type&gt;(id, ..., x, y, w, h)</code>, in pixels. Leave <code>ui()</code> out and UDAW builds a plain window with one control per parameter. Controls sit directly on the window with transparent backgrounds, and they stretch with the window when it is resized, so design at a comfortable size. A control placed wholly on a group or panel automatically becomes part of it, so it takes the frame's background and moves with it (no filled rectangles around knobs). Place controls so they do not overlap: Validate warns about every overlapping pair by name (a control lying wholly on a group or panel is fine). Every type of UDAW's own control set can be created:
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Call</th><th>Control</th></tr>
+                <tr><td><code>ui.label</code>, <code>ui.status</code></td><td>Text; a status line.</td></tr>
+                <tr><td><code>ui.button</code> (<code>toggle=True</code> for an on/off button), <code>ui.check</code></td><td>Buttons and check boxes. Bound to an on/off parameter they follow it; otherwise the plug-in gets a <code>click</code> / <code>change</code> event.</td></tr>
+                <tr><td><code>ui.knob</code>, <code>ui.slider</code> (<code>vertical=True</code>), <code>ui.eq_slider</code></td><td>Value controls. Bound with <code>param=</code> they take range, default, logarithmic scale, resolution and unit from the parameter.</td></tr>
+                <tr><td><code>ui.meter</code> / <code>ui.progress</code></td><td>A level bar. Drive it from <code>process()</code> with <code>self.ui_set("id", value=level)</code>.</td></tr>
+                <tr><td><code>ui.combo</code>, <code>ui.list</code>, <code>ui.list_view</code>, <code>ui.tree</code></td><td>Drop-down, list, table with columns, expandable tree.</td></tr>
+                <tr><td><code>ui.edit</code>, <code>ui.memo</code></td><td>A text box; a multi-line text area (read-only or editable).</td></tr>
+                <tr><td><code>ui.group</code>, <code>ui.panel</code>, <code>ui.recess</code>, <code>ui.collapse</code>, <code>ui.scroll_box</code>, <code>ui.bevel</code>, <code>ui.shine</code>, <code>ui.splitter</code></td><td>Containers and decoration. Give a control <code>parent="id"</code> to place it inside one (its position is then relative to the container).</td></tr>
+                <tr><td><code>ui.tabs</code>, <code>ui.tab_strip</code></td><td>Pages: <code>ui.tabs("t", ["Tone", "About"], ...)</code> then <code>parent="t#0"</code> / <code>"t#1"</code> to fill a page.</td></tr>
+                <tr><td><code>ui.scroll_bar</code></td><td>A scroll bar with change events.</td></tr>
+                <tr><td><code>ui.canvas</code></td><td>A surface you draw yourself (below).</td></tr>
+                <tr><td><code>ui.add(type, id, ...)</code></td><td>Any of the above by name.</td></tr>
+            </table>
+            <p>
+                <b>Every property is reachable.</b> Extra named arguments set the control's property of the same name, written either way: <code>font_size=14</code>, <code>bold=True</code>, <code>font_color="#8a93a3"</code>, <code>color="#16181d"</code>, <code>hint="Shown on hover"</code>, <code>read_only=False</code>, <code>Decimals=1</code>, <code>visible=False</code>. Colours are <code>"#rrggbb"</code> or <code>(r, g, b)</code>. The script can change controls while it runs: <code>self.ui_set("id", caption="...", value=0.5, visible=True)</code>, and react to controls that have no parameter by defining <code>on_&lt;id&gt;(self, event, value)</code> or <code>on_event(self, id, event, value)</code>.
+            </p>
+            <h4>Drawing your own surface</h4>
+            <p>
+                A <code>ui.canvas</code> is redrawn about 30 times a second (or on <code>self.repaint(id)</code>) by calling <code>paint_&lt;id&gt;(self, canvas)</code> or <code>paint(self, id, canvas)</code>. Draw with:
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Draw command</th><th>Result</th></tr>
+                <tr><td><code>fill_rect</code>, <code>rect</code>, <code>round_rect</code>, <code>ellipse</code>, <code>circle</code></td><td>Filled and outlined shapes.</td></tr>
+                <tr><td><code>line</code>, <code>polyline</code>, <code>polygon</code>, <code>arc</code></td><td>Lines, paths and filled polygons.</td></tr>
+                <tr><td><code>gradient(x, y, w, h, top, bottom, horizontal)</code></td><td>A colour blend.</td></tr>
+                <tr><td><code>plot(values, x, y, w, h, lo, hi, color)</code>, <code>grid(...)</code></td><td>A curve scaled into a box (waveforms, transfer curves, spectra); a ruled grid.</td></tr>
+                <tr><td><code>text(x, y, string, color, size, bold, align, width)</code></td><td>Text, left / centre / right aligned.</td></tr>
+                <tr><td><code>push_clip</code> / <code>pop_clip</code>, <code>alpha</code></td><td>Restrict drawing to a box; set transparency.</td></tr>
+            </table>
+            <p>
+                With <code>mouse=True</code> (the default) the canvas also reports the mouse to <code>on_mouse(self, id, kind, x, y, button)</code> - kinds <i>down, move, up, wheel, double</i> - so you can build draggable curves, XY pads or step sequencers.
+            </p>
+            <h4>Saving extra data</h4>
+            <p>
+                Parameter values are saved automatically. For anything else (a preset number, a list of steps), return plain data from <code>get_state()</code> and read it back in <code>set_state(state)</code>; it is saved with the project too. Other hooks: <code>reset()</code> (clear filter memory when playback restarts), <code>on_param(id, value)</code> (a setting changed), <code>on_timer()</code> (about 20 times a second while the window is open).
+            </p>
+            <h4>The bundled example: Guitar Overdrive &amp; Distortion</h4>
+            <p>
+                <b>Plugins &gt; Open Example</b> opens a complete plug-in made for guitar recordings, and it exercises every part of the system: parameters of all kinds, per-sample audio, a tabbed window with knobs, a combo box, check boxes, level meters and a memo, a custom-drawn transfer curve with a live waveform, presets that move many settings at once, and saved extra state. Signal flow: noise gate, tight (high-pass before the clipper), drive, one of six voicings through one to three cascaded clipping stages, tone low-pass, bass / mid / presence, a cabinet filter, DC block, dry/wet mix, output level and a soft output limiter.
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Voicing</th><th>Character</th></tr>
+                <tr><td>Clean Boost</td><td>Soft, nearly transparent push - thickens a clean part and drives the next stage.</td></tr>
+                <tr><td>Overdrive</td><td>A pushed tube-like stage with a touch of asymmetry: warm, dynamic, responds to picking.</td></tr>
+                <tr><td>Crunch</td><td>Different knees for the two halves of the wave: rhythm-guitar grit.</td></tr>
+                <tr><td>Distortion</td><td>Hard knee, tight and aggressive - rock and metal.</td></tr>
+                <tr><td>Fuzz</td><td>Heavy, uneven and raw.</td></tr>
+                <tr><td>Metal</td><td>An almost square-wave clipper: the most extreme voicing. At full Drive there is about 100 dB of gain into the clipper.</td></tr>
+            </table>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Control</th><th>Why you would touch it</th></tr>
+                <tr><td>Gate</td><td>High-gain sounds amplify hum and hiss between notes; raise it until the gaps are silent but note tails still ring.</td></tr>
+                <tr><td>Tight</td><td>Cuts low frequencies <i>before</i> the clipper so palm-muted low strings stay clear instead of turning to mud.</td></tr>
+                <tr><td>Drive</td><td>How hard the clipper is pushed. Automate it for a solo that gets dirtier as it climbs.</td></tr>
+                <tr><td>Stages</td><td>One to three clippers in series: every extra stage clips what the last one already clipped, for a denser, more compressed, far more distorted sound.</td></tr>
+                <tr><td>Tone / Bass / Mid / Presence</td><td>Shape the result after the distortion, where it matters.</td></tr>
+                <tr><td>Cabinet</td><td>Rolls off the fizz above about 5 kHz and the rumble below 80 Hz, as a speaker would.</td></tr>
+                <tr><td>2x anti-alias</td><td>Less harsh digital fizz on heavy settings, for more CPU.</td></tr>
+                <tr><td>Mix</td><td>Blend with the dry guitar: parallel drive keeps the pick attack of a clean take under a heavy tone.</td></tr>
+                <tr><td>Output limiter</td><td>A soft ceiling so even the heaviest setting can never go over 0 dBFS.</td></tr>
+                <tr><td>Preset</td><td>Clean Boost, Blues Overdrive, Classic Crunch, Hard Rock, Metal Wall, Fuzz Face - each moves many controls at once.</td></tr>
+            </table>
+            <h4>The bundled plug-ins</h4>
+            <p>
+                Three finished plug-ins ship with UDAW, all written by <b>Daniel J. Hobson, Australia</b>. They appear in the Plugins menu by themselves, open in the editor to be read and changed, and between them show most of what the system can do. The Vocoder and Reverberator &amp; Chorus use numpy (<code>pip install numpy</code>) so they stay light on the processor; without it they pass the sound through and say so in their Log.
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Plug-in</th><th>What it is for</th></tr>
+                <tr><td>Guitar Overdrive &amp; Distortion</td><td>Re-amp a clean guitar: six voicings from a clean boost to a metal wall, cascaded stages, gate, tone stack, cabinet filter.</td></tr>
+                <tr><td>Vocoder</td><td>Make a voice talk through a built-in synthesiser. Choose a sawtooth, pulse, detuned choir or noise carrier, a note and a chord; 8 to 32 bands, attack and release, formant shift, brightness and a sibilance control so consonants stay clear. Presets include Classic Robot, Choir Pad, Deep Giant and Whisper. It needs no side-chain: put it straight on the vocal lane. Latency is about 21 ms.</td></tr>
+                <tr><td>Reverberator &amp; Chorus</td><td>A stereo chorus (one to four modulated voices, rate, depth, delay, mix) feeding an algorithmic reverb (eight combs and four all-pass filters with damping, pre-delay and stereo width). Room, Hall, Plate and Cathedral types set sensible starting points. Use it to thicken a thin part and place it in a room in one step.</td></tr>
+            </table>
+            <p>
+                <b>Free for every user.</b> These three plug-ins are included for all UDAW users as working demonstrations of how to program your own plug-ins. Use them, open them in the editor, study them and adapt them to learn the system - at no extra cost. You may share your own plug-ins, and changed versions of these, with other users free of charge, but they may not be sold or distributed for commercial gain. <b>Want to contribute?</b> If you would like to contribute plug-ins, ideas or other work to UDAW, please contact <b>udaw2026@gmail.com</b>. Please write properly: say who you are, give a verifiable name and contact details, and explain clearly what you would like to contribute. Spam, unsolicited offers and anything irrelevant to UDAW will be ignored without reply.
+            </p>
+            <h4>More ideas for your own plug-ins</h4>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>Plug-in</th><th>Why it is worth writing</th></tr>
+                <tr><td>Tape wobble / lo-fi</td><td>A slow <code>LFO</code> modulating a <code>DelayLine</code> plus a high-cut and a little noise gives a worn-tape character no stock effect matches exactly.</td></tr>
+                <tr><td>Mid / side balance</td><td>Two knobs and ten lines turn a stereo recording's centre or sides up and down - handy for vocal focus or widening.</td></tr>
+                <tr><td>Smart gate for a drum bus</td><td>Combine an <code>EnvelopeFollower</code> with your own hold and release rules, and show the gate's state with a meter.</td></tr>
+                <tr><td>Level and spectrum display</td><td>Use a <code>canvas</code> to draw what you need on every lane: peak history, stereo balance, a rough spectrum.</td></tr>
+                <tr><td>Ducker</td><td>Lower a pad when a note is detected on the same channel, with exactly the shape you want.</td></tr>
+                <tr><td>Step-gate / trance gate</td><td>A canvas of clickable steps (<code>on_mouse</code>) that chops the signal in time.</td></tr>
+                <tr><td>Teaching tool</td><td>A filter or clipper with the maths in plain sight - change a line, hear the difference.</td></tr>
+            </table>
+            <h4>If something goes wrong</h4>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>What you see</th><th>What to do</th></tr>
+                <tr><td>"Python 3.14 or newer was not found"</td><td>Install the current Python from python.org with <i>Add python.exe to PATH</i> ticked, then try again.</td></tr>
+                <tr><td>The insert passes sound through unchanged</td><td>The script did not load or stopped. Open the editor, press <b>Validate</b>, and read <b>Problems</b> and <b>Output</b>.</td></tr>
+                <tr><td>Status line says some blocks are "late"</td><td>The script is too heavy for real time. Simplify the per-sample loop, set <code>buffered = True</code>, or use numpy.</td></tr>
+                <tr><td>A control does not appear</td><td>Validate lists controls placed outside the window or hung off a parent that does not exist.</td></tr>
+                <tr><td>Validate says two controls overlap</td><td>The message names both controls and the script lines that created them; move or resize one so they do not cover each other.</td></tr>
+                <tr><td>Listen cannot start</td><td>Another sound (Timeline playback) is using the speakers, or the plug-in instance runs at a different sample rate than the output device - close the window and open it again.</td></tr>
+                <tr><td>A change to the file does not affect the song</td><td>The project holds its own copy: add the plug-in to the lane again.</td></tr>
+            </table>
 
             <h3 id="tracker-to-timeline">Tracker Modules on the Timeline</h3>
             <p>
@@ -1227,7 +1797,7 @@
             <p>
                 Each strip is a vertical channel: name and colour (a strip takes the colour of the
                 Timeline track it is linked to), <b>In</b> and <b>Out</b> choosers, its effect list with
-                <b>+ FX</b> and <b>+ Send</b> beneath it, a pan slider, the fader level and peak readouts,
+                <b>+ FX</b> (its menu also has a <b>Python Plug-ins</b> sub-menu listing your scripts &ndash; pick one to put it on that strip) and <b>+ Send</b> beneath it, a pan slider, the fader level and peak readouts,
                 the fader with its meter, and <b>M</b> (mute), <b>S</b> (solo) and <b>R</b> (arm for
                 recording) at the bottom. Click an effect to edit it, right-click it to move or remove it,
                 and click a send to remove it. Double-click the fader or the pan slider to reset it.
@@ -1475,7 +2045,7 @@
             <h3 id="codec-mp4">MP4</h3>
             <p>
                 Open and import <code>.mp4</code>, <code>.m4a</code>, <code>.m4v</code>, <code>.mov</code>, <code>.mkv</code> and <code>.webm</code> files. Sound plays and imports to the Timeline sample-accurately: AAC (including HE-AAC and surround), MP3 and uncompressed audio are decoded exactly, the silent padding that encoders add at the start and end of a file is removed so a clip begins on the first real sample, and surround channels keep their standard order. A damaged section of a file becomes silence of the same length instead of shortening the clip, so everything after it stays in time. Large video files are handled without loading the whole file into memory. Matroska (MKV/WebM) files and less common audio formats (Opus, Vorbis, AC-3, DTS, FLAC and others) are read with the media codecs installed in Windows; installing a codec pack such as K-Lite extends the list. MP4/M4A and MP3 export from the Timeline are encoded by the Windows system audio encoders (Windows only), always at 48 kHz. Use <strong>Import to
-                Timeline</strong> to bring audio in from an MP4/M4A/MKV file the same way as WAV/MP3/FLAC. If the file also contains <strong>video</strong>, the picture is placed on its own <strong>Video</strong> channel at the same start time, separate from the sound's audio channel. While the Timeline plays, a video pane beside the Timeline shows the picture in step with the audio (the pane appears whenever a video channel holds a clip; the picture is silent because the sound plays from the audio channel). Video is displayed with the video support installed in Windows; a file whose video format Windows cannot display still imports, but its pane stays blank. <strong>Exporting video:</strong> when the Timeline holds video, <strong>Timeline &gt; Export &gt; MP4...</strong> or <strong>MKV...</strong> (also in the Timeline popup menu) saves the picture and the mixed sound together as one file. Where several video clips overlap, the clip on the higher video channel is shown; gaps are black; muted channels and clips are left out; and a range selection exports just that range. The picture size is that of the largest video clip used and the frame rate follows the first clip. Only MP4 and MKV are offered while video is present, since other formats cannot carry a picture. Progress appears in the status bar and Jobs.
+                Timeline</strong> to bring audio in from an MP4/M4A/MKV file the same way as WAV/MP3/FLAC. If the file also contains <strong>video</strong>, the picture is placed on its own <strong>Video</strong> channel at the same start time, separate from the sound's audio channel. While the Timeline plays, a video pane beside the Timeline shows the picture in step with the audio (the pane appears whenever a video channel holds a clip; the picture is silent because the sound plays from the audio channel). Video is displayed with the video support installed in Windows; a file whose video format Windows cannot display still imports, but its pane stays blank. <strong>Exporting video:</strong> when the Timeline holds video, <strong>Timeline &gt; Export &gt; MP4...</strong> or <strong>MKV...</strong> (also in the Timeline popup menu) saves the picture and the mixed sound together as one file. Where several video clips overlap, the clip on the higher video channel is shown; gaps are black; muted channels and clips are left out; and a range selection exports just that range. The picture size is that of the largest video clip used and the frame rate follows the first clip. Only MP4 and MKV are offered while video is present, since other formats cannot carry a picture. Progress appears in the status bar and Jobs. See <a href="#timeline-video">Video: Import, Edit and Export</a> for the full walk-through.
             </p>
         </section>
 
@@ -1533,20 +2103,20 @@
 
         <!-- ============================================================ -->
         <section id="ai">
-            <h2>13. AI Assistant &amp; Voice Control</h2>
+            <h2>13. AI/SI Assistant &amp; Voice Control</h2>
             <div class="udaw-purpose">
-                <p><b>Purpose</b> Use an external AI provider to answer questions, make validated edits, suggest mix/master moves, generate new music, and take voice commands - all as an optional layer on top of a DAW that works fully offline without it.</p>
-                <p><b>Why</b> Every AI-driven action goes through the same safe, undo-aware command path a mouse-driven edit uses (see <a href="#project-doc">Projects, Undo &amp; Recovery</a>), and destructive actions always ask for confirmation first - so using the assistant never puts your project at more risk than editing it by hand.</p>
+                <p><b>Purpose</b> Use an external AI/SI provider to answer questions, make validated edits, suggest mix/master moves, generate new music, and take voice commands - all as an optional layer on top of a DAW that works fully offline without it.</p>
+                <p><b>Why</b> Every AI/SI-driven action goes through the same safe, undo-aware command path a mouse-driven edit uses (see <a href="#project-doc">Projects, Undo &amp; Recovery</a>), and destructive actions always ask for confirmation first - so using the assistant never puts your project at more risk than editing it by hand.</p>
             </div>
             <p>
-                The AI tab hosts a chat panel that can be pointed at different AI providers
+                The AI/SI tab hosts a chat panel that can be pointed at different AI/SI providers
                 (OpenAI, Claude, or DeepSeek), selected through a provider factory so the rest of the
                 application does not care which one is active. Each provider is optional and can be
                 individually enabled by saving an API key for it; with none configured, UDAW is a
-                complete, fully functional DAW with no AI features engaged at all.
+                complete, fully functional DAW with no AI/SI features engaged at all.
             </p>
             <p>
-                A horizontal splitter sits between the MCP server list and the AI log below it -
+                A horizontal splitter sits between the MCP server list and the AI/SI log below it -
                 drag it up or down to give the log more or less room, the same way you would resize
                 any docked panel.
             </p>
@@ -1554,9 +2124,9 @@
             <h3 id="ai-keys">Getting API Keys</h3>
             <div class="udaw-purpose">
                 <p><b>Purpose</b> Know exactly where each provider's key comes from and what to paste into UDAW, so you're not guessing which website to sign up on.</p>
-                <p><b>Why</b> "AI provider" and "Suno" are not accounts you already have just because you use UDAW - each is a separate third-party service with its own signup, billing and key page. UDAW never creates, sells or proxies these keys; it only stores whatever you paste in, in your operating system's own secure credential store (DPAPI on Windows), and sends it straight to that provider's API over HTTPS.</p>
+                <p><b>Why</b> "AI/SI provider" and "Suno" are not accounts you already have just because you use UDAW - each is a separate third-party service with its own signup, billing and key page. UDAW never creates, sells or proxies these keys; it only stores whatever you paste in, in your operating system's own secure credential store (DPAPI on Windows), and sends it straight to that provider's API over HTTPS.</p>
             </div>
-            <p>For every provider below, the steps in UDAW are the same: on the <strong>AI tab</strong>, pick the provider from the <strong>Provider</strong> dropdown, paste the key into the <strong>API key</strong> field, and press <strong>Save</strong> (then <strong>Test</strong> to confirm it works). Leaving a provider's key blank simply leaves that provider disabled - nothing else in UDAW requires it.</p>
+            <p>For every provider below, the steps in UDAW are the same: on the <strong>AI/SI tab</strong>, pick the provider from the <strong>Provider</strong> dropdown, paste the key into the <strong>API key</strong> field, and press <strong>Save</strong> (then <strong>Test</strong> to confirm it works). Leaving a provider's key blank simply leaves that provider disabled - nothing else in UDAW requires it.</p>
             <table class="udaw-table udaw-col-30">
                 <tr><th>Provider</th><th>Where to get a key</th><th>Notes</th></tr>
                 <tr><td>OpenAI / ChatGPT</td><td><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a></td><td>Requires an OpenAI Platform account (separate from a ChatGPT Plus subscription) with billing/usage set up. Create a "secret key" and paste it in as-is.</td></tr>
@@ -1566,12 +2136,12 @@
                 <tr><td>Luma</td><td>Create an account and key at <a href="https://platform.lumalabs.ai/" target="_blank" rel="noopener">platform.lumalabs.ai</a></td><td>Luma generates <strong>video and images only</strong> (Ray / Photon) - it has no music, lyrics or sheet-music service, so choosing Luma hides the music controls (Recordings, Lyrics and Styles) and shows video/image controls instead. Use <strong>Test (credits)</strong> to verify the key. A finished Luma video is placed automatically on a new <strong>VIDEO</strong> channel of the <a href="#timeline">Timeline</a> at the playhead, where you can move, trim, split and fade it like any other clip.</td></tr>
             </table>
             <div class="udaw-note">
-                Keys are billed by that provider, not by UDAW. Treat a pasted key like a password: anyone with it can spend against your account. Select the provider and press the AI tab's <strong>Delete</strong> button to remove its stored key from secure storage, and rotate/revoke the key on the provider's own dashboard if you ever suspect it leaked.
+                Keys are billed by that provider, not by UDAW. Treat a pasted key like a password: anyone with it can spend against your account. Select the provider and press the AI/SI tab's <strong>Delete</strong> button to remove its stored key from secure storage, and rotate/revoke the key on the provider's own dashboard if you ever suspect it leaked.
             </div>
 
-            <h3 id="ai-cost">AI Cost: Consumer Plans vs. Your Own API Key</h3>
+            <h3 id="ai-cost">AI/SI Cost: Consumer Plans vs. Your Own API Key</h3>
             <div class="udaw-purpose">
-                <p><b>Purpose</b> Understand what AI inside UDAW costs compared with a consumer chat subscription, so you can pick the provider and model that suit how much you use it.</p>
+                <p><b>Purpose</b> Understand what AI/SI inside UDAW costs compared with a consumer chat subscription, so you can pick the provider and model that suit how much you use it.</p>
                 <p><b>Why</b> Chat plans (ChatGPT Plus/Pro, Claude Pro/Max) are flat monthly fees, roughly $20, $100 or $200, with message caps and rolling usage windows. UDAW uses each provider's API with your own key, which is billed per token used, with no monthly fee from UDAW, no mark-up and no message cap other than your own budget.</p>
             </div>
             <table class="udaw-table udaw-col-30">
@@ -1580,7 +2150,7 @@
                 <tr><td>OpenAI GPT-5.6 Luna</td><td>$0.20 / $1.20</td><td>about $0.50</td></tr>
                 <tr><td>Claude Sonnet 5</td><td>$2 / $10</td><td>about $4.50</td></tr>
             </table>
-            <p>Use a low-cost model for routine questions and quick edits, and switch provider on the <strong>AI tab</strong> to a premium model only when a task needs it. Because the assistant reads your live tracks and mixer, you do not spend tokens describing the project.</p>
+            <p>Use a low-cost model for routine questions and quick edits, and switch provider on the <strong>AI/SI tab</strong> to a premium model only when a task needs it. Because the assistant reads your live tracks and mixer, you do not spend tokens describing the project.</p>
             <div class="udaw-note">
                 Rates and plan prices are set by the providers and change often; the figures above are indicative. Check the current pricing yourself:
                 <ul>
@@ -1592,13 +2162,13 @@
                 </ul>
             </div>
 
-            <h3 id="ai-compose">AI Composition: Samples and Loops Before MIDI</h3>
+            <h3 id="ai-compose">AI/SI Composition: Samples and Loops Before MIDI</h3>
             <div class="udaw-purpose">
-                <p><b>Purpose</b> Understand what the AI actually puts on a track when it composes or revises an arrangement, and how to make it use generated MIDI on purpose when that is what you want.</p>
-                <p><b>Why</b> Real recorded samples and loops from your own catalogue sound like finished production; generated MIDI performance data is a starting point that still needs an instrument, a patch and a performance. Defaulting to real audio means an AI-composed arrangement is closer to "done" on the first pass.</p>
+                <p><b>Purpose</b> Understand what the AI/SI actually puts on a track when it composes or revises an arrangement, and how to make it use generated MIDI on purpose when that is what you want.</p>
+                <p><b>Why</b> Real recorded samples and loops from your own catalogue sound like finished production; generated MIDI performance data is a starting point that still needs an instrument, a patch and a performance. Defaulting to real audio means an AI/SI-composed arrangement is closer to "done" on the first pass.</p>
             </div>
             <p>
-                When the AI composition/arrangement engine (see <a href="#ai-chat">Chat &amp; Tool
+                When the AI/SI composition/arrangement engine (see <a href="#ai-chat">Chat &amp; Tool
                 Commands</a> and the <code>SuggestMix</code>/song-specification pipeline) builds or
                 revises a track, it always tries a matching <strong>sample or loop</strong> from your
                 instrument/sample catalogue first - scored the same way instrument matching already
@@ -1661,7 +2231,7 @@
 
             <h3 id="project-startup">Startup, recovery and recent projects</h3>
             <p><strong>Settings</strong> has separate General, Colours and Diagnostics pages. Secure Storage, MP3, MP4, Graph, DSP, Supported SFX (formerly WAV), Advanced DSP and Scope are in Settings. The General page also sets <strong>Timeline refresh (per second)</strong> &ndash; how often the Timeline redraws while playing (5, 10, 15, 20, 25, 30, 35 or 40; default 20). Lower values use less CPU, which can help audio and video playback on slower machines. Open Log from the main or popup menus. Colours controls backgrounds for clips with effects and fade-in/fade-out regions; choose coloured areas (default), curves, or both. A colour you change under Settings &gt; Colors for an effect shows at once on every clip that carries that effect, selected or not - the effect's span is tinted behind the waveform and the wave itself is drawn in that colour.</p>
-            <p>UDAW starts on the <strong>Project tab</strong>. It reopens the last successfully opened or saved project. If that project has an unclean-shutdown marker, UDAW automatically loads its newest available recovery candidate and marks recovered autosaved changes as unsaved. Recovery is limited to data already written to an autosave; it cannot restore edits made after the last snapshot. Missing or unreadable project data produces an error and leaves a new project available.</p>
+            <p>UDAW starts on the <strong>Timeline</strong> and, unless you have turned it off, shows the <a href="#welcome">Welcome screen</a> over it. It reopens the last successfully opened or saved project. If that project has an unclean-shutdown marker, UDAW automatically loads its newest available recovery candidate and marks recovered autosaved changes as unsaved. Recovery is limited to data already written to an autosave; it cannot restore edits made after the last snapshot. Missing or unreadable project data produces an error and leaves a new project available.</p>
             <p><strong>Project &gt; File &gt; Recent Projects</strong> lists the last ten distinct opened or saved projects, newest first. Reopening a project moves it to the top. The list survives restarts, and opening a recent entry uses the same recovery manager. Creating a new project clears the automatic last-project target until you save or open a named project.</p>
             <p>The startup splash uses the saved visual theme from its first display. An animated circular activity indicator appears alongside the current startup stage and its progress bar. The animation continues while Windows startup work is busy; it does not imply a measured percentage.</p>
             <p>UDAW saves its normal window dimensions and maximized state on close, then restores them on the next startup. Closing while minimized preserves the previous normal/maximized state. Restored dimensions are constrained to the current screen's working area.</p>
@@ -1673,8 +2243,8 @@
             </div>
             <ol>
                 <li>Get a managed API key: create an account at <a href="https://sunoapi.org" target="_blank" rel="noopener">sunoapi.org</a>, add credits, then open <a href="https://sunoapi.org/api-key" target="_blank" rel="noopener">sunoapi.org/api-key</a> and copy your API key (another dashboard using the same <code>apibox.erweima.ai</code> contract also works). The provider's site and pricing are its own and can change - if a link has moved, start from the <a href="https://docs.sunoapi.org" target="_blank" rel="noopener">documentation</a>.</li>
-                <li>Open the <strong>AI tab</strong>, choose <strong>Suno</strong> on the <strong>Provider</strong> row, paste the key into <strong>API key</strong> and press <strong>Save</strong>. UDAW stores it in the operating system's secure storage. Nothing else on the panel needs to change.</li>
-                <li>Press <strong>Test</strong>. Success shows the provider's credit balance. HTTP errors, a website page instead of JSON, and invalid quota responses fail the test - most often a missing or wrong key. Check the AI log for the result. Test does not generate music.</li>
+                <li>Open the <strong>AI/SI tab</strong>, choose <strong>Suno</strong> on the <strong>Provider</strong> row, paste the key into <strong>API key</strong> and press <strong>Save</strong>. UDAW stores it in the operating system's secure storage. Nothing else on the panel needs to change.</li>
+                <li>Press <strong>Test</strong>. Success shows the provider's credit balance. HTTP errors, a website page instead of JSON, and invalid quota responses fail the test - most often a missing or wrong key. Check the AI/SI log for the result. Test does not generate music.</li>
                 <li>Enter a music description in <strong>Suno prompt</strong>, optionally select <strong>Instrumental</strong>, and press <strong>Generate</strong>. To supply your own lyrics instead, enable <strong>Custom lyrics/style</strong>: the single-line prompt field is replaced by a multi-line <strong>Lyrics</strong> box sized to hold a full song, with a live character counter, and the <strong>Style / BPM</strong> and <strong>Title</strong> fields appear alongside it (both required in custom mode). Suno's own limit on custom-mode lyrics is 5000 characters - UDAW enforces this both as you type (further input is blocked past the limit) and again when Generate is pressed, so a paid submission never gets rejected by the provider for being too long. In custom instrumental mode, style and title are still required but the lyrics box may be left blank.</li>
                 <li>Watch the status bar or <strong>Jobs</strong> tab for submission, provider status, and take-by-take download and decoding. Generation runs in the background. <strong>Cancel</strong> stops local processing at the next cancellation check; an active network request can take up to its 30-second timeout. Remote work may continue and charges may still apply.</li>
                 <li>The first finished take goes to the audio track selected when Generate was pressed, at the snapped playhead position captured then. Alternative takes go to separate lanes at the same position. If no valid selected track remains, UDAW creates a new lane. Clip insertion is undoable. Switching projects cancels/detaches the old job so it cannot import into the replacement project.</li>
@@ -1686,7 +2256,7 @@
             <p><strong>Audio and timing:</strong> this integration downloads finished full-mix MP3 takes and converts them locally to WAV. Cached WAVs remain available if timeline import fails. BPM in the prompt is a suggestion; automatic grid warping, leading-silence removal, remote WAV conversion and stem-separation jobs are not included. The proxy's <code>/api/concat</code> endpoint joins extensions; it is not a stem-separation endpoint.</p>
             <p>Provider selection and (in Advanced mode) URL, model and callback settings are saved when you Test or Generate. See the <a href="https://github.com/gcui-art/suno-api#api-reference" target="_blank" rel="noopener">self-hosted API reference</a> and the <a href="https://docs.sunoapi.org/suno-api/generate-music" target="_blank" rel="noopener">managed provider documentation</a> for their server setup and account requirements.</p>
             <div class="udaw-note">
-                Generated takes are downloaded to a local cache folder before the finished WAV is imported onto the Timeline - and that WAV is <strong>not</strong> deleted afterwards (only the intermediate MP3 is). Since this is paid, provider-billed audio, use <strong>Open Suno Cache Folder...</strong> - on the AI menu and on the AI tab's right-click menu - to open that folder directly and copy your takes somewhere safe. The folder is created automatically the first time you use this, even before you've generated anything.
+                Generated takes are downloaded to a local cache folder before the finished WAV is imported onto the Timeline - and that WAV is <strong>not</strong> deleted afterwards (only the intermediate MP3 is). Since this is paid, provider-billed audio, use <strong>Open Suno Cache Folder...</strong> - on the AI/SI menu and on the AI/SI tab's right-click menu - to open that folder directly and copy your takes somewhere safe. The folder is created automatically the first time you use this, even before you've generated anything.
             </div>
 
             <h3 id="ai-suno-upmatch">Taking a UDAW Mix to Suno (Up-Match Workflow)</h3>
@@ -1733,7 +2303,7 @@
             </ol>
 
             <h4>Doing the same from inside UDAW (API route)</h4>
-            <p>If you have set up the Suno API key as described under <a href="#ai-suno">Music Generation</a>, the <strong>AI tab</strong> can send recorded reference audio to Suno for <strong>Cover</strong> or <strong>Extend</strong> without leaving UDAW, and the finished takes are downloaded and placed on the Timeline for you. That route goes through the third-party API provider, not suno.com, so those takes belong to that service's account and will <strong>not</strong> appear on your suno.com profile. Use the browser workflow above whenever you specifically want the result on your own suno.com profile.</p>
+            <p>If you have set up the Suno API key as described under <a href="#ai-suno">Music Generation</a>, the <strong>AI/SI tab</strong> can send recorded reference audio to Suno for <strong>Cover</strong> or <strong>Extend</strong> without leaving UDAW, and the finished takes are downloaded and placed on the Timeline for you. That route goes through the third-party API provider, not suno.com, so those takes belong to that service's account and will <strong>not</strong> appear on your suno.com profile. Use the browser workflow above whenever you specifically want the result on your own suno.com profile.</p>
 
             <h4>Tips for better results</h4>
             <ul>
@@ -1759,31 +2329,31 @@
                 <strong>How to use it:</strong> press the voice-record control to capture a few seconds of
                 microphone input; UDAW transcribes it (on Windows, via the system speech recognizer) and
                 either performs a direct action it recognizes (e.g. "add a marker", "set tempo to 120") or,
-                if it isn't a recognized command, forwards the transcript to the AI chat provider as a
+                if it isn't a recognized command, forwards the transcript to the AI/SI chat provider as a
                 normal message.
             </p>
 
                         <h3 id="ai-luma">Video &amp; Image Generation (Luma)</h3>
-            <p>Luma is set up like Suno: pick <strong>Luma (video/image)</strong> on the AI Selection tab, paste your API key (create one at <a href="https://platform.lumalabs.ai/" target="_blank" rel="noopener">platform.lumalabs.ai</a>), press <strong>Save</strong>, then use the <strong>Generation</strong> tab.</p>
+            <p>Luma is set up like Suno: pick <strong>Luma (video/image)</strong> on the AI/SI Selection tab, paste your API key (create one at <a href="https://platform.lumalabs.ai/" target="_blank" rel="noopener">platform.lumalabs.ai</a>), press <strong>Save</strong>, then use the <strong>Generation</strong> tab.</p>
             <ul>
                 <li><strong>Test (credits)</strong> checks your key and shows your remaining Luma credit balance.</li>
                 <li><strong>Media</strong> switches between Video (Ray models) and Image (Photon models). Only the controls Luma accepts for that type are shown: video offers aspect ratio, resolution (540p-4k), duration (5s/9s), loop, and start and end frame image URLs; image offers aspect ratio, JPG/PNG format, an image reference, a style reference, a character reference and a modify-image reference (each with a 0.0-1.0 weight where Luma supports one). Luma only accepts public HTTPS image URLs, not local files.</li>
                 <li><strong>Generate</strong> submits the job, shows live progress in the status bar and Jobs tab, and saves the finished .mp4/.jpg/.png into your Recordings folder under <em>Luma</em>. <strong>Cancel</strong> stops local work, but Luma may still charge for a job already submitted.</li>
             </ul>
-            <p><b>What Luma does not do:</b> Luma's API produces video and images only - there is no music, lyrics, instrumental or sheet-music service, so those controls (and the Recordings and Lyrics and Styles tabs) are hidden when Luma is selected. Use Suno for music. A generated video is placed on its own <strong>VIDEO</strong> channel of the Timeline (a blue VIDEO tag in the channel header) at the playhead, as an ordinary non-destructive clip, so you can edit it on the Timeline - move, trim, split, fade and delete - with full undo, and the AI assistant and MCP clients can do the same through <code>SplitClip</code>, <code>DeleteClip</code>, <code>SetClipFade</code> and <code>MoveClip</code>.</p>
+            <p><b>What Luma does not do:</b> Luma's API produces video and images only - there is no music, lyrics, instrumental or sheet-music service, so those controls (and the Recordings and Lyrics and Styles tabs) are hidden when Luma is selected. Use Suno for music. A generated video is placed on its own <strong>VIDEO</strong> channel of the Timeline (a blue VIDEO tag in the channel header) at the playhead, as an ordinary non-destructive clip, so you can edit it on the Timeline - move, trim, split, fade and delete - with full undo, and the AI/SI assistant and MCP clients can do the same through <code>SplitClip</code>, <code>DeleteClip</code>, <code>SetClipFade</code> and <code>MoveClip</code>.</p>
 
             <h4>Music Tabular Only (practice PDF)</h4>
-            <p>With <strong>Luma</strong> selected, tick <strong>Music Tabular Only</strong> on the Generation tab, describe the music in the prompt box (song or style, instrument, key, difficulty - e.g. <em>12-bar blues in A for guitar, beginner</em>) and press <strong>Generate</strong>. Luma itself cannot write music, so nothing is sent to Luma and no Luma credits are used: UDAW asks your Claude, OpenAI or DeepSeek assistant (whichever has a saved key, in that order) for the music laid out as tablature - guitar and bass tab, drum grids and chord names, with bar numbers, sections and practice tips - and renders it to a <strong>PDF</strong> in a monospaced font so the columns line up for study and practice. The file is saved automatically to <code>AI\Rendered</code> inside your Recordings folder (Settings &gt; Recordings folder), named from your prompt plus the date and time, and <strong>Open</strong> shows it. Progress appears in the status bar. Untick the option to go back to Luma video/image generation. The PDF is produced by UDAW itself; it is text-based tablature, not engraved standard notation, and the AI's arrangement should be checked by ear.</p>
+            <p>With <strong>Luma</strong> selected, tick <strong>Music Tabular Only</strong> on the Generation tab, describe the music in the prompt box (song or style, instrument, key, difficulty - e.g. <em>12-bar blues in A for guitar, beginner</em>) and press <strong>Generate</strong>. Luma itself cannot write music, so nothing is sent to Luma and no Luma credits are used: UDAW asks your Claude, OpenAI or DeepSeek assistant (whichever has a saved key, in that order) for the music laid out as tablature - guitar and bass tab, drum grids and chord names, with bar numbers, sections and practice tips - and renders it to a <strong>PDF</strong> in a monospaced font so the columns line up for study and practice. The file is saved automatically to <code>AI/SI\Rendered</code> inside your Recordings folder (Settings &gt; Recordings folder), named from your prompt plus the date and time, and <strong>Open</strong> shows it. Progress appears in the status bar. Untick the option to go back to Luma video/image generation. The PDF is produced by UDAW itself; it is text-based tablature, not engraved standard notation, and the AI/SI's arrangement should be checked by ear.</p>
 
             <h3 id="ai-mcp">Model Context Protocol (MCP)</h3>
             <div class="udaw-purpose">
-                <p><b>Purpose</b> Let UDAW's AI assistant use tools from external MCP servers (a sample librarian, a documentation server, a project-management server, ...) in the same conversation as the built-in DAW tools - and, in the other direction, let an external MCP-aware client drive UDAW itself through its own safe command API.</p>
-                <p><b>Why</b> MCP (Model Context Protocol) is the emerging standard for connecting an AI assistant to external tools without hand-writing a new integration for each one. UDAW treats every MCP tool call as informational context for the model rather than a direct DAW mutation, so connecting an unfamiliar third-party MCP server can never bypass UDAW's own edit-validation and confirmation rules.</p>
+                <p><b>Purpose</b> Let UDAW's AI/SI assistant use tools from external MCP servers (a sample librarian, a documentation server, a project-management server, ...) in the same conversation as the built-in DAW tools - and, in the other direction, let an external MCP-aware client drive UDAW itself through its own safe command API.</p>
+                <p><b>Why</b> MCP (Model Context Protocol) is the emerging standard for connecting an AI/SI assistant to external tools without hand-writing a new integration for each one. UDAW treats every MCP tool call as informational context for the model rather than a direct DAW mutation, so connecting an unfamiliar third-party MCP server can never bypass UDAW's own edit-validation and confirmation rules.</p>
             </div>
 
             <h4>Consuming external MCP servers (the common case)</h4>
             <ol>
-                <li>On the AI tab, fill in <strong>MCP name</strong> (a short label you choose) and
+                <li>On the AI/SI tab, fill in <strong>MCP name</strong> (a short label you choose) and
                     <strong>MCP command line</strong>. UDAW picks the transport from what you type:
                     anything starting with <code>http://</code> or <code>https://</code> is treated as an
                     MCP-over-HTTP ("Streamable HTTP") server: UDAW POSTs each JSON-RPC message to that URL, advertising
@@ -1796,7 +2366,7 @@
                 <li>Press <strong>Test</strong>. UDAW starts the transport, performs the MCP
                     <code>initialize</code> handshake (protocol version <code>2024-11-05</code>,
                     identifying itself as client "UDAW"), then calls <code>tools/list</code> and logs the
-                    server's name/version and every tool's name and description to the AI log. This is a
+                    server's name/version and every tool's name and description to the AI/SI log. This is a
                     one-shot connect-list-disconnect check, not a live connection - use it to confirm a
                     server is reachable and see what it offers before relying on it in a real conversation.
                     A server that never answers within its timeout (10 seconds by default) fails the test
@@ -1809,14 +2379,14 @@
                     and tells the assistant what tools each one offers - the assistant can then call one of
                     those tools mid-conversation (e.g. "search the sample library for a snare") and the
                     result is fed back as context. <strong>MCP tool results never directly change your
-                    project</strong> - if you want the AI to act on what it found, ask it to do so via an
+                    project</strong> - if you want the AI/SI to act on what it found, ask it to do so via an
                     ordinary DAW tool command (see <a href="#ai-chat">Chat &amp; Tool Commands</a>), which
                     still goes through the normal validated, undo-safe path.</li>
             </ol>
             <div class="udaw-note">
                 A misbehaving or unreachable MCP server never blocks the DAW or the UI - it just
                 contributes no tools for that conversation ("that tool is unavailable"), exactly like a
-                built-in AI provider with no key configured.
+                built-in AI/SI provider with no key configured.
             </div>
             <p><strong>Authentication and environment:</strong> an HTTP MCP server that needs a login takes a
                 <strong>bearer token</strong>: type it in the <strong>HTTP auth token</strong> box next to the MCP
@@ -1828,7 +2398,7 @@
                 closed) to pass a credential without putting it on the command line.</p>
             <p><strong>Resources and prompts:</strong> UDAW's MCP client can already fetch a server's
                 <code>resources/list</code>/<code>resources/read</code> and
-                <code>prompts/list</code>/<code>prompts/get</code> at the protocol level, but the AI chat
+                <code>prompts/list</code>/<code>prompts/get</code> at the protocol level, but the AI/SI chat
                 only surfaces a connected server's <strong>tools</strong> today - resources and prompts are
                 not yet pulled into the conversation automatically.</p>
 
@@ -1847,7 +2417,7 @@
                 yourself.
             </p>
             <ol>
-                <li>On the AI tab, check <strong>Expose UDAW as an MCP server</strong> and set the port
+                <li>On the AI/SI tab, check <strong>Expose UDAW as an MCP server</strong> and set the port
                     (default <code>8765</code>) and bind address (default <code>127.0.0.1</code>; leave
                     it unless you specifically understand the exposure you're creating by changing it).</li>
                 <li>Leave <strong>Allow destructive tools</strong> unchecked to only permit the read-only
@@ -1857,13 +2427,13 @@
                     tools; even then, each destructive call additionally requires the external client to
                     pass an explicit <code>confirm: true</code> argument, so a client can't destructively
                     mutate the project through one blind call.</li>
-                <li>UDAW generates a <strong>bearer token</strong> the first time you start the server, keeps it in the secure credential store, and shows it in the AI log each time the server starts. Give it to the external client; every request must carry <code>Authorization: Bearer &lt;token&gt;</code> or UDAW answers <code>401 Unauthorized</code>. UDAW refuses to start the server on any address other than <code>127.0.0.1</code> without a token.</li>
+                <li>UDAW generates a <strong>bearer token</strong> the first time you start the server, keeps it in the secure credential store, and shows it in the AI/SI log each time the server starts. Give it to the external client; every request must carry <code>Authorization: Bearer &lt;token&gt;</code> or UDAW answers <code>401 Unauthorized</code>. UDAW refuses to start the server on any address other than <code>127.0.0.1</code> without a token.</li>
                 <li>Every call an external client makes - destructive or not - runs through the exact same
                     dispatch/undo-stack path as a chat-driven or mouse-driven edit, so it always lands on
                     the undo stack and is subject to the same validation.</li>
             </ol>
             <h4 id="ai-mcp-remote">Remote access over TLS (agents outside your network)</h4>
-            <p>The local listener stays on <code>127.0.0.1</code>. To let an AI agent that is <em>not</em> on your
+            <p>The local listener stays on <code>127.0.0.1</code>. To let an AI/SI agent that is <em>not</em> on your
                 network connect, tick <strong>HTTPS (TLS) for remote agents</strong> on the MCP tab: UDAW then opens a
                 second, encrypted listener (TLS 1.2+, default port <code>8766</code>) <em>alongside</em> the local one,
                 so local and remote access are both available at once. It <strong>always requires the bearer token</strong>
@@ -1872,17 +2442,17 @@
             <ol>
                 <li>Provide a PEM <strong>certificate</strong> and <strong>private key</strong> in the
                     <strong>Cert (PEM)</strong> / <strong>Key (PEM)</strong> boxes. A CA-signed certificate (for example
-                    Let's Encrypt) is what AI providers will trust; a self-signed one only works for your own tests.</li>
+                    Let's Encrypt) is what AI/SI providers will trust; a self-signed one only works for your own tests.</li>
                 <li>Make the port reachable from the internet: a router port-forward to this PC, or a tunnel
                     (Cloudflare Tunnel, ngrok) that gives you a public https URL and its own certificate.</li>
-                <li>Tick <strong>Expose UDAW as an MCP server</strong>. The AI log shows the token and the HTTPS port.</li>
+                <li>Tick <strong>Expose UDAW as an MCP server</strong>. The AI/SI log shows the token and the HTTPS port.</li>
                 <li>Press <strong>Test local</strong> (checks the local listener) and <strong>Test TLS / URL</strong>
                     (blank = the local https listener; or type your public <code>https://host:port/mcp</code>).
                     The report lists each stage - connect, TLS handshake and certificate, token, MCP handshake, tool
                     list - and confirms that a request <em>without</em> the token is refused. Tick
                     <strong>Allow self-signed certificate</strong> only when testing your own self-signed certificate.</li>
             </ol>
-            <p><strong>Which AI providers can use it</strong> (checked against the providers' documentation on 2026-09-21;
+            <p><strong>Which AI/SI providers can use it</strong> (checked against the providers' documentation on 2026-09-21;
                 the same table is shown on the MCP tab):</p>
             <table class="udaw-table">
                 <tr><th>Provider</th><th>Remote MCP support</th><th>What it needs</th></tr>
@@ -1903,12 +2473,12 @@
                     <td><code>SetGain</code>, <code>SetPan</code>, <code>SetMute</code>, <code>SetSolo</code>, <code>AddMarker</code>, <code>CreateAutomation</code>, <code>RenameTrack</code>, <code>SplitClip</code>, <code>SetClipFade</code>, <code>TransportPlay</code></td>
                     <td><code>AddTrack</code>, <code>MoveClip</code>, <code>SetTempo</code>, <code>ExportProject</code>, <code>GenerateMusic</code>, <code>AddSampleToTimeline</code>, <code>DeleteClip</code></td></tr>
             </table>
-            <p><strong>New tools:</strong> <code>RenameTrack{track,name}</code>, <code>SplitClip{clip_id,position_sec}</code>, <code>DeleteClip{clip_id}</code>, <code>SetClipFade{clip_id,fade_in_sec,fade_out_sec}</code>, <code>TransportPlay{from_beginning}</code> and <code>TransportStop</code> (playback stops and the playhead rewinds to 0, like the Stop button), and <code>GetAIProviders</code>, which reports which AI providers (OpenAI, Claude, DeepSeek, Suno, Luma) have a stored credential - it never returns the key itself. The server's <code>tools/list</code> now publishes a real description and typed input schema (required fields, ranges) for every tool, so an MCP-aware AI can discover how to use each one without guessing. This is how you <strong>delegate</strong> a project to an external AI: give it the endpoint and token, and it works through the same validated, undoable commands you use.</p>
+            <p><strong>New tools:</strong> <code>RenameTrack{track,name}</code>, <code>SplitClip{clip_id,position_sec}</code>, <code>DeleteClip{clip_id}</code>, <code>SetClipFade{clip_id,fade_in_sec,fade_out_sec}</code>, <code>TransportPlay{from_beginning}</code> and <code>TransportStop</code> (playback stops and the playhead rewinds to 0, like the Stop button), and <code>GetAIProviders</code>, which reports which AI/SI providers (OpenAI, Claude, DeepSeek, Suno, Luma) have a stored credential - it never returns the key itself. The server's <code>tools/list</code> now publishes a real description and typed input schema (required fields, ranges) for every tool, so an MCP-aware AI/SI can discover how to use each one without guessing. This is how you <strong>delegate</strong> a project to an external AI/SI: give it the endpoint and token, and it works through the same validated, undoable commands you use.</p>
 
             <h4>Connecting an MCP client to UDAW (setup, step by step)</h4>
             <ol>
                 <li><strong>Open a project</strong> in UDAW - the server acts on whichever project is open; with none open every call answers "no project is currently open".</li>
-                <li>On the AI tab check <strong>Expose UDAW as an MCP server</strong> (registration required). Read the <strong>endpoint</strong> and <strong>bearer token</strong> from the AI log: the endpoint is <code>http://127.0.0.1:8765</code> unless you changed the port, and the token line starts <em>MCP server bearer token</em>.</li>
+                <li>On the AI/SI tab check <strong>Expose UDAW as an MCP server</strong> (registration required). Read the <strong>endpoint</strong> and <strong>bearer token</strong> from the AI/SI log: the endpoint is <code>http://127.0.0.1:8765</code> unless you changed the port, and the token line starts <em>MCP server bearer token</em>.</li>
                 <li><strong>Sanity-check it</strong> from a terminal on the same machine (replace TOKEN):<br>
                     <code>curl -X POST http://127.0.0.1:8765 -H "Authorization: Bearer TOKEN" -H "Content-Type: application/json" -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}"</code><br>
                     A JSON list of tools means it is working. <code>401</code> = wrong/missing token.</li>
@@ -1923,7 +2493,7 @@
             <p><strong>Working with it safely:</strong> leave <strong>Allow destructive tools</strong> off while a client is only reading or making small mix moves; turn it on only for a session where you want the client to add tracks, move/delete clips, change tempo, export or generate music (each such call must also carry <code>confirm: true</code>, which a well-behaved client will ask you about). Stop the server by unchecking the box. Reaching UDAW from another computer needs a non-loopback bind address (e.g. <code>0.0.0.0</code>) <em>and</em> a firewall rule for the port; there is no TLS, so do that only on a network you trust.</p>
             <table class="udaw-table udaw-col-30">
                 <tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr>
-                <tr><td>Client cannot connect</td><td>Server not started, wrong port, or firewall (non-loopback)</td><td>Check the box is ticked and the AI log says "exposing UDAW on ..."; match the port.</td></tr>
+                <tr><td>Client cannot connect</td><td>Server not started, wrong port, or firewall (non-loopback)</td><td>Check the box is ticked and the AI/SI log says "exposing UDAW on ..."; match the port.</td></tr>
                 <tr><td><code>401 Unauthorized</code></td><td>Token missing or stale</td><td>Copy the token from the newest log line; send it as <code>Authorization: Bearer ...</code>.</td></tr>
                 <tr><td><code>403 Forbidden</code></td><td>A browser-origin request to a loopback server (DNS-rebinding guard)</td><td>Use a normal MCP client/CLI, not a web page.</td></tr>
                 <tr><td><code>405 Method Not Allowed</code> on GET</td><td>Client probing for a push stream</td><td>Harmless; UDAW answers POST only and clients fall back to it.</td></tr>
@@ -1948,23 +2518,23 @@
                 project (add tracks, change tempo, export, trigger a paid Suno generation) subject only to
                 the confirm-flag requirement described above.
             </div>
-            <h3 id="ai-rights">Using AI: Copyright &amp; AI-Generated Vocals</h3>
+            <h3 id="ai-rights">Using AI/SI: Copyright &amp; AI/SI-Generated Vocals</h3>
             <div class="udaw-purpose">
-                <p><b>Purpose</b> Explain, in plain and legally grounded terms, where an AI model's ability to sing, play, and arrange actually comes from, and what that means for your rights and your risk when you release AI-assisted work commercially.</p>
-                <p><b>Why</b> UDAW is a professional production tool. Professional musicians and producers have always needed to understand sampling clearance, mechanical licensing, and session-player rights; AI-assisted creation adds one more professional skill to that same list. Knowing this up front lets you use these tools confidently and release work that is unambiguously yours.</p>
+                <p><b>Purpose</b> Explain, in plain and legally grounded terms, where an AI/SI model's ability to sing, play, and arrange actually comes from, and what that means for your rights and your risk when you release AI/SI-assisted work commercially.</p>
+                <p><b>Why</b> UDAW is a professional production tool. Professional musicians and producers have always needed to understand sampling clearance, mechanical licensing, and session-player rights; AI/SI-assisted creation adds one more professional skill to that same list. Knowing this up front lets you use these tools confidently and release work that is unambiguously yours.</p>
             </div>
 
             <div class="udaw-note">
-                UDAW's AI features are powerful and are provided so you can create quickly and
+                UDAW's AI/SI features are powerful and are provided so you can create quickly and
                 professionally - but having the feature does not remove your responsibility as the
-                releasing artist. Before commercially using anything AI-assisted, do your own research:
+                releasing artist. Before commercially using anything AI/SI-assisted, do your own research:
                 actively compare it against existing songs and artists rather than assuming a generated
                 result is automatically clear. Treat that research as a required step of your release
                 process, not an optional one.
             </div>
 
-            <h4>How AI models actually learn sound</h4>
-            <p>An AI voice or music model is not inventing singing, playing, or arranging from nothing. It learned by listening to enormous quantities of existing, already-recorded music: real vocal performances, real instrumental performances, real mixes, real productions, made by real people - working musicians, session players, and famous recording artists alike. When a generated vocal sounds breathy like one singer, or gritty like another, or carries phrasing that resembles a particular vocalist's signature style, that is not coincidence; it is the model echoing patterns it absorbed from real human performances during training. Real musicians - artists as we recognize them today, people like Dolly Parton, Jimi Hendrix, the members of Led Zeppelin, and every artist of that caliber - spent careers building a distinct, recognizable voice and style. An AI model can imitate the surface texture of that style because it was trained on recordings of it; it did not earn that style, and neither do you simply by generating with a prompt.</p>
+            <h4>How AI/SI models actually learn sound</h4>
+            <p>An AI/SI voice or music model is not inventing singing, playing, or arranging from nothing. It learned by listening to enormous quantities of existing, already-recorded music: real vocal performances, real instrumental performances, real mixes, real productions, made by real people - working musicians, session players, and famous recording artists alike. When a generated vocal sounds breathy like one singer, or gritty like another, or carries phrasing that resembles a particular vocalist's signature style, that is not coincidence; it is the model echoing patterns it absorbed from real human performances during training. Real musicians - artists as we recognize them today, people like Dolly Parton, Jimi Hendrix, the members of Led Zeppelin, and every artist of that caliber - spent careers building a distinct, recognizable voice and style. An AI/SI model can imitate the surface texture of that style because it was trained on recordings of it; it did not earn that style, and neither do you simply by generating with a prompt.</p>
 
             <h4>What copyright actually protects (United States)</h4>
             <p>Under the U.S. Copyright Act (Title 17, U.S. Code), an original work of authorship is protected the moment it is fixed in a tangible medium of expression (17 U.S.C. &sect;102(a)); no registration is required for the protection to exist, though registration is required before an infringement suit can be filed (17 U.S.C. &sect;411). In music this splits into layers worth knowing separately:</p>
@@ -1974,19 +2544,19 @@
                 <tr><td>Sound recording ("master")</td><td>The specific captured performance - 17 U.S.C. &sect;102(a)(7)</td><td>Recording artist / label</td></tr>
                 <tr><td>Right of publicity / voice</td><td>A real person's name, voice and likeness - state law, not federal</td><td>The individual person</td></tr>
             </table>
-            <p>Right-of-publicity and voice-misappropriation claims are separate from copyright entirely and apply even when no copyrighted recording is literally copied. The leading cases are <em>Midler v. Ford Motor Co.</em>, 849 F.2d 460 (9th Cir. 1988) and <em>Waits v. Frito-Lay, Inc.</em>, 978 F.2d 1093 (9th Cir. 1992), both of which found liability for hiring a sound-alike singer to imitate a specific artist's voice. These precedents apply directly to AI voice cloning. Tennessee's ELVIS Act, effective July 1, 2024, went further and amended that state's publicity statute to name "voice" as protected specifically against unauthorized AI cloning; other states are actively considering similar laws.</p>
+            <p>Right-of-publicity and voice-misappropriation claims are separate from copyright entirely and apply even when no copyrighted recording is literally copied. The leading cases are <em>Midler v. Ford Motor Co.</em>, 849 F.2d 460 (9th Cir. 1988) and <em>Waits v. Frito-Lay, Inc.</em>, 978 F.2d 1093 (9th Cir. 1992), both of which found liability for hiring a sound-alike singer to imitate a specific artist's voice. These precedents apply directly to AI/SI voice cloning. Tennessee's ELVIS Act, effective July 1, 2024, went further and amended that state's publicity statute to name "voice" as protected specifically against unauthorized AI/SI cloning; other states are actively considering similar laws.</p>
 
             <h4>Infringement turns on similarity, not intent</h4>
-            <p>You do not need to have deliberately copied anything to infringe. Courts generally look at ownership plus copying of original elements, assessed through access and "substantial similarity" - would an ordinary listener recognize your work as too close to an existing one (approaches vary slightly by circuit, e.g. the Ninth Circuit's extrinsic/intrinsic test versus the Second Circuit's ordinary-observer test). It does not matter that an AI generated the material instead of you performing it, or that you never heard the original while working - if the model reproduced enough of an artist's pattern during training for the resemblance to be obvious, you are the one publishing and profiting from it, and liability generally follows whoever releases the work.</p>
+            <p>You do not need to have deliberately copied anything to infringe. Courts generally look at ownership plus copying of original elements, assessed through access and "substantial similarity" - would an ordinary listener recognize your work as too close to an existing one (approaches vary slightly by circuit, e.g. the Ninth Circuit's extrinsic/intrinsic test versus the Second Circuit's ordinary-observer test). It does not matter that an AI/SI generated the material instead of you performing it, or that you never heard the original while working - if the model reproduced enough of an artist's pattern during training for the resemblance to be obvious, you are the one publishing and profiting from it, and liability generally follows whoever releases the work.</p>
             <p>Consequences are real and quantified: under 17 U.S.C. &sect;504 a copyright owner can elect statutory damages of up to $30,000 per infringed work, or up to $150,000 per work if the infringement is willful, separate from platform-level DMCA takedowns (17 U.S.C. &sect;512) that can pull a release down or terminate a distribution account on their own.</p>
 
-            <h4>Who owns AI-generated material</h4>
-            <p>The U.S. Copyright Office's 2023 guidance and the ruling in <em>Thaler v. Perlmutter</em>, 687 F. Supp. 3d 140 (D.D.C. 2023), hold that copyright requires human authorship: material generated purely by an AI system with no meaningful human creative control is not copyrightable in the United States at all. The more you meaningfully arrange, edit, select, and creatively direct AI output, the stronger your own claim to authorship of the final result - and that is a separate question from whether the output infringes someone else's existing rights. It is possible to both fail to own a track and infringe another artist's rights in the same track. Separately, whether training AI models on copyrighted recordings without a license is itself infringement is actively being litigated - the RIAA sued AI music generators Suno and Udio in 2024 on exactly this theory - so the legal status of the training data behind any AI tool, including tools inside UDAW, may itself be contested.</p>
+            <h4>Who owns AI/SI-generated material</h4>
+            <p>The U.S. Copyright Office's 2023 guidance and the ruling in <em>Thaler v. Perlmutter</em>, 687 F. Supp. 3d 140 (D.D.C. 2023), hold that copyright requires human authorship: material generated purely by an AI/SI system with no meaningful human creative control is not copyrightable in the United States at all. The more you meaningfully arrange, edit, select, and creatively direct AI/SI output, the stronger your own claim to authorship of the final result - and that is a separate question from whether the output infringes someone else's existing rights. It is possible to both fail to own a track and infringe another artist's rights in the same track. Separately, whether training AI/SI models on copyrighted recordings without a license is itself infringement is actively being litigated - the RIAA sued AI/SI music generators Suno and Udio in 2024 on exactly this theory - so the legal status of the training data behind any AI/SI tool, including tools inside UDAW, may itself be contested.</p>
 
             <h4>Vocals: the most sensitive case</h4>
-            <p>A human voice is one of the most recognizable and personally identifying things an artist has. If a generated vocal sounds like a specific, identifiable real singer - famous or not - do not use it in anything released commercially. This includes an AI voice model built to imitate a named artist, a style-transfer or voice-clone result a listener would reasonably associate with a real singer, and any vocal you personally notice sounds like someone specific even if that was not your intent. This holds regardless of how much you believe you "changed it" - both substantial-similarity and right-of-publicity claims turn on what an ordinary listener perceives, not on how many parameters were altered.</p>
+            <p>A human voice is one of the most recognizable and personally identifying things an artist has. If a generated vocal sounds like a specific, identifiable real singer - famous or not - do not use it in anything released commercially. This includes an AI/SI voice model built to imitate a named artist, a style-transfer or voice-clone result a listener would reasonably associate with a real singer, and any vocal you personally notice sounds like someone specific even if that was not your intent. This holds regardless of how much you believe you "changed it" - both substantial-similarity and right-of-publicity claims turn on what an ordinary listener perceives, not on how many parameters were altered.</p>
 
-            <h4>Before you release AI-assisted material</h4>
+            <h4>Before you release AI/SI-assisted material</h4>
             <ol>
                 <li>Listen critically, all the way through, before committing to a generation.</li>
                 <li>Ask honestly whether it reminds you of a specific existing song, artist, or recording - melody, vocal tone, chord progression, groove, and arrangement can each trigger a "too close" feeling worth trusting.</li>
@@ -1996,11 +2566,11 @@
                 <li>When still in doubt after all of the above, treat the doubt as a reason to stop and consult a music attorney or licensing professional before commercial release.</li>
             </ol>
 
-            <p><strong>Outside the United States:</strong> the same concerns apply under different statutes. The Berne Convention sets baseline copyright protection across most countries without requiring registration; the UK's Copyright, Designs and Patents Act 1988 protects compositions and sound recordings similarly to U.S. law; the EU AI Act's Article 53 requires providers of general-purpose AI models to publish a summary of copyrighted training material, a direct response to these same concerns. Assume the strictest applicable jurisdiction's rules may apply to you, not just your home country's.</p>
-            <p><strong>Australia:</strong> the Copyright Act 1968 (Cth) protects original musical works and sound recordings automatically on creation, with no registration system - musical works are protected for the life of the author plus 70 years (s 33), and sound recordings for 70 years from the year of publication (s 93). Australia has no single federal statute equivalent to the U.S. right of publicity or Tennessee's ELVIS Act; unauthorised use of a real performer's voice or likeness is instead pursued through the tort of passing off and through s 18 of the Australian Consumer Law (misleading or deceptive conduct), as in cases such as <em>Henderson v Radio Corporation Pty Ltd</em> (1960) and <em>Newton-John v Scholl-Plough (Aust) Pty Ltd</em> (1986), both involving unauthorised use of a performer's identity in advertising. The Attorney-General's Department has been consulting on AI-specific copyright reform since 2023; the Copyright Act does not yet contain AI-specific voice-cloning provisions, so the general passing-off and Australian Consumer Law protections above are what currently apply to an AI-cloned Australian artist's voice.</p>
+            <p><strong>Outside the United States:</strong> the same concerns apply under different statutes. The Berne Convention sets baseline copyright protection across most countries without requiring registration; the UK's Copyright, Designs and Patents Act 1988 protects compositions and sound recordings similarly to U.S. law; the EU AI Act's Article 53 requires providers of general-purpose AI/SI models to publish a summary of copyrighted training material, a direct response to these same concerns. Assume the strictest applicable jurisdiction's rules may apply to you, not just your home country's.</p>
+            <p><strong>Australia:</strong> the Copyright Act 1968 (Cth) protects original musical works and sound recordings automatically on creation, with no registration system - musical works are protected for the life of the author plus 70 years (s 33), and sound recordings for 70 years from the year of publication (s 93). Australia has no single federal statute equivalent to the U.S. right of publicity or Tennessee's ELVIS Act; unauthorised use of a real performer's voice or likeness is instead pursued through the tort of passing off and through s 18 of the Australian Consumer Law (misleading or deceptive conduct), as in cases such as <em>Henderson v Radio Corporation Pty Ltd</em> (1960) and <em>Newton-John v Scholl-Plough (Aust) Pty Ltd</em> (1986), both involving unauthorised use of a performer's identity in advertising. The Attorney-General's Department has been consulting on AI/SI-specific copyright reform since 2023; the Copyright Act does not yet contain AI/SI-specific voice-cloning provisions, so the general passing-off and Australian Consumer Law protections above are what currently apply to an AI/SI-cloned Australian artist's voice.</p>
 
             <div class="udaw-warn">
-                This section is educational, not legal advice, and copyright/publicity law differs by country and state and is actively changing because of AI. Confirm current status and consult a qualified attorney before commercial release of any AI-assisted work you are unsure about. Never use an AI-generated vocal that sounds like a specific, identifiable real artist in commercial work - respect the artist and the work that trained the model that made your generation possible.
+                This section is educational, not legal advice, and copyright/publicity law differs by country and state and is actively changing because of AI/SI. Confirm current status and consult a qualified attorney before commercial release of any AI/SI-assisted work you are unsure about. Never use an AI/SI-generated vocal that sounds like a specific, identifiable real artist in commercial work - respect the artist and the work that trained the model that made your generation possible.
             </div>
 
         </section>
@@ -2017,18 +2587,45 @@
                 choose a visual theme from the bundled style set for the application's look and
                 feel. Changes here are saved independently of any open project.
             </p>
+            <h3 id="audio-output">Audio output, backend and exclusive mode</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Choose the device and the way UDAW talks to your sound hardware.</p>
+                <p><b>Why</b> The right choice here decides whether you hear UDAW from the speakers you expect, how quickly sound responds when you press play or record, and whether other programs can play sound at the same time. Every setting on this page is saved and applied the moment you change it.</p>
+            </div>
             <p>
-                The General page's <strong>Startup &amp; Audio Engine</strong> group includes an
-                <strong>Input device</strong> selector - a dropdown of every capture device UDAW's audio
-                backend can currently see, with the top entry always <em>Default (system)</em>. Pick a
-                specific microphone/interface here when you have more than one connected and Windows'
-                own default isn't the one you want to record from (see
-                <a href="#start">Choosing an audio device</a>); the selection is written to your saved
-                audio configuration and restored automatically on the next launch. As with the sample
-                rate, buffer size, and channel-count fields next to it, a changed input device only takes
-                effect once you click <strong>Reopen Audio</strong> (or restart UDAW) - selecting it alone
-                does not hot-swap the already-running stream.
+                On the General page, the <strong>Startup &amp; Audio Engine</strong> group holds:
             </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><td>Audio backend</td><td>How UDAW talks to the hardware. <b>auto</b> picks the best one available (recommended). <b>wasapi</b> is the modern Windows audio system: lowest latency, and the only one that offers true exclusive mode. <b>directsound</b> is the older, classic Windows audio system: choose it for an older interface or driver that misbehaves with wasapi, or if you want its behaviour. <b>software</b> uses no hardware at all (nothing is audible) - for testing. Choosing a different backend reopens audio at once and resets the Input and Output devices to <em>Default (system)</em>, because a device is named differently under each backend.</td></tr>
+                <tr><td>Sample rate (Hz)</td><td>The rate the device runs at. <em>Device default</em> follows the hardware. Use 44100 for most music, 48000 if you also work with video or game audio.</td></tr>
+                <tr><td>Buffer size (frames)</td><td>Smaller buffers give lower latency (a tighter feel when recording) but risk crackles on a busy machine; larger buffers are safer for mixing. Try 256 or 512, and raise it if you hear dropouts. The directsound backend never goes below 256.</td></tr>
+                <tr><td>Output channels / Output device</td><td><strong>Output device</strong> is the device <em>everything</em> plays through: the Timeline, WAV editor, Tracker, Piano Roll and drum machine, Foley pads, previews and the warning sounds. <em>Default (system)</em> follows Windows. Pick a specific device to send UDAW to your interface or monitors while Windows sounds stay on the laptop speakers. The choice is remembered. <em>Why:</em> a producer with a studio interface usually wants UDAW on the interface and everything else on the speakers.</td></tr>
+                <tr><td>Input channels / Input device</td><td>The microphone or line input used for recording and live monitoring; <em>Default (system)</em> follows Windows.</td></tr>
+                <tr><td>Auto-start audio engine on launch</td><td>Opens the audio device when UDAW starts so playback is ready immediately.</td></tr>
+                <tr><td>Enable audio input (capture)</td><td>Needed for recording and voice control. Leave it off if you only play back, so UDAW does not hold your microphone.</td></tr>
+                <tr><td>Exclusive-mode output</td><td>Takes over the chosen backend's strongest control of the device. With <b>wasapi</b> this is true exclusive mode: lowest latency, but other programs lose their sound while UDAW is open. With <b>directsound</b> there is no true exclusive mode, so UDAW takes the highest sharing level and sets the device to its own format; other programs may still play. If the device refuses exclusive access UDAW usually falls back to shared mode. <em>Why:</em> turn it on for the tightest possible response when tracking, off when you need to hear other applications.</td></tr>
+            </table>
+            <p>
+                To check what UDAW is really using, look at the <strong>Out</strong> entry in the status box at the right of the menu bar (see <a href="#timeline-transport">Transport buttons and status box</a>).
+                If a device you chose can no longer be found, UDAW generally falls back to the system default device rather than going silent.
+                Further settings on the page - Log level, Locale, Timeline refresh, tempo options, hints and the
+                visual theme - are described in the paragraphs below and in <a href="#registration">Registration &amp; Updates</a>.
+            </p>
+
+            <h3 id="system-sounds">Warning and system sounds</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Make the Windows beeps and chimes that go with warnings and errors come out of the same Output device as the rest of UDAW.</p>
+                <p><b>Why</b> If your music goes to an audio interface, a warning chime from a different set of speakers is confusing - and worse, it could land on a monitor system at an unexpected volume. Routing them together keeps all sound in one place.</p>
+            </div>
+            <p>
+                When UDAW shows a warning, error, information or confirmation message, it plays the sound
+                that <strong>your own Windows Sound settings</strong> assign to that kind of message, through
+                the audio engine and the Output device you chose. If your Windows sound scheme is set to
+                <em>No Sounds</em>, UDAW stays silent too. If the audio engine is not open, the ordinary Windows
+                beep is used instead so a warning is never missed. Messages that appear before UDAW has opened
+                its audio, during start-up, use the Windows default.
+            </p>
+            
             <p>
                 Working directories include a <strong>Video Captures</strong> folder and a
                 <strong>Video Capture Filename</strong> pattern (use <code>%DATETIME%</code> for a
@@ -2074,7 +2671,7 @@
             <p>
                 <strong>Unregistered</strong> UDAW has full functionality except that <strong>exporting of any
                 kind</strong> (audio, MP3/MP4/FLAC, MIDI, tracker modules, samples, takes, themes) and
-                <strong>any use of AI</strong> (chat, composition, mixing/mastering assistants, Suno, MCP) are
+                <strong>any use of AI/SI</strong> (chat, composition, mixing/mastering assistants, Suno, MCP) are
                 disabled; attempting either opens the Registration page. The window title and the page show
                 whether this copy is registered.
             </p>
@@ -2113,6 +2710,21 @@
                 <dt>Can I mix a tracker module, recorded audio and MIDI in the same project?</dt>
                 <dd>Yes. The project format embeds the graph, mixer, timeline, tracker module and MIDI sequence together in one file, and they all run through the same mixer and audio graph.</dd>
 
+                <dt>Which speakers or device is UDAW using, and how do I change it?</dt>
+                <dd>Look at the Out entry in the status box at the right of the menu bar: it names the device UDAW is really playing through. To change it, open Settings and choose another <b>Output device</b> in the Startup &amp; Audio Engine group (next to Output channels). The change applies immediately, and it covers the Timeline, WAV editor, Tracker, Foley pads and the warning sounds.</dd>
+
+                <dt>Why do I hear nothing, or hear it from the wrong place?</dt>
+                <dd>Check the Out entry in the menu bar status box first. If it says <em>Audio: not open</em>, turn on <em>Auto-start audio engine</em> or change any audio setting to reopen it. If it shows a device you did not mean, pick the right Output device in Settings. If you use an audio interface with an older driver, try the other Audio backend choice (wasapi or directsound) - a device that is quiet under one is often fine under the other.</dd>
+
+                <dt>Other programs go silent while UDAW is open. Why?</dt>
+                <dd>Exclusive-mode output is on with the wasapi backend, which takes sole control of the device. Untick <em>Exclusive-mode output</em> in Settings to share it.</dd>
+
+                <dt>How do I play sound effects against a video?</dt>
+                <dd>Open the Foley Sampler (the Foley icon in the Timeline transport strip), load sounds onto the pads, tick <em>Record hits while the Timeline plays</em>, press Play and hit the pads in time. Then choose <em>Add hits to Timeline</em> and each hit becomes a clip where you struck it.</dd>
+
+                <dt>UDAW showed an "Unexpected error" window. What do I do?</dt>
+                <dd>Press <b>Copy</b> (or <b>Save...</b>) to keep the report, then <b>Exit</b>, and post it on the UDAW forum with the steps that led up to it - see <a href="#crash-window">If UDAW shows the crash window</a>. Your project can be recovered from its last autosave when you start UDAW again.</dd>
+
                 <dt>What happens if UDAW crashes while I'm recording?</dt>
                 <dd>The active take is written to a disk-streaming recoverable container as it's captured; its index can be rebuilt on next launch so the audio already recorded is not lost.</dd>
 
@@ -2122,14 +2734,14 @@
                 <dt>How do I know UDAW is still working during a long operation, like a big render?</dt>
                 <dd>The status bar at the bottom of the window shows a live progress bar and description for operations that take noticeable time - rendering the timeline for playback, applying an effect or mastering pass, and building a track's waveform display. For a few file formats whose internal decoder doesn't expose a step-by-step position (currently MP3 and MP4/AAC), the bar shows start and finish rather than a smooth in-between percentage; every other long operation reports real incremental progress.</dd>
 
-                <dt>Where does the AI Assistant's knowledge come from?</dt>
-                <dd>It is a chat interface to your selected external AI provider (OpenAI, Claude or DeepSeek); music generation additionally calls out to Suno. Both require the relevant API access to be configured. See <a href="#ai">AI Assistant &amp; Voice Control</a>.</dd>
+                <dt>Where does the AI/SI Assistant's knowledge come from?</dt>
+                <dd>It is a chat interface to your selected external AI/SI provider (OpenAI, Claude or DeepSeek); music generation additionally calls out to Suno. Both require the relevant API access to be configured. See <a href="#ai">AI/SI Assistant &amp; Voice Control</a>.</dd>
 
-                <dt>Can an AI-driven change break my project or bypass Undo?</dt>
+                <dt>Can an AI/SI-driven change break my project or bypass Undo?</dt>
                 <dd>No. Every tool command the assistant runs - including ones reached through an MCP server - executes through the same validated command path a mouse-driven edit uses, so it is always undoable, and structural/destructive actions always ask for confirmation first.</dd>
 
                 <dt>What is MCP and do I need to use it?</dt>
-                <dd>Model Context Protocol - a way to plug external tool servers into the AI chat, and optionally let an external client drive UDAW back. It is entirely optional; with no MCP servers configured and server-exposure left off (the default), UDAW behaves exactly as if MCP did not exist. See <a href="#ai-mcp">Model Context Protocol (MCP)</a>.</dd>
+                <dd>Model Context Protocol - a way to plug external tool servers into the AI/SI chat, and optionally let an external client drive UDAW back. It is entirely optional; with no MCP servers configured and server-exposure left off (the default), UDAW behaves exactly as if MCP did not exist. See <a href="#ai-mcp">Model Context Protocol (MCP)</a>.</dd>
 
                 <dt>Is it safe to expose UDAW as an MCP server?</dt>
                 <dd>It is off by default and binds to loopback (127.0.0.1) only. Read-only tools are always safe to expose; destructive tools additionally require the external caller to pass a confirm flag, and only when you've explicitly enabled "Allow destructive tools" yourself.</dd>
@@ -2158,6 +2770,36 @@
             <h3>Then post in the UDAW forum</h3>
             <p><code>https://www.ultimanium.com/index.php?action=forums</code></p>
             <p>Once a reported problem has been fixed and resolved, we will delete it from the Forum Board.</p>
+            <h3 id="crash-window">If UDAW shows the crash window</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Capture exactly what went wrong when UDAW hits an unexpected error, so you can send it to us.</p>
+                <p><b>Why</b> A technical detail such as a stack trace is what lets a problem be found and fixed, and it is exactly what a screenshot of an error message leaves out. The crash window collects it for you.</p>
+            </div>
+            <p>
+                If UDAW meets an error it cannot recover from, it stops and opens the
+                <strong>Unexpected error</strong> window. It shows a report in a scrollable box (scroll bars
+                appear when the report is longer or wider than the box): the time, UDAW version, Windows version,
+                <strong>which thread</strong> raised the error (the main window, or a named background worker thread, for
+                example one of the audio or recording threads), what was raised, its message, and the trail of
+                routines it passed through. A copy of the report is also saved automatically in UDAW's logs folder
+                as <span class="kbd">crash-&lt;date&gt;-&lt;time&gt;.txt</span>; the window tells you the path.
+            </p>
+            <table class="udaw-table udaw-col-22">
+                <tr><td>Copy</td><td>Puts the whole report on the clipboard, ready to paste into a forum post.</td></tr>
+                <tr><td>Save...</td><td>Writes the report to a text file you choose.</td></tr>
+                <tr><td>Exit</td><td>Closes UDAW. This is the only way out of the window.</td></tr>
+            </table>
+            <div class="udaw-warn">
+                <strong>Only the first error is reported.</strong> Once the crash window has appeared, UDAW does not
+                show another for any later error - after a first failure nothing that follows can be trusted, and a
+                second window would only bury the first. Later errors are still written to the log.
+            </div>
+            <p>
+                Copy or save the report <em>before</em> you press Exit, then post it with the steps you took (see
+                below). UDAW's autosave and recovery (<a href="#project-doc">Projects, Undo &amp; Recovery</a>)
+                will offer to restore your work from the last snapshot the next time you start.
+            </p>
+
             <h3>Tell us exactly what you did, step by step</h3>
             <p>
                 The most important part of any bug report is <strong>exactly what you did to get the bug, step by
@@ -2169,6 +2811,7 @@
                 <li>What you expected to happen.</li>
                 <li>What actually happened instead, including any error message word for word.</li>
                 <li>Your UDAW version (shown at the top of this page) and your version of Windows.</li>
+                <li>If UDAW showed its <a href="#crash-window">crash window</a>, the report it displayed (use Copy and paste it into your post).</li>
             </ol>
             <h3>Need to discuss it further?</h3>
             <p>
@@ -2192,12 +2835,12 @@
                 framework and audio devices; the internal DSP foundation; the audio graph; the project
                 system; the WAV codec; the timeline; recording; the mixer; the DSP effect suite; the
                 native tracker engine and its MOD/XM/MPTM(IT) import-export; MP3; the MP4 container; MIDI
-                and the Piano Roll; multiple AI providers; Suno-based music generation with a voice
-                command pipeline; AI mixing/mastering assistants; AI tool commands; the Model Context
-                Protocol client/server layer; the AI song-specification/arrangement engine (with
+                and the Piano Roll; multiple AI/SI providers; Suno-based music generation with a voice
+                command pipeline; AI/SI mixing/mastering assistants; AI/SI tool commands; the Model Context
+                Protocol client/server layer; the AI/SI song-specification/arrangement engine (with
                 samples-and-loops-before-MIDI track realisation - see
                 <a href="#ai-compose">Samples and Loops Before MIDI</a>); and a testing/hardening pass
-                covering provider-failure handling, project-reopen compatibility, deterministic AI
+                covering provider-failure handling, project-reopen compatibility, deterministic AI/SI
                 regeneration and real-time plugin-crash isolation.
             </p>
             <p>
@@ -2209,10 +2852,62 @@
             <p>This page is bundled with the application and opened from the desktop client's own Help menu.</p>
         </section>
 
+        <!-- ============================================================ -->
+        <section id="license">
+            <h2>19. License &amp; EULA</h2>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Read the agreement that covers your use of UDAW.</p>
+                <p><b>Why</b> UDAW is free and open source software provided without warranty, and you are responsible for the material you use and create.</p>
+            </div>
+            <p>
+                Open <strong>Help &rarr; License and EULA (Read the Agreement)...</strong> to read the full
+                License and End-User License Agreement in its own window. The same text ships with UDAW as
+                <code>LICENSE.md</code>.
+            </p>
+            <ul>
+                <li>UDAW is Free and Open Source Software, provided <strong>as is</strong>, with no warranty.</li>
+                <li>UDAW and any Python plug-ins made with or for it may be shared free of charge, but may not be sold or distributed for commercial gain. The music and other work you create with UDAW is yours.</li>
+                <li>You may not reverse engineer UDAW &ndash; by hand or with AI or automated analysis tools &ndash; to use what you learn for profit. This is a breach of the agreement (section 2.11).</li>
+                <li>The developer(s) are not responsible for what UDAW does to your computer, devices or data at any time. Back up your work and keep your listening volume safe.</li>
+                <li>Services such as Suno, Luma, OpenAI, Anthropic and DeepSeek are independent engines run by other companies. What you import, generate, publish or sell &ndash; audio, video or anything else &ndash; and its copyright status is your responsibility.</li>
+                <li>Report problems on our Discord channel &ndash; the invite link is in the README that accompanies UDAW.</li>
+            </ul>
+        </section>
+
         <div class="udaw-footer">UDAW Help Centre &mdash; for use inside the UDAW desktop application only.</div>
 
     </main>
 </div>
+<script>
+/* Language: Google Translate in the header bar. It loads when the page is online and the bar stays hidden
+   otherwise. Code samples are marked so they are never translated. */
+(function () {
+    function markNoTranslate() {
+        var els = document.querySelectorAll('.udaw-code, code, pre');
+        for (var i = 0; i < els.length; i++) { els[i].setAttribute('translate', 'no'); els[i].className += ' notranslate'; }
+    }
+    window.googleTranslateElementInit = function () {
+        try {
+            new google.translate.TranslateElement({
+                pageLanguage: 'en',
+                layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
+                autoDisplay: false
+            }, 'google_translate_element');
+            var box = document.getElementById('udaw-translate');
+            if (box) { box.style.display = 'flex'; }
+        } catch (e) { /* offline or blocked: the language box stays hidden */ }
+    };
+    function load() {
+        markNoTranslate();
+        var sc = document.createElement('script');
+        sc.src = 'https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
+        sc.async = true;
+        sc.onerror = function () { };
+        document.head.appendChild(sc);
+    }
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', load); } else { load(); }
+})();
+</script>
 <script>
 (function () {
     "use strict";

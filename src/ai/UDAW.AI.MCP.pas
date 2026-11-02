@@ -270,6 +270,8 @@ function MCPDefaultRegistryPath: string;
 
 implementation
 
+uses UDAW.Threading;
+
 const
   SUBSYS = 'AI.MCP';
 
@@ -279,7 +281,7 @@ type
   { Reads the child process's stdout continuously and pushes complete lines
     to the owning transport via OnLineReceived. Platform-specific read loop,
     common outer shape. }
-  TMCPStdioReaderThread = class(TThread)
+  TMCPStdioReaderThread = class(TUDAWThread)
   private
     FOwner: TMCPStdioTransport;
   protected

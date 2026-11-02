@@ -81,6 +81,7 @@ object frmGLFileDialog: TfrmGLFileDialog
     ViewStyle = vsReport
     OnClick = lvFilesClick
     OnDblClick = lvFilesDblClick
+    OnMouseDown = lvFilesMouseDown
   end
   object lblName: TGLLabel
     Left = 12

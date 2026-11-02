@@ -16,10 +16,10 @@ unit UDAW.UI.InstrumentEditor;
 interface
 
 uses
-  Winapi.Windows, System.SysUtils, System.Classes, System.Math, System.Types,
+  Winapi.Windows, System.SysUtils, System.Classes, System.Math, System.Types, System.UITypes,
   System.Generics.Collections, System.StrUtils, Vcl.Controls, Vcl.Forms, Vcl.Graphics,
   Winapi.MMSystem, UDAW.Audio.Types, UDAW.Drum.Machine, UDAW.GL.Canvas, UDAW.GL.Controls, UDAW.GL.Widgets,
-  UDAW.Timeline.FxPresets, UDAW.UI.FileDialog;
+  UDAW.Timeline.FxPresets, UDAW.UI.FileDialog, Vcl.Dialogs;
 
 type
   TfrmInstrumentEditor = class(TForm)
@@ -158,7 +158,8 @@ type
 implementation
 
 uses UDAW.DSP.MathTables,
-  UDAW.Codec.WAV, UDAW.DSP.TimeStretch, UDAW.UI.EffectEditor, UDAW.Timeline.OfflineFx;
+  UDAW.Codec.WAV, UDAW.DSP.TimeStretch, UDAW.UI.EffectEditor, UDAW.Timeline.OfflineFx,
+  UDAW.App;
 
 {$R *.dfm}
 
@@ -949,7 +950,11 @@ end;
 procedure TfrmInstrumentEditor.StopAudition;
 begin
   if FMachine <> nil then FMachine.StopPad(FNote)
-  else if FFileMode then PlaySound(nil, 0, 0);
+  else if FFileMode then
+  begin
+    if (App <> nil) and (App.Audio <> nil) then App.Audio.ClearSource
+    else PlaySound(nil, 0, 0);
+  end;
 end;
 
 { ---- hearing the work ---- }
@@ -958,12 +963,16 @@ procedure TfrmInstrumentEditor.Audition(const AData: TAudioPlanar);
 begin
   if FFileMode then
   begin
-    { the region is written beside the output and played through the system audio output }
+    { the region is written beside the output and played through the audio engine, i.e. the output
+      device and backend chosen in Settings }
     if (Length(AData) < 1) or (Length(AData[0]) < 2) then Exit;
-    PlaySound(nil, 0, 0);
+    StopAudition;
     try
       SaveWavFile(FAuditionPath, AData, Length(AData), FRate, Length(AData[0]), wsfPCM16);
-      PlaySound(PChar(FAuditionPath), 0, SND_FILENAME or SND_ASYNC or SND_NODEFAULT);
+      if (App <> nil) and (App.Audio <> nil) then
+        App.Audio.SetSource(TWavPlayerSource.Create(FAuditionPath, False))
+      else
+        PlaySound(PChar(FAuditionPath), 0, SND_FILENAME or SND_ASYNC or SND_NODEFAULT);
     except
       on E: Exception do Note('Audition failed: ' + E.Message);
     end;
@@ -1025,8 +1034,7 @@ begin
   except
     on E: Exception do
     begin
-      MessageBox(Handle, PChar('Could not save the edited sound:' + sLineBreak + E.Message),
-        'Instrument editor', MB_OK or MB_ICONWARNING);
+      MessageDlg('Could not save the edited sound:' + sLineBreak + E.Message, mtWarning, [mbOK], 0);
       Result := False;
     end;
   end;
@@ -1085,8 +1093,7 @@ begin
     Note('Saved ' + ExtractFileName(fn));
   except
     on E: Exception do
-      MessageBox(Handle, PChar('Could not save the audio:' + sLineBreak + E.Message),
-        'Audio file editor', MB_OK or MB_ICONWARNING);
+      MessageDlg('Could not save the audio:' + sLineBreak + E.Message, mtWarning, [mbOK], 0);
   end;
 end;
 
@@ -1115,8 +1122,7 @@ end;
 procedure TfrmInstrumentEditor.btnCancelClick(Sender: TObject);
 begin
   if FModified and
-     (MessageBox(Handle, 'Discard the changes made to this sound?', 'Instrument editor',
-       MB_YESNO or MB_ICONQUESTION) <> IDYES) then Exit;
+     (MessageDlg('Discard the changes made to this sound?', mtConfirmation, [mbYes, mbNo], 0) <> mrYes) then Exit;
   ModalResult := mrCancel;
 end;
 

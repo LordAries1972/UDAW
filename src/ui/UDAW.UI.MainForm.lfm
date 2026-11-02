@@ -4513,17 +4513,6 @@
           OnClick = btnTrkStopClick
         end
       end
-      object mnuTrkEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuTrkUndo: TMenuItem
-          Caption = 'Undo'
-          OnClick = btnTrkUndoClick
-        end
-        object mnuTrkRedo: TMenuItem
-          Caption = 'Redo'
-          OnClick = btnTrkRedoClick
-        end
-      end
       object mnuTrkImport: TMenuItem
         Caption = 'Import'
         object mnuTrkImportMod: TMenuItem
@@ -4594,17 +4583,6 @@
         object mnuMixDelInsert: TMenuItem
           Caption = 'Remove insert'
           OnClick = btnMixDelInsertClick
-        end
-      end
-      object mnuMixEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuMixUndo: TMenuItem
-          Caption = 'Undo'
-          OnClick = btnMixUndoClick
-        end
-        object mnuMixRedo: TMenuItem
-          Caption = 'Redo'
-          OnClick = btnMixRedoClick
         end
       end
       object mnuMixModulation: TMenuItem
@@ -4718,17 +4696,6 @@
         object mnuMidiPanic: TMenuItem
           Caption = 'MIDI Panic (all notes off)'
           OnClick = btnSetMidiPanicClick
-        end
-      end
-      object mnuMidiEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuMidiUndo: TMenuItem
-          Caption = 'Undo'
-          OnClick = btnMidiUndoClick
-        end
-        object mnuMidiRedo: TMenuItem
-          Caption = 'Redo'
-          OnClick = btnMidiRedoClick
         end
       end
       object mnuMidiImport: TMenuItem
@@ -4905,8 +4872,121 @@
           OnClick = btnTlStopClick
         end
       end
+      object mnuTlTrack: TMenuItem
+        Caption = 'Channel'
+        object mnuTlTrackUp: TMenuItem
+          Caption = 'Move Channel Up'
+          OnClick = btnTlTrackUpClick
+        end
+        object mnuTlTrackDown: TMenuItem
+          Caption = 'Move Channel Down'
+          OnClick = btnTlTrackDownClick
+        end
+        object mnuTlMuteTrack: TMenuItem
+          Caption = 'Mute Channel'
+          OnClick = pmTlMuteTrackClick
+        end
+      end
+      object mnuTlLoop: TMenuItem
+        Caption = 'Loop'
+        object mnuTlLoopStart: TMenuItem
+          Caption = 'Set Loop Start Here'
+          OnClick = btnTlLoopStartClick
+        end
+        object mnuTlLoopEnd: TMenuItem
+          Caption = 'Set Loop End Here'
+          OnClick = btnTlLoopEndClick
+        end
+        object mnuTlLoopSep1: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlLoopToggle: TMenuItem
+          Caption = 'Loop Playback'
+          OnClick = btnTlLoopToggleClick
+        end
+        object mnuTlLoopSep2: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlLoopToRange: TMenuItem
+          Caption = 'Set Loop to Selection'
+          OnClick = btnTlLoopToRangeClick
+        end
+      end
+      object mnuTlBrowserSep: TMenuItem
+        Caption = '-'
+      end
+      object mnuTlOpenBrowser: TMenuItem
+        Caption = 'Open Browser Window...'
+        OnClick = OpenBrowserWindowClick
+      end
+    end
+    object mnuProject: TMenuItem
+      Caption = 'Project'
+      object mnuProjectFile: TMenuItem
+        Caption = 'File'
+        object mnuProjectNew: TMenuItem
+          Caption = 'New'
+          ShortCut = 16462
+          OnClick = btnProjectNewClick
+        end
+        object mnuProjectOpen: TMenuItem
+          Caption = 'Open...'
+          ShortCut = 16463
+          OnClick = btnProjectOpenClick
+        end
+        object mnuProjectSepOpen: TMenuItem
+          Caption = '-'
+        end
+        object mnuProjectRecent: TMenuItem
+          Caption = 'Recent Projects'
+        end
+        object mnuProjectSepRecent: TMenuItem
+          Caption = '-'
+        end
+        object mnuProjectSave: TMenuItem
+          Caption = 'Save'
+          ShortCut = 16467
+          OnClick = btnProjectSaveClick
+        end
+        object mnuProjectSaveAs: TMenuItem
+          Caption = 'Save As...'
+          ShortCut = 24659
+          OnClick = btnProjectSaveAsClick
+        end
+      end
+      object mnuProjectAutosave: TMenuItem
+        Caption = 'Autosave'
+        object mnuProjectAutosaveNow: TMenuItem
+          Caption = 'Autosave now'
+          OnClick = btnAutosaveNowClick
+        end
+        object mnuProjectRecover: TMenuItem
+          Caption = 'Recover unsaved changes'
+          OnClick = btnRecoverClick
+        end
+      end
+      object mnuProjectSepExit: TMenuItem
+        Caption = '-'
+      end
+      object mnuProjectExit: TMenuItem
+        Caption = 'Exit UDAW'
+        ShortCut = 32883
+        OnClick = mnuProjectExitClick
+      end
+    end
+    object mnuEdit: TMenuItem
+      Caption = 'Edit'
+      object mnuProjectUndo: TMenuItem
+        Caption = 'Undo'
+        OnClick = btnUndoClick
+      end
+      object mnuProjectRedo: TMenuItem
+        Caption = 'Redo'
+        OnClick = btnRedoClick
+      end
       object mnuTlEdit: TMenuItem
-        Caption = 'Edit'
+        Caption = 'Timeline'
+        Visible = False
         object mnuTlUndo: TMenuItem
           Caption = 'Undo'
           OnClick = btnTlUndoClick
@@ -5227,126 +5307,40 @@
           OnClick = TlSaveSelectionClick
         end
       end
-      object mnuTlTrack: TMenuItem
-        Caption = 'Channel'
-        object mnuTlTrackUp: TMenuItem
-          Caption = 'Move Channel Up'
-          OnClick = btnTlTrackUpClick
-        end
-        object mnuTlTrackDown: TMenuItem
-          Caption = 'Move Channel Down'
-          OnClick = btnTlTrackDownClick
-        end
-        object mnuTlMuteTrack: TMenuItem
-          Caption = 'Mute Channel'
-          OnClick = pmTlMuteTrackClick
-        end
-      end
-      object mnuTlLoop: TMenuItem
-        Caption = 'Loop'
-        object mnuTlLoopStart: TMenuItem
-          Caption = 'Set Loop Start Here'
-          OnClick = btnTlLoopStartClick
-        end
-        object mnuTlLoopEnd: TMenuItem
-          Caption = 'Set Loop End Here'
-          OnClick = btnTlLoopEndClick
-        end
-        object mnuTlLoopSep1: TMenuItem
-          Caption = '-'
-        end
-        object mnuTlLoopToggle: TMenuItem
-          Caption = 'Loop Playback'
-          OnClick = btnTlLoopToggleClick
-        end
-        object mnuTlLoopSep2: TMenuItem
-          Caption = '-'
-        end
-        object mnuTlLoopToRange: TMenuItem
-          Caption = 'Set Loop to Selection'
-          OnClick = btnTlLoopToRangeClick
-        end
-      end
-      object mnuTlBrowserSep: TMenuItem
-        Caption = '-'
-      end
-      object mnuTlOpenBrowser: TMenuItem
-        Caption = 'Open Browser Window...'
-        OnClick = OpenBrowserWindowClick
-      end
-    end
-    object mnuProject: TMenuItem
-      Caption = 'Project'
-      object mnuProjectFile: TMenuItem
-        Caption = 'File'
-        object mnuProjectNew: TMenuItem
-          Caption = 'New'
-          ShortCut = 16462
-          OnClick = btnProjectNewClick
-        end
-        object mnuProjectOpen: TMenuItem
-          Caption = 'Open...'
-          ShortCut = 16463
-          OnClick = btnProjectOpenClick
-        end
-        object mnuProjectSepOpen: TMenuItem
-          Caption = '-'
-        end
-        object mnuProjectRecent: TMenuItem
-          Caption = 'Recent Projects'
-        end
-        object mnuProjectSepRecent: TMenuItem
-          Caption = '-'
-        end
-        object mnuProjectSave: TMenuItem
-          Caption = 'Save'
-          ShortCut = 16467
-          OnClick = btnProjectSaveClick
-        end
-        object mnuProjectSaveAs: TMenuItem
-          Caption = 'Save As...'
-          ShortCut = 24659
-          OnClick = btnProjectSaveAsClick
-        end
-      end
-      object mnuProjectMetadata: TMenuItem
-        Caption = 'Metadata'
-        object mnuProjectApply: TMenuItem
-          Caption = 'Apply metadata'
-          OnClick = btnProjectApplyClick
-        end
-      end
-      object mnuProjectEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuProjectUndo: TMenuItem
+      object mnuTrkEdit: TMenuItem
+        Caption = 'Tracker'
+        Visible = False
+        object mnuTrkUndo: TMenuItem
           Caption = 'Undo'
-          OnClick = btnUndoClick
+          OnClick = btnTrkUndoClick
         end
-        object mnuProjectRedo: TMenuItem
+        object mnuTrkRedo: TMenuItem
           Caption = 'Redo'
-          OnClick = btnRedoClick
+          OnClick = btnTrkRedoClick
         end
       end
-      object mnuProjectGraph: TMenuItem
-        Caption = 'Graph'
-        object mnuProjectAddGainNode: TMenuItem
-          Caption = 'Add gain node'
-          OnClick = btnAddGainNodeClick
+      object mnuMixEdit: TMenuItem
+        Caption = 'Mixer'
+        Visible = False
+        object mnuMixUndo: TMenuItem
+          Caption = 'Undo'
+          OnClick = btnMixUndoClick
         end
-        object mnuProjectRemoveLastNode: TMenuItem
-          Caption = 'Remove last node'
-          OnClick = btnRemoveLastNodeClick
+        object mnuMixRedo: TMenuItem
+          Caption = 'Redo'
+          OnClick = btnMixRedoClick
         end
       end
-      object mnuProjectAutosave: TMenuItem
-        Caption = 'Autosave'
-        object mnuProjectAutosaveNow: TMenuItem
-          Caption = 'Autosave now'
-          OnClick = btnAutosaveNowClick
+      object mnuMidiEdit: TMenuItem
+        Caption = 'MIDI'
+        Visible = False
+        object mnuMidiUndo: TMenuItem
+          Caption = 'Undo'
+          OnClick = btnMidiUndoClick
         end
-        object mnuProjectRecover: TMenuItem
-          Caption = 'Recover unsaved changes'
-          OnClick = btnRecoverClick
+        object mnuMidiRedo: TMenuItem
+          Caption = 'Redo'
+          OnClick = btnMidiRedoClick
         end
       end
     end
@@ -5718,6 +5712,10 @@
       object mnuHelpAbout: TMenuItem
         Caption = 'UDAW Help Centre...'
         OnClick = btnHelpAboutClick
+      end
+      object mnuHelpLicense: TMenuItem
+        Caption = 'License and EULA (Read the Agreement)...'
+        OnClick = mnuHelpLicenseClick
       end
       object mnuHelpAboutUdawSep: TMenuItem
         Caption = '-'

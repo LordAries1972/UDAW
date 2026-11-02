@@ -19,7 +19,7 @@ unit UDAW.Audio.Graph.Nodes;
 interface
 
 uses
-  SysUtils, Math, System.NetEncoding,
+  SysUtils, Math, System.NetEncoding, System.JSON,
   UDAW.Errors,
   UDAW.Audio.Types, UDAW.Audio.Buffer, UDAW.Audio.Source,
   UDAW.DSP.Math, UDAW.DSP.Filters, UDAW.DSP.Meter, UDAW.DSP.Envelope,
@@ -28,7 +28,7 @@ uses
   UDAW.DSP.MultibandComp, UDAW.DSP.Mastering, UDAW.DSP.Visualization,
   UDAW.DSP.ParametricEQ, UDAW.DSP.StereoWidth, UDAW.DSP.TransientShaper,
   UDAW.DSP.Exciter, UDAW.DSP.LookaheadLimiter, UDAW.DSP.PitchShift,
-  UDAW.Mixer.VST2, UDAW.Mixer.CLAP, UDAW.Mixer.VST3;
+  UDAW.Mixer.VST2, UDAW.Mixer.CLAP, UDAW.Mixer.VST3, UDAW.Scripting.PyPlugin;
 
 const
   GRAPH_SUBSYS = 'AudioGraph';
@@ -64,6 +64,7 @@ type
     nkLookaheadLimiter, // Phase 34: real lookahead brickwall limiter
     nkCLAP,         // hosted CLAP plugin (UDAW.Mixer.CLAP), audio effect
     nkVST3,         // hosted VST3 plugin (UDAW.Mixer.VST3), audio effect
+    nkPython,       // user Python plug-in (UDAW.Scripting.PyPlugin), audio effect
     nkBus,          // explicit summing / routing point (unity pass)
     nkOutput        // graph output / master; exactly one per graph
   );
@@ -660,6 +661,38 @@ type
     procedure DoConfigure; override;
   end;
 
+  { ---- Python plug-in insert ----
+
+    Params (all values base64 so the "key=value;..." text survives any content):
+      path   full path of the plug-in's script file: the insert points at it (the text is read when the
+             plug-in starts, so editing the file changes the insert); src= is only read from old projects
+      vals   JSON object of parameter id -> value, the settings saved with the project
+      state  the script's own saved data (JSON)
+      iid    instance id: lets an open editor window attach to the instance that is playing
+      file   the file name it came from (display only)
+      pn     the parameter names, one per line (the mixer's automation list)
+    The script runs in its own Python process (see UDAW.Scripting.PyPlugin); if it cannot start
+    the insert passes the audio through dry and LoadError says why. }
+  TPythonNode = class(TEffectNodeBase)
+  private
+    FHost: TPyPluginHost;
+    FSrcB64, FPathB64, FValsB64, FStateB64, FIid, FFileB64, FNamesB64: string;
+    FStartedKey, FFailedKey, FLoadError: string;
+    function ConfigKey: string;
+    procedure DropHost;
+  public
+    destructor Destroy; override;
+    procedure Reset; override;
+    procedure Process(AIn, AOut: TAudioBuffer); override;
+    function SerializeParams: string; override;
+    procedure DeserializeParams(const AText: string); override;
+    property Host: TPyPluginHost read FHost;
+    property LoadError: string read FLoadError;
+    property InstanceId: string read FIid;
+  protected
+    procedure DoConfigure; override;
+  end;
+
   { ---- bus / output ---- }
 
   TBusNode = class(TAudioNode)
@@ -792,6 +825,7 @@ begin
     nkVST2:        Result := 'vst2';
     nkCLAP:        Result := 'clap';
     nkVST3:        Result := 'vst3';
+    nkPython:      Result := 'python';
     nkParametricEQ: Result := 'parametriceq';
     nkStereoWidth: Result := 'stereowidth';
     nkTransientShaper: Result := 'transientshaper';
@@ -842,6 +876,7 @@ begin
     nkVST2:        Result := 'VST Plugin';
     nkCLAP:        Result := 'CLAP Plugin';
     nkVST3:        Result := 'VST3 Plugin';
+    nkPython:      Result := 'Python Plug-in';
     nkParametricEQ: Result := 'Parametric EQ';
     nkStereoWidth: Result := 'Stereo Width';
     nkTransientShaper: Result := 'Transient Shaper';
@@ -3079,6 +3114,122 @@ begin
   if FConfigured then DoConfigure;
 end;
 
+{ ================= TPythonNode ================= }
+
+destructor TPythonNode.Destroy;
+begin
+  DropHost;
+  inherited Destroy;
+end;
+
+procedure TPythonNode.DropHost;
+begin
+  if FHost = nil then Exit;
+  PyLive.Unregister(FIid, FHost);
+  FHost.AudioActive := False;
+  FHost.Release;
+  FHost := nil;
+  FStartedKey := '';
+end;
+
+{ what a running instance depends on: a change in any of these needs a fresh process }
+function TPythonNode.ConfigKey: string;
+begin
+  Result := Format('%s|%s|%s|%d|%d|%d', [FPathB64, PyScriptStamp(PyDecode(FPathB64)), FSrcB64, FSampleRate, FChannels, FMaxFrames]);
+end;
+
+procedure TPythonNode.DoConfigure;
+var
+  src, err, key, fileName, scriptDir: string;
+  v: TJSONValue;
+  pair: TJSONPair;
+begin
+  if (FPathB64 = '') and (FSrcB64 = '') then Exit;
+  key := ConfigKey;
+  if (FHost <> nil) and (FHost.Dead or (FStartedKey <> key)) then DropHost;
+  if FHost = nil then
+  begin
+    if FFailedKey = key then Exit;            // already tried this exact setup: stay dry
+    if not PyInsertSource(Format('path=%s;src=%s;file=%s', [FPathB64, FSrcB64, FFileB64]),
+         src, fileName, scriptDir, err) then
+    begin
+      FLoadError := err;
+      FFailedKey := key;
+      Exit;
+    end;
+    FHost := TPyPluginHost.Create;
+    if not FHost.Start(src, fileName, scriptDir, PyDecode(FValsB64), PyDecode(FStateB64),
+         FSampleRate, FChannels, FMaxFrames, err) then
+    begin
+      FLoadError := err;
+      FHost.Release;
+      FHost := nil;
+      FFailedKey := key;
+      Exit;
+    end;
+    FLoadError := '';
+    FFailedKey := '';
+    FStartedKey := key;
+    FHost.AudioActive := True;
+    PyLive.Register(FIid, FHost);
+  end
+  else if FValsB64 <> '' then
+  begin
+    { same script, new settings (an edit or an undo in the project): move the parameters }
+    v := TJSONObject.ParseJSONValue(PyDecode(FValsB64));
+    try
+      if v is TJSONObject then
+        for pair in TJSONObject(v) do
+          if pair.JsonValue is TJSONNumber then
+            FHost.SetParam(pair.JsonString.Value, TJSONNumber(pair.JsonValue).AsDouble);
+    finally
+      v.Free;
+    end;
+  end;
+end;
+
+procedure TPythonNode.Reset;
+begin
+  if (FHost <> nil) and FHost.Ready then FHost.ResetDsp;
+end;
+
+procedure TPythonNode.Process(AIn, AOut: TAudioBuffer);
+var
+  nc, n: Integer;
+  ok: Boolean;
+begin
+  n := AOut.FrameCount;
+  GatherPtrs(AIn, AOut, nc);
+  if (nc = 0) or (n = 0) then Exit;
+  ok := (FHost <> nil) and FHost.ProcessBlock(FInPtrs, FOutPtrs, n);
+  if not ok then
+    { script missing / slow / stopped: the dry signal, never silence and never a stall }
+    for nc := 0 to High(FOutPtrs) do
+      Move(FInPtrs[nc]^, FOutPtrs[nc]^, n * SizeOf(Single));
+end;
+
+function TPythonNode.SerializeParams: string;
+begin
+  Result := Format('path=%s;src=%s;vals=%s;state=%s;iid=%s;file=%s;pn=%s',
+    [FPathB64, FSrcB64, FValsB64, FStateB64, FIid, FFileB64, FNamesB64]);
+end;
+
+procedure TPythonNode.DeserializeParams(const AText: string);
+var
+  newIid: string;
+begin
+  FSrcB64 := ParamStrDef(AText, 'src', '');
+  FPathB64 := ParamStrDef(AText, 'path', '');
+  FValsB64 := ParamStrDef(AText, 'vals', '');
+  FStateB64 := ParamStrDef(AText, 'state', '');
+  FFileB64 := ParamStrDef(AText, 'file', '');
+  FNamesB64 := ParamStrDef(AText, 'pn', '');
+  newIid := ParamStrDef(AText, 'iid', '');
+  if (newIid <> FIid) and (FHost <> nil) then DropHost;
+  FIid := newIid;
+  if FConfigured then DoConfigure;
+end;
+
 { ================= factory ================= }
 
 function CreateNode(AId: Integer; AKind: TNodeKind; const AName: string): TAudioNode;
@@ -3105,6 +3256,7 @@ begin
     nkVST2:        Result := TVST2Node.Create(AId, AKind, AName);
     nkCLAP:        Result := TCLAPNode.Create(AId, AKind, AName);
     nkVST3:        Result := TVST3Node.Create(AId, AKind, AName);
+    nkPython:      Result := TPythonNode.Create(AId, AKind, AName);
     nkParametricEQ: Result := TParametricEQNode.Create(AId, AKind, AName);
     nkStereoWidth: Result := TStereoWidthNode.Create(AId, AKind, AName);
     nkTransientShaper: Result := TTransientShaperNode.Create(AId, AKind, AName);

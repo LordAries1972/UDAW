@@ -77,7 +77,10 @@ begin
   if FileLooksLikeXm(AFileName) then
     Result := XmToModule(data)
   else if FileLooksLikeMptm(AFileName) then
-    Result := MptmToModule(data)
+  begin
+    MptmSetSampleFolder(ExtractFilePath(ExpandFileName(AFileName)));
+    Result := MptmToModule(data);
+  end
   else if FileLooksLikeMod(AFileName) then
     Result := ModToModule(data);
 end;

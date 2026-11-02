@@ -22,6 +22,8 @@ type
     pnlBottom: TPanel;
     btnReset: TButton;
     lblTargets: TGLLabel;
+    lblSource: TGLLabel;
+    cboSource: TGLCombo;
     tmrMeters: TTimer;
     procedure pbMetersPaint(Sender: TObject);
     procedure tmrMetersTimer(Sender: TObject);
@@ -37,6 +39,8 @@ type
       const ALabel: string);
   public
     property StripProvider: TMeterStripProvider read FProvider write FProvider;
+    { 0 = automatic (follows what is playing), 1 = the Timeline mixer, 2 = the Tracker module's mixer }
+    function SourceIndex: Integer;
   end;
 
 implementation
@@ -168,6 +172,13 @@ procedure Trough(ACanvas: TGLCanvas; const R: TRect);
 begin
   ACanvas.Pen.Style := psClear;
   ACanvas.Brush.Style := bsSolid;
+  { the trough stands proud of the panel: a soft drop shadow beneath it }
+  ACanvas.Brush.Color := clBlack;
+  ACanvas.Alpha := 0.30;
+  ACanvas.RoundRect(R.Left - 5, R.Top - 1, R.Right + 5, R.Bottom + 7, 10, 10);
+  ACanvas.Alpha := 0.45;
+  ACanvas.RoundRect(R.Left - 4, R.Top, R.Right + 4, R.Bottom + 5, 8, 8);
+  ACanvas.Alpha := 1;
   ACanvas.Brush.Color := $08080A;
   ACanvas.RoundRect(R.Left - 4, R.Top - 3, R.Right + 4, R.Bottom + 3, 7, 7);
   HLine(ACanvas, R.Left - 2, R.Right + 2, R.Top - 3, $020203);          // shadow on the top lip
@@ -181,6 +192,11 @@ var
 begin
   ACanvas.Pen.Style := psClear;
   ACanvas.Brush.Style := bsSolid;
+  { each block casts a small shadow onto the trough floor }
+  ACanvas.Brush.Color := clBlack;
+  ACanvas.Alpha := 0.55;
+  ACanvas.FillRect(Rect(R.Left + 1, R.Bottom, R.Right + 1, R.Bottom + 2));
+  ACanvas.Alpha := 1;
   if ALit then
   begin
     ACanvas.Alpha := 0.20;
@@ -229,6 +245,11 @@ begin
   ACanvas.Font.Color := AColor;
   ACanvas.TextOut(R.Right - 8 - ACanvas.TextWidth(AText), R.Top + (R.Bottom - R.Top - ACanvas.TextHeight(AText)) div 2, AText);
   ACanvas.Font.Style := [];
+end;
+
+function TfrmMeters.SourceIndex: Integer;
+begin
+  Result := Max(0, cboSource.ItemIndex);
 end;
 
 procedure TfrmMeters.FormShow(Sender: TObject);

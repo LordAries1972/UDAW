@@ -47,6 +47,11 @@ type
     PanelBackground: TColor;
     ClipEffectsBackground: TColor;
     FadeInBackground, FadeOutBackground: TColor;
+    LockColor: TColor;               // the padlock on locked clips, markers, scenes and chords
+    ControlSelection: TColor;        // selected rows, ticked boxes and the gliding selection pill of lists and trees
+    ControlSelectionText: TColor;    // text on a selected row
+    ControlHover: TColor;            // the glow that follows the mouse over a list or tree row
+    ControlFocus: TColor;            // the outline of the control that has the keyboard focus
     Text: TColor;
     SecondaryText: TColor;
     Border: TColor;
@@ -95,7 +100,8 @@ type
     csAccent, csSelection, csWaveform, csGrid, csMeter, csMeterClip,
     csAutomation, csMidiNote,
     csLogTrace, csLogDebug, csLogInfo, csLogWarn, csLogError, csLogCritical,
-    csClipEffectsBackground, csFadeInBackground, csFadeOutBackground,
+    csClipEffectsBackground, csFadeInBackground, csFadeOutBackground, csTimelineLock,
+    csControlSelection, csControlSelectionText, csControlHover, csControlFocus,
     csFxCompressor, csFxReverb, csFxChorus, csFxFlanger, csFxPhaser,
     csFxTremolo, csFxAutoPan, csFxSaturation, csFxBitCrusher, csFxBrightenEQ,
     csFxSilence, csFxAmplify, csFxDeEsser, csFxDelay, csFxExpander, csFxFoldback,
@@ -239,6 +245,11 @@ begin
   Result.ClipEffectsBackground := RGB(74, 69, 115);
   Result.FadeInBackground := RGB(38, 92, 74);
   Result.FadeOutBackground := RGB(104, 69, 43);
+  Result.LockColor := RGB(240, 176, 48);
+  Result.ControlSelection := RGB(44, 176, 176);
+  Result.ControlSelectionText := RGB(255, 255, 255);
+  Result.ControlHover := RGB(205, 210, 220);
+  Result.ControlFocus := RGB(60, 190, 200);
   { fixed default per-effect palette, same rationale as the clip/fade
     backgrounds above: a colour every built-in theme starts with, that the
     user can then re-pick per swatch on the Colors settings page. }
@@ -281,6 +292,10 @@ begin
     Result.ClipEffectsBackground := RGB(204, 194, 230);
     Result.FadeInBackground := RGB(159, 221, 190);
     Result.FadeOutBackground := RGB(236, 198, 155);
+    Result.LockColor := RGB(188, 108, 0);
+    Result.ControlSelection := RGB(0, 128, 136);
+    Result.ControlHover := RGB(60, 70, 90);
+    Result.ControlFocus := RGB(0, 120, 150);
   end;
   Result.Text := AText;
   Result.SecondaryText := ASecondaryText;
@@ -398,6 +413,11 @@ begin
     ATheme.ClipEffectsBackground := ColorField('clipeffectsbackground', RGB(74, 69, 115));
     ATheme.FadeInBackground := ColorField('fadeinbackground', RGB(38, 92, 74));
     ATheme.FadeOutBackground := ColorField('fadeoutbackground', RGB(104, 69, 43));
+    ATheme.LockColor := ColorField('timelinelock', RGB(240, 176, 48));
+    ATheme.ControlSelection := ColorField('controlselection', RGB(44, 176, 176));
+    ATheme.ControlSelectionText := ColorField('controlselectiontext', RGB(255, 255, 255));
+    ATheme.ControlHover := ColorField('controlhover', RGB(205, 210, 220));
+    ATheme.ControlFocus := ColorField('controlfocus', RGB(60, 190, 200));
     ATheme.Text := ColorField('text', clWhite);
     ATheme.SecondaryText := ColorField('secondarytext', clSilver);
     ATheme.Border := ColorField('border', clGray);
@@ -484,6 +504,11 @@ begin
     lines.Values['clipeffectsbackground'] := IntToStr(Integer(ATheme.ClipEffectsBackground));
     lines.Values['fadeinbackground'] := IntToStr(Integer(ATheme.FadeInBackground));
     lines.Values['fadeoutbackground'] := IntToStr(Integer(ATheme.FadeOutBackground));
+    lines.Values['timelinelock'] := IntToStr(Integer(ATheme.LockColor));
+    lines.Values['controlselection'] := IntToStr(Integer(ATheme.ControlSelection));
+    lines.Values['controlselectiontext'] := IntToStr(Integer(ATheme.ControlSelectionText));
+    lines.Values['controlhover'] := IntToStr(Integer(ATheme.ControlHover));
+    lines.Values['controlfocus'] := IntToStr(Integer(ATheme.ControlFocus));
     lines.Values['text'] := IntToStr(Integer(ATheme.Text));
     lines.Values['secondarytext'] := IntToStr(Integer(ATheme.SecondaryText));
     lines.Values['border'] := IntToStr(Integer(ATheme.Border));
@@ -643,7 +668,8 @@ const
     'Accent', 'Selection', 'Waveform', 'Grid Lines', 'Meter',
     'Meter Clip', 'Automation', 'MIDI Note',
     'Log: Trace', 'Log: Debug', 'Log: Info', 'Log: Warn', 'Log: Error',
-    'Log: Critical', 'Clip with effects: Background', 'Fade in: Background', 'Fade out: Background',
+    'Log: Critical', 'Clip with effects: Background', 'Fade in: Background', 'Fade out: Background', 'Timeline: Lock',
+    'Control: Selection', 'Control: Selection text', 'Control: Hover glow', 'Control: Focus outline',
     'Effect: Compressor', 'Effect: Reverb', 'Effect: Chorus', 'Effect: Flanger',
     'Effect: Phaser', 'Effect: Tremolo', 'Effect: Auto-Pan', 'Effect: Saturation',
     'Effect: Bit Crusher', 'Effect: Brighten (EQ)', 'Effect: Silence',
@@ -736,6 +762,11 @@ begin
     csClipEffectsBackground: Result := ATheme.ClipEffectsBackground;
     csFadeInBackground: Result := ATheme.FadeInBackground;
     csFadeOutBackground: Result := ATheme.FadeOutBackground;
+    csTimelineLock: Result := ATheme.LockColor;
+    csControlSelection: Result := ATheme.ControlSelection;
+    csControlSelectionText: Result := ATheme.ControlSelectionText;
+    csControlHover: Result := ATheme.ControlHover;
+    csControlFocus: Result := ATheme.ControlFocus;
     csText:            Result := ATheme.Text;
     csSecondaryText:   Result := ATheme.SecondaryText;
     csBorder:          Result := ATheme.Border;
@@ -802,6 +833,11 @@ begin
     csClipEffectsBackground: ATheme.ClipEffectsBackground := AColor;
     csFadeInBackground: ATheme.FadeInBackground := AColor;
     csFadeOutBackground: ATheme.FadeOutBackground := AColor;
+    csTimelineLock: ATheme.LockColor := AColor;
+    csControlSelection: ATheme.ControlSelection := AColor;
+    csControlSelectionText: ATheme.ControlSelectionText := AColor;
+    csControlHover: ATheme.ControlHover := AColor;
+    csControlFocus: ATheme.ControlFocus := AColor;
     csText:            ATheme.Text := AColor;
     csSecondaryText:   ATheme.SecondaryText := AColor;
     csBorder:          ATheme.Border := AColor;

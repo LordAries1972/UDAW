@@ -211,7 +211,7 @@ try {
     $optimization = if ($Config -eq 'Release') { '-$O+' } else { '-$O-' }
 
     Write-Host "==> Building UDAW.exe ($Config)"
-    & $dcc -B "-NS$ns" "-D$defines" "-U$rtl" $optimization `
+    & $dcc -B "-NS$ns" "-D$defines" "-U$rtl" $optimization -GD `
         "-E$OutputDir" '-NUbuild\dcu' `
         '-Usrc\common;src\audio;src\audio\backend;src\audio\dsp;src\audio\graph;src\codecs\pcm;src\codecs\tracker;src\codecs\mp3;src\codecs\flac;src\codecs\aac;src\codecs\mp4;src\codecs\ableton;src\codecs\flstudio;src\midi;src\timeline;src\project;src\recording;src\mixer;src\tracker;src\application;src\ui;src\web;src\input;src\video;src\ai;src\browser;src\composer;src\voice;ThirdParty\TaurusTLS\Source;ThirdParty\dglOpenGL' `
         '-Isrc\common' '-Rsrc\ui' `
@@ -237,6 +237,8 @@ Write-Host "==> Copying VCL style resources"
 New-Item -ItemType Directory -Force -Path (Join-Path $OutputDir 'resources\styles') | Out-Null
 Copy-Item 'resources\styles\*.vsf' (Join-Path $OutputDir 'resources\styles') -Force -ErrorAction SilentlyContinue
 Copy-Item 'udaw-icon-image.png' (Join-Path $OutputDir 'udaw-icon-image.png') -Force
+Copy-Item 'udaw-license.dat' (Join-Path $OutputDir 'udaw-license.dat') -Force
+Copy-Item 'LICENSE.md' (Join-Path $OutputDir 'LICENSE.md') -Force
 Copy-Item 'about-udaw.dat' (Join-Path $OutputDir 'about-udaw.dat') -Force   # help page, read from disk (the web server is gone)
 
 # ---- Stamp the in-app help page's version banner ------------------------

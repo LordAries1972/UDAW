@@ -242,11 +242,11 @@ type
 implementation
 
 const
-  PAD = 6;
+  PAD = 10;                  { the inset area's margin: controls stand clear of the frame }
   ROW_H = 20;
   ROW_STEP = 23;
   FADER_W = 38;
-  HEADER_H = 40;
+  HEADER_H = 46;             { clear of the colour bar along the top of the inset area }
   FADER_MIN_H = 120;
   ARROW_W = 28;              { header area that folds / opens the strip }
 
@@ -300,6 +300,7 @@ end;
 
 procedure TMixRow.PaintGL;
 var
+  bh: Integer;
   cv: TGLCanvas;
   th: TUDAWTheme;
   face, fld, edge, ink: TColor;
@@ -314,33 +315,36 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := face;
   cv.FillRect(Rect(0, 0, Width, Height));
+  bh := Height - 3;   // the body stands off its shadow
+  DrawDropShadow(cv, Rect(0, 0, Width, bh), 6, 3, 1.3);
   fld := FieldColorOf;
   if Hover then fld := Blend(fld, th.Text, 0.10);
   if Pressed and Hover then fld := Blend(fld, th.Accent, 0.30);
   cv.Brush.Color := fld;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   edge := Blend(fld, th.Border, 0.9);
   cv.Pen.Style := psSolid;
   cv.Pen.Color := edge;
   cv.Brush.Style := bsClear;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
+  DrawInsetShadow(cv, Rect(1, 1, Width - 1, bh - 1), 2);
 
   cv.Font.Size := 8;
-  y := (Height - cv.TextHeight('Ag')) div 2;
+  y := (bh - cv.TextHeight('Ag')) div 2;
   case FKind of
     rkEffect, rkSend:
       begin
         if FKind = rkEffect then
         begin
           if FBypass then cv.Brush.Color := th.SecondaryText else cv.Brush.Color := th.Meter;
-          cv.Ellipse(7, Height div 2 - 3, 13, Height div 2 + 3);
+          cv.Ellipse(7, bh div 2 - 3, 13, bh div 2 + 3);
         end
         else
         begin
           cv.Brush.Color := th.SecondaryText;
-          cv.Polygon([Point(7, Height div 2 - 3), Point(7, Height div 2 + 3), Point(13, Height div 2)]);
+          cv.Polygon([Point(7, bh div 2 - 3), Point(7, bh div 2 + 3), Point(13, bh div 2)]);
         end;
         cv.Brush.Style := bsClear;
         if FBypass then cv.Font.Color := th.SecondaryText else cv.Font.Color := ink;
@@ -370,6 +374,7 @@ end;
 
 procedure TMixReadout.PaintGL;
 var
+  bh: Integer;
   cv: TGLCanvas;
   th: TUDAWTheme;
   fld: TColor;
@@ -381,24 +386,28 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := FaceColorOf;
   cv.FillRect(Rect(0, 0, Width, Height));
+  bh := Height - 3;   // the body stands off its shadow
+  DrawDropShadow(cv, Rect(0, 0, Width, bh), 6, 3, 1.3);
   fld := FieldColorOf;
   cv.Brush.Color := fld;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Pen.Style := psSolid;
   cv.Pen.Color := Blend(fld, th.Border, 0.9);
   cv.Brush.Style := bsClear;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Pen.Style := psClear;
+  DrawInsetShadow(cv, Rect(1, 1, Width - 1, bh - 1), 2);
   cv.Font.Size := 8;
   cv.Font.Color := th.Text;
   s := Caption;
-  cv.TextOut((Width - cv.TextWidth(s)) div 2, (Height - cv.TextHeight(s)) div 2, s);
+  cv.TextOut((Width - cv.TextWidth(s)) div 2, (bh - cv.TextHeight(s)) div 2, s);
 end;
 
 { TMixCombo }
 
 procedure TMixCombo.PaintGL;
 var
+  bh: Integer;
   cv: TGLCanvas;
   th: TUDAWTheme;
   fld: TColor;
@@ -411,21 +420,24 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := FaceColorOf;
   cv.FillRect(Rect(0, 0, Width, Height));
+  bh := Height - 3;   // the body stands off its shadow
+  DrawDropShadow(cv, Rect(0, 0, Width, bh), 6, 3, 1.3);
   fld := FieldColorOf;
   if Hover or DroppedDown then fld := Blend(fld, th.Text, 0.10);
   cv.Brush.Color := fld;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Pen.Style := psSolid;
   cv.Pen.Color := Blend(fld, th.Border, 0.9);
   cv.Brush.Style := bsClear;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Pen.Style := psClear;
+  DrawInsetShadow(cv, Rect(1, 1, Width - 1, bh - 1), 2);
   cv.Font.Size := 8;
   cv.Font.Color := th.Text;
   if (ItemIndex >= 0) and (ItemIndex < Items.Count) then s := Items[ItemIndex] else s := '';
   s := Fit(cv, s, Width - 26);
-  cv.TextOut(8, (Height - cv.TextHeight('Ag')) div 2, s);
-  cy := Height div 2;
+  cv.TextOut(8, (bh - cv.TextHeight('Ag')) div 2, s);
+  cy := bh div 2;
   cv.Brush.Style := bsSolid;
   cv.Brush.Color := th.SecondaryText;
   cv.Polygon([Point(Width - 17, cy - 2), Point(Width - 9, cy - 2), Point(Width - 13, cy + 3)]);
@@ -445,6 +457,7 @@ end;
 
 procedure TMixToggle.PaintGL;
 var
+  bh: Integer;
   cv: TGLCanvas;
   th: TUDAWTheme;
   fld, ink: TColor;
@@ -456,6 +469,8 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := FaceColorOf;
   cv.FillRect(Rect(0, 0, Width, Height));
+  bh := Height - 4;   // the body stands off its shadow
+  DrawDropShadow(cv, Rect(0, 0, Width, bh), 6, 4, 1.5);
   fld := FieldColorOf;
   if Down then
   begin
@@ -469,11 +484,11 @@ begin
     ink := th.SecondaryText;
   end;
   cv.Brush.Color := fld;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Pen.Style := psSolid;
   cv.Pen.Color := Blend(fld, th.Border, 0.9);
   cv.Brush.Style := bsClear;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Pen.Style := psClear;
   if FGlyph = mgText then
   begin
@@ -481,14 +496,14 @@ begin
     cv.Font.Style := [fsBold];
     cv.Font.Color := ink;
     tw := cv.TextWidth(Caption);
-    cv.TextOut((Width - tw) div 2, (Height - cv.TextHeight(Caption)) div 2, Caption);
+    cv.TextOut((Width - tw) div 2, (bh - cv.TextHeight(Caption)) div 2, Caption);
     Exit;
   end;
 
   { the icon, centred: a speaker (with a cross when muted, sound waves when not), headphones for
     solo, a disc for record }
-  cx := Width div 2;
-  cy := Height div 2;
+  cx := Width shr 1;
+  cy := bh div 2;
   cv.Brush.Style := bsSolid;
   cv.Brush.Color := ink;
   cv.Pen.Style := psSolid;
@@ -556,11 +571,13 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := FaceColorOf;
   cv.FillRect(Rect(0, 0, Width, Height));
-  cx := Width div 2;
+  cx := Width shr 1;
   top := 8;
   bot := Height - 8;   { the same travel TGLSlider.DragTo maps the pointer onto }
+  DrawDropShadow(cv, Rect(cx - 3, top - 4, cx + 3, bot + 4), 4, 2, 1.4);
   cv.Brush.Color := FieldColorOf;
   cv.RoundRect(cx - 3, top - 4, cx + 3, bot + 4, 4, 4);
+  DrawInsetShadow(cv, Rect(cx - 3, top - 4, cx + 3, bot + 4), 2);
 
   { 6 dB ticks either side of the groove, the 0 dB mark longer and lit }
   db := Round(MIX_DB_MAX);
@@ -625,8 +642,9 @@ begin
   cv.FillRect(Rect(0, 0, Width, Height));
   l := 8;
   r := Width - 8;   { TGLSlider.DragTo's horizontal travel }
-  cy := Height div 2;
+  cy := Height shr 1;
   mid := (l + r) div 2;
+  DrawDropShadow(cv, Rect(l, cy - 2, r, cy + 2), 4, 2, 1.4);
   cv.Brush.Color := FieldColorOf;
   cv.RoundRect(l, cy - 2, r, cy + 2, 4, 4);
   tx := l + Round((r - l) * Fraction);
@@ -685,40 +703,68 @@ procedure TMixMeter.PaintGL;
 var
   cv: TGLCanvas;
   th: TUDAWTheme;
-  db, y, lx, rx, bw, bot, k, step: Integer;
+  db, y, lx, rx, bw, bot, step: Integer;
   txt: string;
 
+  { a digital LED ladder: the bar is a stack of small lenses, each lit once the level reaches it -
+    green, then amber from -6 dB, then red above 0 dB - standing in a recessed, shadowed trough }
+  procedure Led(AX0, AY0, AX1, AY1: Integer; ALit, AHeld: Boolean; AColor: TColor);
+  begin
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.45;
+    cv.FillRect(Rect(AX0, AY1, AX1 + 1, AY1 + 1));   // shadow under the lens
+    cv.Alpha := 1;
+    if ALit or AHeld then
+    begin
+      cv.Brush.Color := AColor;
+      cv.Alpha := 0.20;
+      cv.FillRect(Rect(AX0 - 1, AY0 - 1, AX1 + 1, AY1 + 1));   // glow
+      cv.Alpha := 1;
+      if AHeld and not ALit then cv.Alpha := 0.75;
+      cv.GradientRect(Rect(AX0, AY0, AX1, AY1), Blend(AColor, clWhite, 0.50), Blend(AColor, clBlack, 0.40));
+      cv.Alpha := 1;
+      cv.Brush.Color := clWhite;
+      cv.Alpha := 0.55;
+      cv.FillRect(Rect(AX0, AY0, AX1, AY0 + 1));       // bright top edge
+      cv.Alpha := 1;
+    end
+    else
+    begin
+      cv.GradientRect(Rect(AX0, AY0, AX1, AY1), Blend(AColor, clBlack, 0.90), Blend(AColor, clBlack, 0.80));
+      cv.Brush.Color := clWhite;
+      cv.Alpha := 0.07;
+      cv.FillRect(Rect(AX0, AY1 - 1, AX1, AY1));       // light catching the recess
+      cv.Alpha := 1;
+    end;
+  end;
+
   procedure Bar(AX: Integer; APeak, AHold: Double);
+  const
+    SEG_H = 3;
+    SEG_PITCH = 4;
   var
-    top, yMinus6, yZero: Integer;
+    i, n, segBot, segTop: Integer;
+    segDb, dbPerPx: Double;
+    col: TColor;
   begin
     cv.Brush.Style := bsSolid;
     cv.Pen.Style := psClear;
-    cv.Brush.Color := FieldColorOf;
-    cv.FillRect(Rect(AX, 8, AX + bw, bot));
-    top := LevelY(APeak);
-    if top >= bot then Exit;
-    yMinus6 := LevelY(-6);
-    yZero := LevelY(0);
-    cv.Brush.Color := th.Meter;
-    cv.FillRect(Rect(AX, Max(top, yMinus6), AX + bw, bot));
-    if top < yMinus6 then
+    DrawDropShadow(cv, Rect(AX, 8, AX + bw, bot), 3, 3, 1.5);
+    cv.Brush.Color := Blend(FieldColorOf, clBlack, 0.55);
+    cv.RoundRect(AX, 8, AX + bw, bot, 3, 3);
+    DrawInsetShadow(cv, Rect(AX, 8, AX + bw, bot), 3);
+    n := (bot - 8 - 1) div SEG_PITCH;
+    dbPerPx := (MIX_DB_MAX - MIX_DB_MIN) / Max(1, bot - 8);
+    for i := 0 to n - 1 do
     begin
-      cv.Brush.Color := $0020D0F0;
-      cv.FillRect(Rect(AX, Max(top, yZero), AX + bw, yMinus6));
-    end;
-    if top < yZero then
-    begin
-      cv.Brush.Color := th.MeterClip;
-      cv.FillRect(Rect(AX, top, AX + bw, yZero));
-    end;
-    if AHold > MIX_DB_MIN then
-    begin
-      cv.Pen.Style := psSolid;
-      cv.Pen.Color := th.Text;
-      k := LevelY(AHold);
-      cv.MoveTo(AX, k); cv.LineTo(AX + bw, k);
-      cv.Pen.Style := psClear;
+      segBot := bot - 1 - i * SEG_PITCH;
+      segTop := segBot - SEG_H;
+      segDb := MIX_DB_MIN + (bot - (segTop + segBot) / 2) * dbPerPx;
+      if segDb >= 0 then col := th.MeterClip
+      else if segDb >= -6 then col := $0020D0F0
+      else col := th.Meter;
+      Led(AX + 1, segTop, AX + bw - 1, segBot, APeak >= segDb,
+        (AHold > MIX_DB_MIN) and (Abs(segDb - AHold) <= SEG_PITCH * dbPerPx / 2), col);
     end;
   end;
 
@@ -729,7 +775,7 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := FaceColorOf;
   cv.FillRect(Rect(0, 0, Width, Height));
-  bw := 7;
+  bw := 10;
   rx := Width - 2 - bw;
   lx := rx - bw - 2;
   bot := Height - 8;
@@ -1262,7 +1308,7 @@ procedure TGLMixerStrip.PaintGL;
 var
   cv: TGLCanvas;
   th: TUDAWTheme;
-  face, edge: TColor;
+  face, frameFace: TColor;
 begin
   cv := GL;
   th := CurrentTheme;
@@ -1271,33 +1317,36 @@ begin
   cv.Brush.Color := th.Background;
   cv.FillRect(Rect(0, 0, Width, Height));
   face := FaceColorOf;
-  if FIsMaster then face := Blend(face, th.Accent, 0.07);
-  if FSelected then face := Blend(face, FTint, 0.14);
+  frameFace := face;
+  if FIsMaster then frameFace := Blend(frameFace, th.Accent, 0.07);
+  if FSelected then frameFace := Blend(frameFace, FTint, 0.14);
+  { a raised frame ... }
+  DrawBox3D(cv, Rect(0, 0, Width, Height), frameFace, True, 10);
+  { ... around an inset area: its rim, then the flat face colour the strip's own controls paint over }
+  cv.Pen.Style := psClear;
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := Blend(frameFace, clBlack, 0.38);
+  cv.RoundRect(3, 3, Width - 3, Height - 3, 9, 9);
   cv.Brush.Color := face;
-  cv.RoundRect(0, 0, Width, Height, 10, 10);
+  cv.RoundRect(4, 4, Width - 4, Height - 4, 8, 8);
 
-  { colour bar along the top edge }
+  { colour bar along the top edge of the inset area }
   cv.Brush.Color := FTint;
-  cv.RoundRect(0, 0, Width, 6, 6, 6);
+  cv.RoundRect(4, 4, Width - 4, 12, 6, 6);
   cv.Brush.Color := face;
-  cv.FillRect(Rect(1, 3, Width - 1, 7));
+  cv.FillRect(Rect(5, 9, Width - 5, 13));
+  DrawInsetShadow(cv, Rect(4, 4, Width - 4, Height - 4), 3);
 
-  cv.Pen.Style := psSolid;
   if FSelected then
   begin
+    cv.Pen.Style := psSolid;
     cv.Pen.Color := FTint;
     cv.Pen.Width := 2;
-  end
-  else
-  begin
-    edge := th.Border;
-    cv.Pen.Color := edge;
+    cv.Brush.Style := bsClear;
+    cv.RoundRect(3, 3, Width - 3, Height - 3, 9, 9);
     cv.Pen.Width := 1;
+    cv.Pen.Style := psClear;
   end;
-  cv.Brush.Style := bsClear;
-  cv.RoundRect(0, 0, Width, Height, 10, 10);
-  cv.Pen.Width := 1;
-  cv.Pen.Style := psClear;
 
   cv.Font.Size := 9;
   cv.Font.Style := [fsBold];
@@ -1307,23 +1356,23 @@ begin
     { a slim bar: arrow pointing right, the name running down it }
     cv.Brush.Style := bsSolid;
     cv.Brush.Color := th.Text;
-    cv.Polygon([Point(Width div 2 - 3, 14), Point(Width div 2 - 3, 26), Point(Width div 2 + 4, 20)]);
+    cv.Polygon([Point(Width shr 1 - 3, 19), Point(Width shr 1 - 3, 31), Point(Width shr 1 + 4, 25)]);
     cv.Brush.Style := bsClear;
-    cv.PushClip(Rect(1, 32, Width - 1, Height - 4));
-    cv.TextOutVertical(Width div 2 - cv.TextHeight(FName) div 2 - 1, 36, FName);
+    cv.PushClip(Rect(5, 38, Width - 5, Height - 8));
+    cv.TextOutVertical(Width shr 1 - cv.TextHeight(FName) div 2 - 1, 42, FName);
     cv.PopClip;
     cv.Font.Style := [];
     Exit;
   end;
-  cv.TextOut(PAD + 1, 10, Fit(cv, FName, Width - 2 * PAD - 2 - 16));
+  cv.TextOut(PAD + 1, 14, Fit(cv, FName, Width - 2 * PAD - 2 - 16));
   cv.Font.Style := [];
   cv.Font.Size := 8;
   cv.Font.Color := th.SecondaryText;
-  cv.TextOut(PAD + 1, 25, Fit(cv, FSub, Width - 2 * PAD - 2));
+  cv.TextOut(PAD + 1, 30, Fit(cv, FSub, Width - 2 * PAD - 2));
   { fold arrow, top right }
   cv.Brush.Style := bsSolid;
   cv.Brush.Color := th.Text;
-  cv.Polygon([Point(Width - 11, 14), Point(Width - 11, 26), Point(Width - 18, 20)]);
+  cv.Polygon([Point(Width - 15, 19), Point(Width - 15, 31), Point(Width - 22, 25)]);
 end;
 
 end.

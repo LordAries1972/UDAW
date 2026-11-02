@@ -272,7 +272,7 @@ var
 begin
   body := MusicTabStripFences(ATabText);
   if Trim(body) = '' then
-    raise Exception.Create('the AI returned no tablature to render');
+    raise Exception.Create('the AI/SI returned no tablature to render');
   folder := MusicTabRenderedFolder(ARecordingsRoot);
   Result := folder + PathDelim + MusicTabFileStem(APrompt) + '_' +
     FormatDateTime('yyyymmdd_hhnnss', Now) + '.pdf';

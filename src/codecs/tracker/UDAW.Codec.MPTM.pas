@@ -49,7 +49,8 @@ uses
   SysUtils, Classes, Math, StrUtils,
   UDAW.Errors,
   UDAW.Audio.Types,
-  UDAW.Tracker.Types, UDAW.Tracker.Instrument, UDAW.Tracker.Pattern;
+  UDAW.Tracker.Types, UDAW.Tracker.Instrument, UDAW.Tracker.Pattern,
+  UDAW.Codec.FLAC.Decoder, UDAW.Codec.MP3, UDAW.Codec.WAV;
 
 const
   MPTM_SUBSYS = 'MPTM';
@@ -132,6 +133,10 @@ function FileLooksLikeMptm(const AFileName: string): Boolean;
 function MptmKindFromData(const AData: TBytes): Boolean;
 
 { ---- import (TMPTMReader) ---- }
+{ folder that relative external-sample paths (a Samples subfolder reference) resolve against;
+  set it to the module file's folder before MptmToModule }
+procedure MptmSetSampleFolder(const AFolder: string);
+function MptmSampleFolder: string;
 function MptmToModule(const AData: TBytes; out AInfo: TMPTMImportInfo): TTrackerModule; overload;
 function MptmToModule(const AData: TBytes): TTrackerModule; overload;
 function LoadMptmFile(const AFileName: string; out AInfo: TMPTMImportInfo): TTrackerModule; overload;
@@ -501,7 +506,6 @@ begin
   lowBits := IfThen(ABits >= 16, 4, 3);
   halfSpan := ABits div 2;                    // 4 for 8-bit, 8 for 16-bit
   blockSamples := IfThen(ABits >= 16, $4000, $8000);
-  temp := 0; temp2 := 0;
   posOut := 0;
   eof := False;
   while (posOut < AFrames) and not eof do
@@ -517,6 +521,7 @@ begin
     end;
 
     bitBuf := 0; bitNum := 0;
+    temp := 0; temp2 := 0;   { delta accumulators restart every block }
     width := maxWidth;
     blockCount := AFrames - posOut;
     if blockCount > blockSamples then blockCount := blockSamples;
@@ -605,6 +610,110 @@ begin
   end;
 end;
 
+{ OpenMPT can store a sample as a reference to an external audio file: the
+  sample's data pointer then addresses a length-prefixed path string instead of
+  PCM. Decode the referenced file (FLAC / WAV / MP3) to mono. }
+var
+  GExtBaseDir: string;   { folder of the module being imported; set by LoadMptmFile }
+
+procedure MptmSetSampleFolder(const AFolder: string);
+begin
+  GExtBaseDir := AFolder;
+end;
+
+function MptmSampleFolder: string;
+begin
+  Result := GExtBaseDir;
+end;
+
+function ExtRefPath(const D: TBytes; APos: Integer): string;
+var
+  n, i: Integer;
+  hasSep, hasDot: Boolean;
+begin
+  Result := '';
+  if (APos <= 0) or (APos >= Length(D)) then Exit;
+  n := D[APos];
+  if (n = 0) or (APos + n >= Length(D)) then Exit;
+  hasSep := False; hasDot := False;
+  for i := 1 to n do
+  begin
+    if (D[APos + i] < $20) or (D[APos + i] > $7E) then Exit;
+    if D[APos + i] in [Ord('\'), Ord('/'), Ord(':')] then hasSep := True;
+    if D[APos + i] = Ord('.') then hasDot := True;
+  end;
+  if not (hasSep and hasDot) then Exit;
+  SetLength(Result, n);
+  for i := 1 to n do Result[i] := Char(D[APos + i]);
+end;
+
+function ResolveExtPath(const ARef: string): string;
+var
+  nm: string;
+  base: string;
+begin
+  Result := '';
+  if FileExists(ARef) then Exit(ARef);
+  if GExtBaseDir = '' then Exit;
+  base := IncludeTrailingPathDelimiter(GExtBaseDir);
+  nm := ExtractFileName(StringReplace(ARef, '/', PathDelim, [rfReplaceAll]));
+  if FileExists(base + StringReplace(ARef, '/', PathDelim, [rfReplaceAll])) then
+    Exit(base + StringReplace(ARef, '/', PathDelim, [rfReplaceAll]));
+  if FileExists(base + 'Samples' + PathDelim + nm) then
+    Exit(base + 'Samples' + PathDelim + nm);
+  if FileExists(base + nm) then
+    Exit(base + nm);
+end;
+
+function PlanarToMono(const APcm: TAudioPlanar; AChannels: Integer;
+  AFrames: Int64): TAudioSampleArray;
+var
+  c, i: Integer;
+  acc: Single;
+begin
+  SetLength(Result, AFrames);
+  if AChannels < 1 then Exit;
+  for i := 0 to AFrames - 1 do
+  begin
+    acc := 0;
+    for c := 0 to AChannels - 1 do acc := acc + APcm[c][i];
+    Result[i] := acc / AChannels;
+  end;
+end;
+
+function DecodeExternalSample(const APath: string): TAudioSampleArray;
+var
+  ext: string;
+  fl: TFLACDecodeResult;
+  mp: TMP3DecodeResult;
+  ch, sr: Integer;
+  pl: TAudioPlanar;
+begin
+  Result := nil;
+  if APath = '' then Exit;
+  ext := LowerCase(ExtractFileExt(APath));
+  try
+    if ext = '.flac' then
+    begin
+      if DecodeFlacFile(APath, fl) then
+        Result := PlanarToMono(fl.Pcm, fl.Channels, fl.TotalFrames);
+    end
+    else if ext = '.mp3' then
+    begin
+      if Mp3DecodeFile(APath, mp) then
+        Result := PlanarToMono(mp.Pcm, mp.Channels, mp.Frames);
+    end
+    else
+    begin
+      pl := LoadWavFile(APath, ch, sr);
+      if Length(pl) > 0 then
+        Result := PlanarToMono(pl, ch, Length(pl[0]));
+    end;
+  except
+    Result := nil;
+  end;
+end;
+
 function DecodeSamplePCM(const D: TBytes; const S: TMPTMSample; ACwtv: Integer;
   var ATruncated: Boolean): TAudioSampleArray;
 var
@@ -613,6 +722,8 @@ var
   cur: Integer;
   raw: Integer;
   raws: TArray<Integer>;
+  extPath: string;
+  extPcm: TAudioSampleArray;
 begin
   frames := S.LengthFrames;
   if frames > MPTM_MAX_SAMPLE_FRAMES then frames := MPTM_MAX_SAMPLE_FRAMES;
@@ -628,10 +739,22 @@ begin
   end;
   p := Integer(S.DataPtr);
 
+  { external-file sample (OpenMPT): data pointer addresses a path string }
+  if S.Compressed or (Int64(p) + Int64(frames) * IfThen(S.Is16Bit, 2, 1) > Length(D)) then
+  begin
+    extPath := ExtRefPath(D, p);
+    if extPath <> '' then
+    begin
+      extPcm := DecodeExternalSample(ResolveExtPath(extPath));
+      if Length(extPcm) = 0 then ATruncated := True;
+      Exit(extPcm);
+    end;
+  end;
+
   if S.Compressed then
   begin
     raws := DecompressITChannel(D, p, frames, IfThen(S.Is16Bit, 16, 8),
-      ACwtv >= $215, ATruncated);
+      S.Delta, ATruncated);   { IT2.15 is flagged by Cvt bit 2, not by tracker version }
     if S.Is16Bit then
       for i := 0 to frames - 1 do Result[i] := raws[i] / 32768.0
     else
@@ -1075,6 +1198,7 @@ begin
   finally
     fs.Free;
   end;
+  GExtBaseDir := ExtractFilePath(ExpandFileName(AFileName));
   Result := MptmToModule(buf, AInfo);
 end;
 

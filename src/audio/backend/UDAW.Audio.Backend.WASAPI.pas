@@ -397,7 +397,7 @@ end;
 type
   TWASAPIStream = class;
 
-  TWASAPIWorker = class(TThread)
+  TWASAPIWorker = class(TUDAWThread)
   private
     FStream: TWASAPIStream;
     FCapture: Boolean;
@@ -624,11 +624,17 @@ begin
     wantChannels := FRequest.RenderChannels;
   end;
 
-  if devId = '' then
+  dev := nil;
+  if devId <> '' then
+    if not HrOk(enumr.GetDevice(PWideChar(WideString(devId)), dev)) then
+    begin
+      Logger.Warn(SUBSYS, 'chosen audio device not found; using the system default');
+      dev := nil;
+      devId := '';
+    end;
+  if dev = nil then
     CheckHr(enumr.GetDefaultAudioEndpoint(dataflow, ROLE_MULTIMEDIA, dev),
-      'GetDefaultAudioEndpoint')
-  else
-    CheckHr(enumr.GetDevice(PWideChar(WideString(devId)), dev), 'GetDevice');
+      'GetDefaultAudioEndpoint');
 
   CheckHr(dev.Activate(IID_IAudioClient, CLSCTX_ALL, nil, AClient), 'IMMDevice.Activate');
 

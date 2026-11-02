@@ -383,7 +383,7 @@ end;
 { TLogWorker }
 
 type
-  TLogWorker = class(TThread)
+  TLogWorker = class(TUDAWThread)
   private
     FOwner: TLogger;
   protected

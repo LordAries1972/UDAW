@@ -17,7 +17,7 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Classes, System.Types,
   System.UITypes, System.Masks, System.Generics.Collections, System.Generics.Defaults, Vcl.Controls,
-  Vcl.Forms, Vcl.Dialogs, UDAW.GL.Widgets, UDAW.GL.Controls;
+  Vcl.Forms, Vcl.Dialogs, UDAW.GL.Widgets, UDAW.GL.Controls, UDAW.UI.ShellMenu;
 
 type
   TGLFileDialogMode = (fdOpen, fdSave, fdFolder);
@@ -88,6 +88,7 @@ type
     procedure edPathKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure lvFilesClick(Sender: TObject);
     procedure lvFilesDblClick(Sender: TObject);
+    procedure lvFilesMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
   private
     FMode: TGLFileDialogMode;
     FDir: string;
@@ -253,6 +254,7 @@ begin
   FPlacePaths := TStringList.Create;
   FFilterMasks := TStringList.Create;
   FResultFiles := TStringList.Create;
+  GLAlignLabelsToFields(Self);   // the captions share their fields' text line
 end;
 
 destructor TfrmGLFileDialog.Destroy;
@@ -550,6 +552,31 @@ begin
     end;
   if n = 1 then names := StringReplace(names, '"', '', [rfReplaceAll]);
   if n > 0 then edName.Text := names;
+end;
+
+{ Right-click on a file or folder: the Windows shell menu for it (Open, Open with, Send to, Copy,
+  Delete, Rename, Properties ...) in the application's own menu style. The list is re-read after a
+  command, so a rename or delete shows up at once. }
+procedure TfrmGLFileDialog.lvFilesMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+  X, Y: Integer);
+var
+  r: Integer;
+  pt: TPoint;
+  path: string;
+begin
+  if Button <> mbRight then Exit;
+  r := lvFiles.ItemAt(X, Y);
+  if r < 0 then Exit;
+  lvFiles.ItemIndex := r;
+  lvFilesClick(lvFiles);
+  path := FDir + lvFiles.Items[r].Caption;
+  pt := lvFiles.ClientToScreen(Point(X, Y));
+  if not ShowShellContextMenu(Handle, path, pt.X, pt.Y,
+    procedure
+    begin
+      LoadDir(FDir);
+    end) then
+    edName.Hint := 'shell menu unavailable: ' + ShellMenuLastError;
 end;
 
 procedure TfrmGLFileDialog.lvFilesDblClick(Sender: TObject);

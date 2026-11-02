@@ -4,7 +4,7 @@ object frmMeters: TfrmMeters
   BorderIcons = [biSystemMenu]
   Caption = 'Loudness and Phase Meters'
   ClientHeight = 520
-  ClientWidth = 760
+  ClientWidth = 1040
   Color = clBtnFace
   DoubleBuffered = True
   Font.Charset = DEFAULT_CHARSET
@@ -34,11 +34,38 @@ object frmMeters: TfrmMeters
     Align = alBottom
     BevelOuter = bvNone
     TabOrder = 0
-    object lblTargets: TGLLabel
+    object lblSource: TGLLabel
       Left = 12
-      Top = 12
+      Top = 6
+      Width = 44
+      Height = 24
+      AutoSize = False
+      Layout = tlCenter
+      Caption = 'Source'
+      Transparent = True
+    end
+    object cboSource: TGLCombo
+      Left = 62
+      Top = 6
+      Width = 200
+      Height = 28
+      Hint = 'Which mixer the meters read: Automatic follows what is playing (a module in the Tracker, otherwise the Timeline).'
+      ItemIndex = 0
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 1
+      Items.Strings = (
+        'Automatic (follows playback)'
+        'Timeline'
+        'Tracker Module')
+    end
+    object lblTargets: TGLLabel
+      Left = 284
+      Top = 6
       Width = 380
-      Height = 15
+      Height = 24
+      AutoSize = False
+      Layout = tlCenter
       Caption = 'Master output. Delivery targets: -23 LUFS (broadcast), -14 LUFS (streaming).'
       Transparent = True
     end

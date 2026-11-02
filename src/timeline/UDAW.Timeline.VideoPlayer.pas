@@ -27,7 +27,7 @@ uses
   SysUtils, Classes, Math, SyncObjs,
   Winapi.Windows, Winapi.ActiveX, Winapi.DirectShow9,
   Vcl.Controls, Vcl.Graphics,
-  UDAW.Timeline.Model;
+  UDAW.Threading, UDAW.Timeline.Model;
 
 type
   { What should be on screen right now, as last posted by the UI thread. }
@@ -116,7 +116,7 @@ type
     graph ending in a sample grabber - the UI never waits on a decoder).  The UI
     asks with Request and collects with TryGet; AOnReady is queued to the UI
     thread whenever a new frame lands. }
-  TVideoThumbnailer = class(TThread)
+  TVideoThumbnailer = class(TUDAWThread)
   private
     FLock: TCriticalSection;
     FWake: TEvent;
@@ -208,7 +208,7 @@ const
   WORKER_STEADY_TICK_MS = 100;      // picture running steadily: nothing to do but a drift check
 
 type
-  TMfVideoWorker = class(TThread)
+  TMfVideoWorker = class(TUDAWThread)
   private
     FLock: TCriticalSection;
     FWake: TEvent;

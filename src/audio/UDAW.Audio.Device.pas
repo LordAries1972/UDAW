@@ -19,7 +19,7 @@ uses
   UDAW.Types, UDAW.Errors, UDAW.Audio.Types, UDAW.Audio.Buffer;
 
 type
-  TAudioBackendId = (abNull, abSoftware, abWASAPI, abCoreAudio, abALSA, abPipeWire);
+  TAudioBackendId = (abNull, abSoftware, abWASAPI, abCoreAudio, abALSA, abPipeWire, abDirectSound);
 
   TAudioDeviceInfo = record
     BackendId: TAudioBackendId;
@@ -143,6 +143,7 @@ begin
     abCoreAudio: Result := 'coreaudio';
     abALSA:      Result := 'alsa';
     abPipeWire:  Result := 'pipewire';
+    abDirectSound: Result := 'directsound';
   else
     Result := '?';
   end;

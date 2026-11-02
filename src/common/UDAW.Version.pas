@@ -51,6 +51,10 @@ function UDAWBuildDate: TDateTime;
 { "1.0.<build>.<ddmmyyyy>" - the product's full display version. }
 function UDAWDisplayVersionString: string;
 
+{ "Version <display version>" for the splash and Welcome screens; a DEBUG build
+  appends " (DEBUG)" so a development build can't be mistaken for a release. }
+function UDAWVersionBannerText: string;
+
 { "Major.Minor.0.<build>" - the purely numeric quad UDAW.Update compares
   against the online manifest's version (same shape as the .rc FILEVERSION). }
 function UDAWNumericVersion: string;
@@ -66,7 +70,7 @@ const
     compile. Used only as a fallback when the running binary has no readable
     version resource yet (e.g. a quick FPC/debug build without a compiled-in
     .res), so the splash screen never shows "build 0". }
-  UDAW_FALLBACK_BUILD_NUMBER = 590;
+  UDAW_FALLBACK_BUILD_NUMBER = 659;
 
 {$IFDEF UDAW_WINDOWS}
 
@@ -147,6 +151,14 @@ begin
   if bdate <= 0 then bdate := Now;
   Result := Format('%d.%d.%d.%s',
     [UDAW_VERSION_MAJOR, UDAW_VERSION_MINOR, build, FormatDateTime('ddmmyyyy', bdate)]);
+end;
+
+function UDAWVersionBannerText: string;
+begin
+  Result := 'Version ' + UDAWDisplayVersionString;
+  {$IFDEF DEBUG}
+  Result := Result + ' (DEBUG)';
+  {$ENDIF}
 end;
 
 function UDAWNumericVersion: string;

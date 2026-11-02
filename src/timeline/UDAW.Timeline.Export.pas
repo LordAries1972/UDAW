@@ -25,7 +25,7 @@ type
 implementation
 
 uses UDAW.Errors, UDAW.Timeline.Model, UDAW.Audio.Types, UDAW.Audio.Buffer,
-  UDAW.Timeline.Playback, UDAW.Mixer.Engine, UDAW.Codec.WAV,
+  UDAW.Timeline.Playback, UDAW.Mixer.Engine, UDAW.Scripting.PyPlugin, UDAW.Codec.WAV,
   UDAW.Codec.MP3, UDAW.Codec.MP3.Metadata, UDAW.Codec.MP3.Frame, UDAW.Codec.MP4, UDAW.Codec.MP4.Container,
   UDAW.Codec.FLAC.Encoder, UDAW.DSP.Dither,
   UDAW.Media.Attribution, UDAW.Media.Progress, UDAW.Media.Transcode
@@ -217,6 +217,8 @@ begin
       if stream <> nil then dither[ch] := TDitherer.Create(16, dsTPDF)
       else dither[ch] := TDitherer.Create(24, dsTPDF);
     done := 0;
+    TPyPluginHost.BeginOffline;   // Python plug-ins on the lanes answer every block, however slow
+    try
     while done < frames do
     begin
       ThrowIfCancelled;
@@ -242,6 +244,9 @@ begin
       SetProgress(0.1 + 0.6 * done / frames,
         Format('Stage 4/6: Rendering mix %.0f%% (%.1f / %.1f s)',
           [100.0 * done / frames, done / sr, frames / sr]));
+    end;
+    finally
+      TPyPluginHost.EndOffline;
     end;
     { The Windows MP3 encoder emits whole 1152-sample frames only and drops the
       final partial one, which cut the end off the program (4800 samples came

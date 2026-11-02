@@ -50,6 +50,8 @@ const
   CFG_SEC_KEYHOOKS = 'KeyHooks';
 
 function KeyHookActionName(AAction: TKeyHookAction): string;
+{ what the hook does and when, for the Key Hooks list }
+function KeyHookDescription(AAction: TKeyHookAction): string;
 
 type
   TKeyHookManager = class
@@ -122,6 +124,19 @@ const
 function KeyHookActionName(AAction: TKeyHookAction): string;
 begin
   Result := ACTION_NAMES[AAction];
+end;
+
+function KeyHookDescription(AAction: TKeyHookAction): string;
+begin
+  case AAction of
+    khaEmergencyStop: Result := 'Stops everything at once and saves the project to a recovery file. Use it when something has gone wrong and you do not want to lose work; works from any program.';
+    khaStopRecording: Result := 'Ends a recording that is running and keeps the take, so you can stop while another window has the focus (a plug-in editor, say).';
+    khaTogglePlayback: Result := 'Starts or stops Timeline playback from anywhere, for example while you play an instrument in another window.';
+    khaPanicStopAudio: Result := 'Silences every sound that is playing (stuck notes, runaway effects) without touching the project.';
+    khaToggleMasterMute: Result := 'Switches the master output off and on again, a quick way to take a break from the sound.';
+  else
+    Result := '';
+  end;
 end;
 
 {$IFDEF MSWINDOWS}

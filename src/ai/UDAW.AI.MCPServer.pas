@@ -132,6 +132,8 @@ type
 
 implementation
 
+uses UDAW.Threading;
+
 const
   SUBSYS = 'AI.MCPServer';
   { MCP revisions UDAW's tools-only server can speak (the tools/list +
@@ -514,7 +516,7 @@ end;
   fully platform-independent and unit-tested without any socket at all. }
 
 type
-  TMcpAcceptThread = class(TThread)
+  TMcpAcceptThread = class(TUDAWThread)
   private
     FOwner: TUDAWMcpServer;
   protected
@@ -523,7 +525,7 @@ type
     constructor Create(AOwner: TUDAWMcpServer);
   end;
 
-  TMcpWorkerThread = class(TThread)
+  TMcpWorkerThread = class(TUDAWThread)
   private
     FOwner: TUDAWMcpServer;
     FClient: TSocket;

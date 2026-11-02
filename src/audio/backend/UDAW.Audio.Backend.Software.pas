@@ -145,7 +145,7 @@ end;
 { ---------------- TSoftwareStream worker thread ---------------- }
 
 type
-  TSoftwareWorker = class(TThread)
+  TSoftwareWorker = class(TUDAWThread)
   private
     FStream: TSoftwareStream;
   protected

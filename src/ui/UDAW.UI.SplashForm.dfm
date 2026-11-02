@@ -56,7 +56,7 @@ object frmSplash: TfrmSplash
       Height = 15
       Alignment = taCenter
       AutoSize = False
-      Caption = 'Daniel J. Hobson of Australia, 2026'
+      Caption = #169' Daniel J. Hobson of Australia, 2026'
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clGrayText
       Font.Height = -12
@@ -84,6 +84,7 @@ object frmSplash: TfrmSplash
       Height = 20
       Min = 0
       Max = 100
+      TextSize = 10
       TabStop = False
     end
     object pnlActivity: TPanel

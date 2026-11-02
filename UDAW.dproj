@@ -42,6 +42,8 @@
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
         <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
+        <DCC_ExeOutput>build\bin\debug</DCC_ExeOutput>
+        <DCC_MapFile>3</DCC_MapFile>
         <DCC_Optimize>false</DCC_Optimize>
         <DCC_GenerateStackFrames>true</DCC_GenerateStackFrames>
         <DCC_DebugDCUs>true</DCC_DebugDCUs>
@@ -75,6 +77,7 @@
         <DCCReference Include="src\audio\UDAW.Audio.Device.pas" />
         <DCCReference Include="src\audio\backend\UDAW.Audio.Backend.Software.pas" />
         <DCCReference Include="src\audio\backend\UDAW.Audio.Backend.WASAPI.pas" />
+        <DCCReference Include="src\audio\backend\UDAW.Audio.Backend.DirectSound.pas" />
         <DCCReference Include="src\audio\UDAW.Audio.Backend.Factory.pas" />
         <DCCReference Include="src\audio\UDAW.Audio.Engine.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.MathTables.pas" />
@@ -244,6 +247,7 @@
         <DCCReference Include="src\ui\UDAW.UI.Theme.pas" />
         <DCCReference Include="src\ui\UDAW.UI.ThemeColors.pas" />
         <DCCReference Include="src\ui\UDAW.UI.Hints.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.ShellMenu.pas" />
         <DCCReference Include="src\web\UDAW.Web.HelpClient.pas" />
         <DCCReference Include="src\ui\UDAW.UI.HelpForm.pas">
             <Form>frmHelp</Form>
@@ -274,8 +278,10 @@
         <DCCReference Include="src\ui\UDAW.UI.MeterForm.pas">
             <Form>frmMeters</Form>
         </DCCReference>
-        <DCCReference Include="src\ui\UDAW.UI.FoleyForm.pas">
-            <Form>frmFoley</Form>
+        <DCCReference Include="src\ui\UDAW.UI.FoleySampler.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.SystemSounds.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.CrashForm.pas">
+            <Form>frmCrash</Form>
         </DCCReference>
         <DCCReference Include="src\ui\UDAW.UI.MixInsertParams.pas" />
         <DCCReference Include="src\ui\UDAW.UI.CapsuleProgress.pas" />
@@ -299,6 +305,16 @@
         <DCCReference Include="src\audio\UDAW.Drum.Machine.pas" />
         <DCCReference Include="src\mixer\UDAW.Mixer.PluginScan.pas" />
         <DCCReference Include="src\ai\UDAW.Scripting.Python.pas" />
+        <DCCReference Include="src\ai\UDAW.Scripting.PyPlugin.pas" />
+        <DCCReference Include="src\ai\UDAW.Scripting.PluginSdk.pas" />
+        <DCCReference Include="src\audio\UDAW.Scripting.PyAudition.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.PluginUI.pas" />
+        <DCCReference Include="src\ui\UDAW.UI.PluginWindow.pas">
+            <Form>frmPyPlugin</Form>
+        </DCCReference>
+        <DCCReference Include="src\ui\UDAW.UI.PluginEditor.pas">
+            <Form>frmPyEditor</Form>
+        </DCCReference>
         <DCCReference Include="src\input\UDAW.Input.KeyHooks.pas" />
         <DCCReference Include="src\ui\UDAW.UI.MainForm.pas">
             <Form>frmMain</Form>

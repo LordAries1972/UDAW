@@ -46,7 +46,7 @@ object frmAbout: TfrmAbout
       Top = 78
       Width = 220
       Height = 15
-      Caption = 'Daniel J. Hobson of Australia, 2026'
+      Caption = #169' Daniel J. Hobson of Australia, 2026'
     end
     object lblVersion: TGLLabel
       Left = 24

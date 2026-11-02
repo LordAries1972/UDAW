@@ -35,6 +35,7 @@ type
     Choke: Integer;
     Mode: Integer;                { 0 one-shot, 1 gate }
     Rate, Frames, Channels: Integer;
+    Collapsed: Boolean;           { the pad's instrument panel is folded into its slim strip }
     { min / max pairs, DRUMKIT_PEAK_COLUMNS columns, scaled by DRUMKIT_PEAK_SCALE }
     Peaks: TArray<SmallInt>;
   end;
@@ -146,7 +147,7 @@ end;
 
 { ---- text form ----
     UDAWDRUMKIT 1
-    PAD <note> "<path>" "<name>" <level> <pan> <mute> <solo> <choke> <mode> <rate> <frames> <channels>
+    PAD <note> "<path>" "<name>" <level> <pan> <mute> <solo> <choke> <mode> <rate> <frames> <channels> [<collapsed>]
     PEAKS <count> <v> <v> ...      (belongs to the PAD above it) }
 
 function Quote(const S: string): string;
@@ -212,7 +213,8 @@ begin
         .Append(FormatFloat('0.###', d.Pan, fs)).Append(' ')
         .Append(Ord(d.Muted)).Append(' ').Append(Ord(d.Soloed)).Append(' ')
         .Append(d.Choke).Append(' ').Append(d.Mode).Append(' ')
-        .Append(d.Rate).Append(' ').Append(d.Frames).Append(' ').Append(d.Channels).AppendLine;
+        .Append(d.Rate).Append(' ').Append(d.Frames).Append(' ').Append(d.Channels).Append(' ')
+        .Append(Ord(d.Collapsed)).AppendLine;
       if Length(d.Peaks) > 0 then
       begin
         sb.Append('PEAKS ').Append(Length(d.Peaks));
@@ -287,6 +289,7 @@ begin
           d.Rate := StrToIntDef(Tok(line), 0);
           d.Frames := StrToIntDef(Tok(line), 0);
           d.Channels := StrToIntDef(Tok(line), 0);
+          d.Collapsed := Tok(line) = '1';   { absent in kits saved before this field: expanded }
           havePad := True;
         end
         else if SameText(key, 'PEAKS') and havePad then

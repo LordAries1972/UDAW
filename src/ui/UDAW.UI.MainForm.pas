@@ -29,7 +29,7 @@ uses
   UDAW.Input.KeyHooks,            // Ctrl+Pause/Ctrl+Space global hotkeys
   UDAW.GL.Canvas, UDAW.GL.Controls, UDAW.GL.Widgets, UDAW.GL.Menus, UDAW.UI.LogSink, UDAW.UI.FileDialog, // OpenGL 3.3 surfaces and icon bars (TGLView, TGLIconBar)
   {$ENDIF}
-  UDAW.UI.AboutForm, UDAW.UI.LogForm, UDAW.UI.MeterForm, UDAW.UI.SpectrumForm, UDAW.UI.FoleyForm, UDAW.UI.BrowserWindow,
+  UDAW.UI.AboutForm, UDAW.UI.LogForm, UDAW.UI.MeterForm, UDAW.UI.SpectrumForm, UDAW.UI.FoleySampler, UDAW.UI.SystemSounds, UDAW.Threading, UDAW.UI.BrowserWindow,
   SysUtils, Classes, Math, Graphics, Controls, Forms, Dialogs, StdCtrls, ComCtrls,
   ExtCtrls, StrUtils, Menus,
   UDAW.App, UDAW.Types, UDAW.Errors, UDAW.Logging, UDAW.Jobs, UDAW.SecureStorage,
@@ -41,7 +41,7 @@ uses
   UDAW.Audio.Graph, UDAW.Audio.Graph.Nodes,
   UDAW.Project.Document, UDAW.Project.Serialization, UDAW.Project.Commands,
   UDAW.Project.Recovery, UDAW.Project.WindowLayout, Generics.Collections,
-  UDAW.Codec.WAV, UDAW.Codec.ProTracker, UDAW.Codec.XM, UDAW.Codec.MPTM,
+  Vcl.Themes, UDAW.Codec.WAV, UDAW.Codec.ProTracker, UDAW.Codec.XM, UDAW.Codec.MPTM,
   UDAW.Codec.MP3.Frame, UDAW.Codec.MP3.Decoder, UDAW.Codec.MP3.Encoder,
   UDAW.Codec.MP3.Metadata, UDAW.Codec.MP3,
   UDAW.Codec.MP3.Source, UDAW.Codec.MP3.Timeline,
@@ -62,7 +62,7 @@ uses
   UDAW.Mixer.Modulation, UDAW.Timeline.SpectralFx, UDAW.Timeline.ExtraFx, UDAW.DSP.AudioToMidi,
   UDAW.Sequencer.Patterns, UDAW.Timeline.Warp, UDAW.Timeline.VideoPlayer, UDAW.UI.VST2Editor,
   UDAW.Timeline.VideoExport, UDAW.Video.Effects, UDAW.Timeline.VideoFxCache,
-  System.IOUtils, UDAW.UI.MixInsertParams, UDAW.UI.VideoForm, UDAW.UI.CapsuleProgress, UDAW.UI.MixerStrip, UDAW.UI.TimelineHeader, UDAW.UI.Score, UDAW.Drum.Machine, UDAW.Drum.KitModel, UDAW.UI.DrumInstrument, UDAW.UI.InstrumentEditor, UDAW.UI.EffectEditor, UDAW.UI.TrkFxPick, UDAW.Timeline.FxPresets, UDAW.Pattern.Model, UDAW.Pattern.Commands, UDAW.Mixer.PluginScan, UDAW.Scripting.Python, System.NetEncoding,
+  System.IOUtils, UDAW.UI.MixInsertParams, UDAW.UI.VideoForm, UDAW.UI.CapsuleProgress, UDAW.UI.MixerStrip, UDAW.UI.TimelineHeader, UDAW.UI.Score, UDAW.Drum.Machine, UDAW.Drum.KitModel, UDAW.UI.DrumInstrument, UDAW.UI.InstrumentEditor, UDAW.UI.EffectEditor, UDAW.UI.TrkFxPick, UDAW.Timeline.FxPresets, UDAW.Pattern.Model, UDAW.Pattern.Commands, UDAW.Mixer.PluginScan, UDAW.Scripting.Python, UDAW.Scripting.PyPlugin, UDAW.Scripting.PyAudition, UDAW.UI.PluginEditor, UDAW.UI.PluginWindow, System.JSON, System.NetEncoding,
   UDAW.Tracker.Types, UDAW.Tracker.Instrument, UDAW.Tracker.Pattern,
   UDAW.CrashTrace, UDAW.SystemInfo, UDAW.GL.InfoView, UDAW.UI.Display, UDAW.Tracker.Player, UDAW.Tracker.Commands, UDAW.Tracker.ScoreNotes, UDAW.Codec.TrackerLegacy, UDAW.UI.ScorePdf,
   UDAW.Recording.Types, UDAW.Recording.Engine, UDAW.Recording.Takes,
@@ -74,7 +74,7 @@ uses
   UDAW.AI.MCPBridge, UDAW.AI.MCPServer, UDAW.AI.MCPDiag,
   UDAW.AI.Types, UDAW.AI.Providers, UDAW.AI.Suno, UDAW.AI.Luma, UDAW.AI.MusicTab,
   UDAW.AI.ToolCommands, UDAW.AI.Mixing, UDAW.AI.Mastering,
-  UDAW.DSP.Analysis, UDAW.UI.ThemeColors, UDAW.UI.Hints,
+  UDAW.DSP.Analysis, UDAW.UI.ThemeColors, UDAW.UI.Hints, UDAW.UI.ShellMenu,
   UDAW.Voice.Command, UDAW.Voice.Capture, UDAW.Voice.Recognition;
 
 const
@@ -85,6 +85,7 @@ const
   CFG_UI_HEIGHT     = 'window_height';
   CFG_UI_MAXIMIZED  = 'window_maximized';
   CFG_UI_MIXER_STRIP_WIDTH = 'mixer_strip_width';  // FMixZoomFactor, persisted across sessions
+  CFG_UI_METERS_SOURCE = 'meters_source';          // the Loudness and Phase window's Source box (0..2)
 
   { tmrUI.Interval: 500ms is fine for the log/jobs/meters polling it normally
     drives, but that's far too coarse for the Tracker tab's live row/pattern
@@ -97,6 +98,7 @@ const
   DEFAULT_TL_REFRESH_HZ = 20;     // Timeline redraws per second while playing (Settings > General)
   WM_MIXSYNC = WM_APP + 41;       // posted when the mixer strip widgets need re-laying out (MixSyncStrips)
   WM_TLSYNC  = WM_APP + 42;       // posted when the Timeline track-header widgets need re-building (TlHeaderSync)
+  MIXPICK_PY_BASE = 100000;       // MixPickClick tag base for a Python plug-in picked from + FX (tag - base = FPlgEntries index)
   WM_MIXPICK = WM_APP + 44;       // posted when an effect was picked from a strip's + FX menu (the editor opens once the menu has gone)
   WM_DRUM_REFRESH = WM_APP + 43;   // posted when the drum instrument panels need rebuilding (after a panel's own click has finished)
 
@@ -168,11 +170,16 @@ type
     the job's own handler unwinds, the changes it made are already rolled back }
   EJobCancelled = class(EAbort);
 
+  { one entry of the Plugins menu: a Python script, or a scanned VST2 / VST3 effect }
+  TPlgEntry = record
+    Name, Path, Group: string;   // Group: sub-folder (Python) / vendor (VST)
+    Kind: Integer;               // 0 Python, 1 VST2, 2 VST3
+  end;
+
   TfrmMain = class(TForm)
     mbMain: TGLMenuBar;
     mnuMain: TMainMenu;
     pnlTop: TGLPanel;
-    lblHeader: TGLLabel;
     pgc: TGLPageControl;
     tabSystem: TGLPage;
     memSystem: TLogSink;
@@ -293,18 +300,15 @@ type
     memProject: TLogSink;
     mnuProject: TMenuItem;
     mnuProjectFile: TMenuItem;
+    mnuProjectSepExit: TMenuItem;
+    mnuProjectExit: TMenuItem;
     mnuProjectNew: TMenuItem;
     mnuProjectOpen: TMenuItem;
     mnuProjectSave: TMenuItem;
     mnuProjectSaveAs: TMenuItem;
-    mnuProjectMetadata: TMenuItem;
-    mnuProjectApply: TMenuItem;
-    mnuProjectEdit: TMenuItem;
+    mnuEdit: TMenuItem;
     mnuProjectUndo: TMenuItem;
     mnuProjectRedo: TMenuItem;
-    mnuProjectGraph: TMenuItem;
-    mnuProjectAddGainNode: TMenuItem;
-    mnuProjectRemoveLastNode: TMenuItem;
     mnuProjectAutosave: TMenuItem;
     mnuProjectAutosaveNow: TMenuItem;
     mnuProjectRecover: TMenuItem;
@@ -393,10 +397,21 @@ type
     mnuMp4Stop: TMenuItem;
     mnuHelpAboutUdawSep: TMenuItem;
     mnuScripts: TMenuItem;
+    mnuPySep: TMenuItem;
+    mnuPyEditor: TMenuItem;
+    mnuPyNew: TMenuItem;
+    mnuPyExample: TMenuItem;
+    mnuPyFolder: TMenuItem;
+    mnuPlugins: TMenuItem;
+    mnuPlgSep1: TMenuItem;
+    mnuPlgLoadVst2: TMenuItem;
+    mnuPlgLoadVst3: TMenuItem;
+    mnuPlgRescan: TMenuItem;
     mnuScriptRun: TMenuItem;
     mnuScriptFolder: TMenuItem;
     dlgOpenPy: TGLOpenDialog;
     mnuHelpAboutUdaw: TMenuItem;
+    mnuHelpLicense: TMenuItem;
     pmMp4: TPopupMenu;
     pmMp4Probe: TMenuItem;
     pmMp4Import: TMenuItem;
@@ -490,6 +505,8 @@ type
     grpStartup: TGLGroup;
     lblSetBackend: TGLLabel;
     cboSetBackend: TGLCombo;
+    lblSetOutDevice: TGLLabel;
+    cboSetOutDevice: TGLCombo;
     lblSetRate: TGLLabel;
     cboSetRate: TGLCombo;
     lblSetBuffer: TGLLabel;
@@ -532,9 +549,9 @@ type
     lblDirRecordings: TGLLabel;
     edDirRecordings: TGLEdit;
     btnDirRecordings: TGLButton;
-    lblDirTemp, lblDirCache, lblDirScripts, lblDirPresets: TGLLabel;
-    edDirTemp, edDirCache, edDirScripts, edDirPresets: TGLEdit;
-    btnDirTemp, btnDirCache, btnDirScripts, btnDirPresets: TGLButton;
+    lblDirTemp, lblDirCache, lblDirScripts, lblDirPresets, lblDirPlugins: TGLLabel;
+    edDirTemp, edDirCache, edDirScripts, edDirPresets, edDirPlugins: TGLEdit;
+    btnDirTemp, btnDirCache, btnDirScripts, btnDirPresets, btnDirPlugins: TGLButton;
     grpSystemPaths: TGLGroup;
     memSysPaths: TLogSink;
     lblSysConfig: TGLLabel;
@@ -599,7 +616,7 @@ type
     lblTlBarsCap: TGLLabel;
     bvlTlSep1: TGLBevel;
     bvlTlSep2: TGLBevel;
-    bvlTlSep3: TGLBevel;
+    bvlTlMasterSep: TGLBevel;
     cboTlSnap: TGLCombo;
     lblTlMasterVol: TGLLabel;
     tbTlMasterVol: TGLTrackBar;
@@ -819,10 +836,11 @@ type
     mnuTlExportFlac: TMenuItem;
     mnuTlExportSep: TMenuItem;
     pmTlEffect: TPopupMenu;
+    sbTlDock: TGLScrollBox;
     pnlTlDock: TGLPanel;
     pgcDock: TGLPageControl;
     splTlDock: TGLSplitter;
-    pnlTlViews: TGLPanel;
+    pnlTlViews: TGLRecessPanel;
     pnlTlMode: TGLPanel;
     tsTlMode: TGLTabStrip;
     pnlTlRight: TGLPanel;
@@ -861,6 +879,7 @@ type
     pbPattern: TGLView;
     dlgOpenPattern: TGLOpenDialog;
     dlgSavePattern: TGLSaveDialog;
+    sbScoreParts: TGLScrollBox;
     pnlScoreParts: TGLPanel;
     pnlScorePartsHead: TGLPanel;
     pnlScorePartsFoot: TGLPanel;
@@ -1348,6 +1367,23 @@ type
     memAdvDspReadout: TLogSink;
     tabAI: TGLPage;
     tabDockAi: TGLPage;
+    tabFoley: TGLPage;
+    sbFoley: TGLScrollBox;
+    grpFoley: TGLGroup;
+    btnFoleyPad1, btnFoleyPad2, btnFoleyPad3, btnFoleyPad4, btnFoleyPad5, btnFoleyPad6,
+    btnFoleyPad7, btnFoleyPad8, btnFoleyPad9, btnFoleyPad10, btnFoleyPad11, btnFoleyPad12,
+    btnFoleyPad13, btnFoleyPad14, btnFoleyPad15, btnFoleyPad16: TGLButton;
+    lblFoleySelected: TGLLabel;
+    btnFoleyLoad: TGLButton;
+    btnFoleyClear: TGLButton;
+    btnFoleyPlace: TGLButton;
+    chkFoleyTimeline: TGLCheck;
+    chkFoleyRecord: TGLCheck;
+    lblFoleyHits: TGLLabel;
+    btnFoleyCommit: TGLButton;
+    btnFoleyDiscard: TGLButton;
+    lblFoleyHelp: TGLLabel;
+    dlgOpenFoley: TGLOpenDialog;
     pcAiMain: TGLPageControl;
     tsAiSelect: TGLPage;
     tsAiMcp: TGLPage;
@@ -1674,7 +1710,8 @@ type
     procedure TlHdrTempo(Sender: TGLTrackHeader);
     procedure TlHdrPassMouse(Sender: TGLTrackHeader; ADown: Boolean; AButton: TMouseButton;
       AShift: TShiftState; X, Y: Integer);
-    procedure pnlTimelineTopResize(Sender: TObject);
+    procedure pgcResize(Sender: TObject);
+    procedure PlaceMasterBlock;
     procedure tsTlModeChange(Sender: TObject);
     procedure DrumLoadDialog(ANote: Integer);
     function DrumPanelFor(ANote: Integer): TDrumInstrumentPanel;
@@ -1709,6 +1746,35 @@ type
     procedure mnuScriptRunClick(Sender: TObject);
     procedure mnuScriptFolderClick(Sender: TObject);
     function ScriptsDir: string;
+    procedure mnuPyEditorClick(Sender: TObject);
+    procedure mnuPyNewClick(Sender: TObject);
+    procedure mnuPyExampleClick(Sender: TObject);
+    procedure mnuPyFolderClick(Sender: TObject);
+    procedure mnuPluginsClick(Sender: TObject);
+    procedure mnuPlgLoadVst2Click(Sender: TObject);
+    procedure mnuPlgLoadVst3Click(Sender: TObject);
+    procedure mnuPlgRescanClick(Sender: TObject);
+    procedure PluginMenuItemClick(Sender: TObject);
+    procedure RefreshPluginsMenu(AForce: Boolean);
+    procedure AddPlgItem(AParent: TMenuItem; AIndex: Integer);
+    procedure AddPlgBucketed(AParent: TMenuItem; const AList: TArray<Integer>);
+    procedure OpenPythonScriptWindow(const AFileName: string);
+    procedure MixAddPythonPlugin(const AFileName: string);
+    function PluginsDir: string;
+    procedure PyPluginSetup;
+    function PyEditorForm: TfrmPyEditor;
+    procedure PyEditorAddToMixer(const ATarget: TPyTarget; const AFilePath, APluginName,
+      AValuesJson, AStateJson, ANames: string);
+    procedure PyEditorRefreshTargets(Sender: TObject);
+    procedure PyEditorClosed(Sender: TObject);
+    procedure OpenPythonInsertWindow(ATracker: Boolean; AStripId, AIndex: Integer);
+    function OpenPythonInsertWindowByIid(ATracker: Boolean; AStripId: Integer; const AIid: string): Boolean;
+    procedure PyWindowClosing(Sender: TObject);
+    procedure PyRestoreInsertsOnLoad;
+    procedure PyWindowAddToMixer(Sender: TObject);
+    procedure InstallPyAuditionHooks;
+    function PyRenderTimelineRange(ARate: Integer; out APlanar: TPyPlanar): Boolean;
+    procedure PySaveInsertState(ATracker: Boolean; AStripId: Integer; const AIid, AState: string);
     procedure DrumSaveKit;
     function DrumPadAt(X, Y: Integer): Integer;
     procedure DrumAudioAttach;
@@ -1849,6 +1915,7 @@ type
     procedure btnTlGoEndClick(Sender: TObject);
     procedure btnTlZoomFitClick(Sender: TObject);
     function TlHotKey(var Key: Word; Shift: TShiftState): Boolean;
+    function TlTransportKey(var Key: Word; Shift: TShiftState): Boolean;
     function TlLoopBarMouseDown(X, Y: Integer; Shift: TShiftState): Boolean;
     procedure TlLoopBarMove(X: Integer);
     procedure TlNudge(ADir: Integer; ACoarse: Boolean);
@@ -1953,6 +2020,8 @@ type
     procedure TlSetMetronome(AOn: Boolean);
     procedure TlWarpMenuClick(Sender: TObject);
     procedure tbTlMasterVolChange(Sender: TObject);
+    function TlMasterIsTracker: Boolean;
+    function TlMasterVolumeDb: Double;
     procedure sbTlHorzChange(Sender: TObject);
     procedure sbTlVertChange(Sender: TObject);
     procedure pbTimelinePaint(Sender: TObject);
@@ -1977,6 +2046,13 @@ type
       Shift: TShiftState; X, Y: Integer);
     procedure pbTimelineMouseWheel(Sender: TObject; Shift: TShiftState;
       WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+    procedure trTlRightMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    function TlRightSelectedInstr: Integer;
+    function TlRightSelectedModule: string;
+    function TlRightSelectedSample: string;
+    procedure TlAddSampleAtPlayhead(const APath: string);
+    procedure TlEditLibrarySample(const APath: string);
+    procedure TlDropTrackerModule(const APath: string);
     procedure pbTimelineDragOver(Sender, Source: TObject; X, Y: Integer;
       State: TDragState; var Accept: Boolean);
     procedure pbTimelineDragDrop(Sender, Source: TObject; X, Y: Integer);
@@ -2049,6 +2125,11 @@ type
     procedure MixEqFlatClick(Sender: TObject);
     procedure MixEqToggle(Sender: TObject);
     procedure MixEqPresetClick(Sender: TObject; AIndex: Integer; const AId: string);
+    procedure sbScorePartsResize(Sender: TObject);
+    procedure SettingsAutoSave(Sender: TObject);
+    procedure WireSettingsAutoSave(AParent: TWinControl);
+    procedure sbTlDockResize(Sender: TObject);
+    procedure cboMixEqPresetSelect(Sender: TObject);
     function MixEqPresetDir: string;
     function MixEqPresetFile(out AFile: string): Boolean;
     procedure MixEqRefreshPresets;
@@ -2186,6 +2267,10 @@ type
     procedure cboGlMonitorChange(Sender: TObject);
     procedure btnGlApplyClick(Sender: TObject);
     procedure tmrGlFpsTimer(Sender: TObject);
+    procedure UpdateTopStatus;
+    procedure OutFieldClick(Sender: TObject);
+    procedure CloseButtonClick(Sender: TObject);
+    procedure OutDevicePicked(Sender: TObject);
     procedure btnAiMcpTestLocalClick(Sender: TObject);
     procedure btnAiMcpTestTlsClick(Sender: TObject);
     procedure btnAiSendClick(Sender: TObject);
@@ -2219,7 +2304,21 @@ type
     procedure RestoreStartupProject;
     procedure ShowLogClick(Sender: TObject);
     procedure ShowMetersClick(Sender: TObject);
+    procedure MeterSourceChange(Sender: TObject);
     procedure ShowFoleyClick(Sender: TObject);
+    procedure FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure btnFoleyPadClick(Sender: TObject);
+    procedure btnFoleyLoadClick(Sender: TObject);
+    procedure btnFoleyClearClick(Sender: TObject);
+    procedure btnFoleyPlaceClick(Sender: TObject);
+    procedure btnFoleyCommitClick(Sender: TObject);
+    procedure btnFoleyDiscardClick(Sender: TObject);
+    procedure FoleyChanged(Sender: TObject);
+    procedure FoleyEnsure;
+    procedure FoleyRefreshPage;
+    function FoleyPadButton(AIndex: Integer): TGLButton;
+    function FoleyPageShowing: Boolean;
+    procedure TlToggleFoley;
     procedure OpenBrowserWindowClick(Sender: TObject);
     procedure BrowserWindowFormClose(Sender: TObject; var Action: TCloseAction);
     function ActiveWorkspacePage: TGLPage;
@@ -2237,6 +2336,8 @@ type
     procedure DrainSunoRefRecording;
     procedure btnVoiceRecordClick(Sender: TObject);
     procedure btnHelpAboutClick(Sender: TObject);
+    procedure mnuHelpLicenseClick(Sender: TObject);
+    procedure mnuProjectExitClick(Sender: TObject);
     procedure btnAboutClick(Sender: TObject);
     procedure pgcChange(Sender: TObject);
     procedure pgcDockChange(Sender: TObject);
@@ -2304,10 +2405,11 @@ type
     FRecoverySessionActive: Boolean;
     FWindowStateReady: Boolean;
     FMeters: TfrmMeters;
-    FFoley: TfrmFoley;
+    FFoley: TFoleySampler;              // the Foley page's pads (created on first use)
     FDisplay: TDisplayController;       // the window's screen mode (windowed / borderless / exclusive full screen)
     FMonitors: TArray<TMonitorEntry>;
     FDisplayModes: TArray<TDisplayMode>;
+    FFpsInMenu: Boolean;                // the FPS read-out is also shown in the menu bar (Settings > Display)
     FGlFps, FGlDraws: Double;           // render rate of the busiest GL surface / of all of them, last sample
     FGlSurfaceCount: Integer;
     FCacheThread: TThread;              // Delete Cache is running (nil when idle)
@@ -2356,6 +2458,12 @@ type
     FTlModeSync: Boolean;
     FRightItems: TArray<TRightItem>;
     FPyBridge: TPythonBridge;
+    FPlgEntries: TArray<TPlgEntry>;   // what the Plugins menu offers (menu item Tag = index)
+    FPlgSig: string;                  // what the menu was last built from
+    FPlgDyn: Integer;                 // dynamic items at the top of the Plugins menu
+    FPlgLast: UInt64;
+    FOpenPyWindows: TList<TfrmPyPlugin>;   // Python plug-in windows opened from mixer inserts (remembered per project)
+    FPyEditor: TfrmPyEditor;        // the Python plug-in editor, one at a time (frees itself on close)
     FPluginScan: TPluginScanner;   // created on first use, cached in Config\plugins.cache
     FRightFilled: Boolean;
     FDrum: TDrumMachine;                  // the kit (kept alive by FDrumIntf)
@@ -2425,6 +2533,8 @@ type
     FTlPlaying: Boolean;
     FSyncingExport: Boolean;     // RefreshExportSettings is filling the Export controls
     FTlRefreshHz: Integer;      // Timeline redraws/second while playing (Settings; 5..60, default 20)
+    FSettingsLoading: Boolean;  // LoadSettingsTab is filling the controls: their change events must not save
+    FSettingsWired: Boolean;    // the Settings controls have been connected to the automatic save
     { True for the duration of a synchronous ShowStatusProgress/
       HideStatusProgress-bracketed operation - tells RefreshJobs (tmrUITimer,
       500ms) not to stomp stbMain/prgStatus with the background-jobs summary
@@ -2539,6 +2649,7 @@ type
     FTlRangeStartSec, FTlRangeEndSec: Double;
     FTlRangeMoving: Boolean;     // right-drag repositions the selected range (popup suppressed once it moves)
     FTlRangeMoveMoved: Boolean;
+    FTlRangeCancelled: Boolean;  // right-press cleared the range; its release shows no popup
     FTlRangeMoveLastSec: Double;
     FTlRangeMoveDownX: Integer;
     FTlMiddlePanning: Boolean;   // middle-mouse-button drag-to-scroll (see pbTimelineMouseDown/Move/Up)
@@ -2593,6 +2704,9 @@ type
     { cboSetInDevice.Items[i] <-> FInputDeviceIds[i]; index 0 is always the
       "Default (system)" entry, mapped to '' (backend default endpoint). }
     FInputDeviceIds: TArray<string>;
+    { cboSetOutDevice.Items[i] <-> FOutputDeviceIds[i]; index 0 = "Default (system)" = '' }
+    FOutputDeviceIds: TArray<string>;
+    FOutPopup: TPopupMenu;   // the menu-bar Out field's device list
     FRecInsertSeconds: Double;
     FRecCommitted: Boolean;
     FRecStarted: UInt64;
@@ -2944,6 +3058,7 @@ type
     function ProjectFingerprint: string;
     function ProjectSecretKey: string;
     procedure RefreshInputDeviceCombo(const ASelectedDeviceId: string);
+    procedure RefreshOutputDeviceCombo(const ASelectedDeviceId: string);
     procedure RefreshMidiDeviceCombos(const ASelectedInName, ASelectedOutName: string);
     procedure OpenMidiDevicesFromConfig;
     procedure HandleLiveMidiInput(Sender: TObject; const AMsg: TMidiMessage; ATimestampMs: Cardinal);
@@ -3091,7 +3206,12 @@ procedure TfrmMain.FormCreate(Sender: TObject);
 var
   i: Integer;
 begin
+  PyPluginSetup;               // Python plug-ins on the lanes need their folder from the first play
+  InstallPyAuditionHooks;
+  InstallSystemSoundRouting;   // warning / error sounds play through the audio engine's output device
   mnuProject.MenuIndex := 0;   // the Project menu is always the first menu
+  { every caption beside a combo box or edit box shares that field's text line }
+  GLAlignLabelsToFields(Self);
   TimelinePumpHook := JobPump;
   { every file dialog opens where it was last used in this project, and the project saves that }
   GLDialogRecall := function(const AKey: string): string
@@ -3102,9 +3222,8 @@ begin
     begin
       if FProject <> nil then FProject.DialogPaths.Put(AKey, APath);
     end;
-  { the video pane is never taller than 290 px (the widget set does not stream Constraints,
-    so it is set here rather than in the form file) }
-  pnlTlVideo.Constraints.MaxHeight := 290;
+  { the video pane fills the whole strip beside the lanes and is black all the way down (a height
+    limit here used to leave the form's grey showing under the picture) }
   FTlVideo := TTimelineVideoPlayer.Create(pnlTlVideo);
   { the picture follows the Timeline tempo (live rate and tempo-map changes) like the sound }
   FTlVideo.WarpFunc :=
@@ -3126,8 +3245,6 @@ begin
   FTlFxBmp := TBitmap.Create;
   FTlRubberBandMods := [ssShift];
   Caption := Format('UDAW - by Ultimanium Designs (C) 2026 - %s', [UDAWDisplayVersionString]);
-  lblHeader.Caption := Format('%s  -  version %s  -  system diagnostics (platform, audio engine, graph, project, PCM/WAV, timeline, recording)',
-    [UDAW_PRODUCT_NAME, UDAWDisplayVersionString]);
   {$IFNDEF FPC}
   { Registration disabled - UDAW is the full version and the Registration page is hidden.
   edtRegUsername.Text := TUDAWLicense.CachedUsername;
@@ -3319,6 +3436,7 @@ begin
   FRecovery := TProjectRecoveryManager.Create;
   FRecovery.Interval := ai5Min;
   FOpenVST2Editors := TList<TfrmVST2Editor>.Create;
+  FOpenPyWindows := TList<TfrmPyPlugin>.Create;
 
   cboRecFormat.Items.Clear;
   cboRecFormat.Items.Add('IEEE float 32-bit');
@@ -3499,7 +3617,8 @@ begin
   FDisplay := TDisplayController.Create(Self);
   FillDisplayPage;
   TThread.ForceQueue(nil, ApplyDisplayFromConfig, 150);
-  TThread.ForceQueue(nil, ShowProjectStartScreen, 600);   // after the Timeline has been shown and drawn
+  PlaceMasterBlock;   // the master volume block goes after the last tab
+  TThread.ForceQueue(nil, ShowProjectStartScreen, 2500);   // after the Timeline has been shown and drawn - and long enough to take it in first
 end;
 
 { Only one tab's menu is ever visible on mnuMain at a time - each tab's action
@@ -3523,6 +3642,14 @@ begin
   mnuMidi.Visible := TabIs(tabMIDI);
   mnuTimeline.Visible := pgc.ActivePage = tabTimeline;
   mnuProject.Visible := True;   // the Project menu (new / open / save ...) is always on the bar
+  { the Edit menu is always on the bar; the tab's own edit group shows with it, and the project-wide
+    Undo / Redo stand in on the tabs that have none }
+  mnuTlEdit.Visible := pgc.ActivePage = tabTimeline;
+  mnuTrkEdit.Visible := TabIs(tabTracker);
+  mnuMixEdit.Visible := TabIs(tabMixer);
+  mnuMidiEdit.Visible := TabIs(tabMIDI);
+  mnuProjectUndo.Visible := not (mnuTlEdit.Visible or mnuTrkEdit.Visible or mnuMixEdit.Visible or mnuMidiEdit.Visible);
+  mnuProjectRedo.Visible := mnuProjectUndo.Visible;
   mnuMp3.Visible := ActiveWorkspacePage = tabMP3;
   mnuSystem.Visible := ActiveWorkspacePage = tabSystem;
   mnuLog.Visible := True;
@@ -3553,6 +3680,7 @@ const
   WINKEY_LOGVIEWER = 'LogViewer';
   WINKEY_BROWSER   = 'BrowserWindow';
   WINKEY_VST2_PREFIX = 'VST2Editor:';
+  WINKEY_PY_PREFIX = 'PyPlugin:';   // PyPlugin:<M|T>:<stripId>:<instance id>
   { Not a window: Left = pixels-per-second * 1000, Top = scroll seconds * 1000
     (reuses the layout section so no project format change is needed). }
   WINKEY_TIMELINEVIEW = 'TimelineView';
@@ -3792,24 +3920,131 @@ begin
   RefreshTimelineTab;
 end;
 
+{ the Foley pads are made on first use and wired to the Timeline }
+procedure TfrmMain.FoleyEnsure;
+begin
+  if FFoley <> nil then Exit;
+  FFoley := TFoleySampler.Create;
+  FFoley.OnPlayhead := FoleyPlayheadSeconds;
+  FFoley.OnIsPlaying := FoleyTimelinePlaying;
+  FFoley.OnCommit := FoleyCommitHits;
+  FFoley.OnPlace := FoleyPlaceClip;
+  FFoley.OnInsert := FoleyInsertAtPlayhead;
+  FFoley.OnChange := FoleyChanged;
+  FFoley.LoadPads;
+end;
+
+function TfrmMain.FoleyPadButton(AIndex: Integer): TGLButton;
+begin
+  Result := FindComponent('btnFoleyPad' + IntToStr(AIndex + 1)) as TGLButton;
+end;
+
+{ the Foley page is the one in front: the Foley tab of the dock under the Timeline lanes }
+function TfrmMain.FoleyPageShowing: Boolean;
+begin
+  Result := (pgc.ActivePage = tabTimeline) and pnlTlDock.Visible and (pgcDock.ActivePage = tabFoley);
+  { (true both in the dock under the lanes and in the full-page FOLEY mode) }
+end;
+
+{ pad captions, the selected pad's line and the recorded-hits line follow the sampler }
+procedure TfrmMain.FoleyRefreshPage;
+var
+  i: Integer;
+  nm: string;
+begin
+  if FFoley = nil then Exit;
+  for i := 0 to FOLEY_PAD_COUNT - 1 do
+  begin
+    if FFoley.Files[i] = '' then nm := '(empty)'
+    else nm := ChangeFileExt(ExtractFileName(FFoley.Files[i]), '');
+    if Length(nm) > 12 then nm := Copy(nm, 1, 11) + '...';
+    FoleyPadButton(i).Caption := FOLEY_PAD_KEYS[i + 1] + '  ' + nm;
+  end;
+  if FFoley.Files[FFoley.Selected] = '' then
+    lblFoleySelected.Caption := Format('Pad %s: empty - choose "Load into pad..."', [FOLEY_PAD_KEYS[FFoley.Selected + 1]])
+  else
+    lblFoleySelected.Caption := Format('Pad %s: %s', [FOLEY_PAD_KEYS[FFoley.Selected + 1],
+      ExtractFileName(FFoley.Files[FFoley.Selected])]);
+  lblFoleyHits.Caption := Format('%d hit(s) recorded', [FFoley.HitCount]);
+  btnFoleyCommit.Enabled := FFoley.HitCount > 0;
+  btnFoleyDiscard.Enabled := FFoley.HitCount > 0;
+end;
+
+procedure TfrmMain.FoleyChanged(Sender: TObject);
+begin
+  FoleyRefreshPage;
+end;
+
+{ the menu entry opens the Foley page under the Timeline, like the Foley icon button }
 procedure TfrmMain.ShowFoleyClick(Sender: TObject);
 begin
-  if FFoley = nil then
-  begin
-    FFoley := TfrmFoley.Create(Self);
-    FFoley.OnPlayhead := FoleyPlayheadSeconds;
-    FFoley.OnIsPlaying := FoleyTimelinePlaying;
-    FFoley.OnCommit := FoleyCommitHits;
-    FFoley.OnPlace := FoleyPlaceClip;
-    FFoley.OnInsert := FoleyInsertAtPlayhead;
-  end;
-  FFoley.Show;
-  FFoley.BringToFront;
+  if not FoleyPageShowing then TlToggleFoley;
+end;
+
+procedure TfrmMain.btnFoleyPadClick(Sender: TObject);
+begin
+  FoleyEnsure;
+  FFoley.Hit((Sender as TComponent).Tag, False, chkFoleyTimeline.Checked, chkFoleyRecord.Checked);
+end;
+
+procedure TfrmMain.btnFoleyLoadClick(Sender: TObject);
+begin
+  FoleyEnsure;
+  if not dlgOpenFoley.Execute then Exit;
+  FFoley.AssignFile(FFoley.Selected, dlgOpenFoley.FileName);
+end;
+
+procedure TfrmMain.btnFoleyClearClick(Sender: TObject);
+begin
+  FoleyEnsure;
+  FFoley.ClearPad(FFoley.Selected);
+end;
+
+procedure TfrmMain.btnFoleyPlaceClick(Sender: TObject);
+begin
+  FoleyEnsure;
+  FFoley.PlaceSelected;
+end;
+
+procedure TfrmMain.btnFoleyCommitClick(Sender: TObject);
+begin
+  FoleyEnsure;
+  FFoley.CommitHits;
+end;
+
+procedure TfrmMain.btnFoleyDiscardClick(Sender: TObject);
+begin
+  FoleyEnsure;
+  FFoley.DiscardHits;
+end;
+
+{ pad keys 1234 / QWER / ASDF / ZXCV play the pads while the Foley page is showing (the lanes
+  keep their own keys otherwise); a held key does not retrigger on keyboard auto-repeat }
+procedure TfrmMain.FormKeyUp(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  if FFoley <> nil then FFoley.KeyUp(TFoleySampler.PadForKey(Key));
 end;
 
 function TfrmMain.MasterStripForMeters: TMixStrip;
+var
+  src: Integer;
 begin
-  if FProject = nil then Result := nil else Result := FProject.Mixer.MasterStrip;
+  if FProject = nil then Exit(nil);
+  { the Tracker plays through its own mixer (strip n = channel n), so while a module is playing in
+    the Tracker the master meters live on that mixer's master strip, not the Timeline mixer's }
+  { the window's Source box: 0 follows what is playing, 1 is the Timeline mixer, 2 the Tracker's }
+  src := 0;
+  if FMeters <> nil then src := FMeters.SourceIndex;
+  if (src = 2) or ((src = 0) and FTrkPlaying and (FTrkPlayer <> nil)) then
+    Result := FProject.TrackerMixer.MasterStrip
+  else
+    Result := FProject.Mixer.MasterStrip;
+end;
+
+procedure TfrmMain.MeterSourceChange(Sender: TObject);
+begin
+  if (App <> nil) and (App.Config <> nil) and (FMeters <> nil) then
+    App.Config.SetInt(CFG_SEC_UI, CFG_UI_METERS_SOURCE, FMeters.SourceIndex);
 end;
 
 { Loudness and Phase Meters window: live master-output meters, see UDAW.UI.MeterForm. }
@@ -3819,7 +4054,15 @@ begin
   begin
     FMeters := TfrmMeters.Create(Self);
     FMeters.StripProvider := MasterStripForMeters;
+    { the last choice is remembered between sessions }
+    if (App <> nil) and (App.Config <> nil) then
+      FMeters.cboSource.ItemIndex := EnsureRange(App.Config.GetInt(CFG_SEC_UI, CFG_UI_METERS_SOURCE, 0), 0, 2);
+    FMeters.cboSource.OnChange := MeterSourceChange;
   end;
+  { opened while only one of them is playing: start on that mixer; with both or neither playing the
+    Source box keeps its last choice (Automatic the first time) }
+  if FTrkPlaying and not FTlPlaying then FMeters.cboSource.ItemIndex := 2
+  else if FTlPlaying and not FTrkPlaying then FMeters.cboSource.ItemIndex := 1;
   FMeters.Show;
   FMeters.BringToFront;
 end;
@@ -3899,6 +4142,11 @@ begin
         FProject.Windows.Put(frm.WindowKey, frm.Left, frm.Top, frm.Width, frm.Height,
           SavedWindowStateOf(frm));
     end;
+  if FOpenPyWindows <> nil then
+    for i := 0 to FOpenPyWindows.Count - 1 do
+      if FOpenPyWindows[i].WindowKey <> '' then
+        FProject.Windows.Put(FOpenPyWindows[i].WindowKey, FOpenPyWindows[i].Left, FOpenPyWindows[i].Top,
+          FOpenPyWindows[i].Width, FOpenPyWindows[i].Height, SavedWindowStateOf(FOpenPyWindows[i]));
 end;
 
 procedure TfrmMain.RestoreWindowLayout;
@@ -3972,6 +4220,24 @@ begin
     if not OpenVST2EditorForInsert(stripId, idx) then
       FProject.Windows.Remove(e.Key);
   end;
+
+  { Python plug-in windows: key is "PyPlugin:<M|T>:<stripId>:<instance id>"; the insert (with the script
+    inside it) came back with the project, so the window reopens on it }
+  for i := FProject.Windows.Entries.Count - 1 downto 0 do
+  begin
+    e := FProject.Windows.Entries[i];
+    if not e.Key.StartsWith(WINKEY_PY_PREFIX, True) then Continue;
+    keyTail := Copy(e.Key, Length(WINKEY_PY_PREFIX) + 1, MaxInt);   // M:12:iid
+    if (Length(keyTail) < 5) or (keyTail[2] <> ':') then
+    begin
+      FProject.Windows.Remove(e.Key);
+      Continue;
+    end;
+    sep := Pos(':', Copy(keyTail, 3, MaxInt));
+    if (sep = 0) or not TryStrToInt(Copy(keyTail, 3, sep - 1), stripId) or
+       not OpenPythonInsertWindowByIid(keyTail[1] = 'T', stripId, Copy(keyTail, 3 + sep, MaxInt)) then
+      FProject.Windows.Remove(e.Key);
+  end;
 end;
 
 { Quiets the whole application before it starts shutting down: the recording is finished and saved,
@@ -4016,7 +4282,9 @@ begin
   {$ENDIF}
   tmrUI.Enabled := False;
   StopLiveRecording;
-  FreeAndNil(FOpenVST2Editors);   // does not own the forms - they free via caFree or MainForm's own ownership
+  FreeAndNil(FFoley);   // takes its pads off the audio engine
+  FreeAndNil(FOpenPyWindows);
+  FreeAndNil(FOpenVST2Editors);  // does not own the forms - they free via caFree or MainForm's own ownership
   FreeAndNil(FPluginScan);
   FreeAndNil(FTrkNotation);
   FreeAndNil(FPyBridge);
@@ -4097,7 +4365,6 @@ end;
 procedure TfrmMain.FormResize(Sender: TObject);
 begin
   DrumFitToPage;
-  if (lblGlFps <> nil) and (lblGlFps.Visible) then lblGlFps.Left := ClientWidth - lblGlFps.Width - 8;
   if (FDisplay <> nil) and FDisplay.IsFullScreen then Exit;   // a full screen window is not the size to remember
   if not FWindowStateReady or (App = nil) or (App.Config = nil) then Exit;
   { minimized geometry is meaningless to persist - leave the last known good
@@ -4121,31 +4388,54 @@ end;
   rows have Data = Pointer(hookIndex + 1) so btnKeyHookAssignClick and
   FormKeyDown's capture-mode branch can find the matching FKeyHooks entry. }
 const
-  KeyHookTable: array[0..21] of record
-    Action, Keys, Context: string;
+  KeyHookTable: array[0..44] of record
+    Action, Keys, Context, Description: string;
   end = (
-    (Action: 'Project: New'; Keys: 'Ctrl+N'; Context: 'Global (not while typing in a text field)'),
-    (Action: 'Undo'; Keys: 'Ctrl+Z'; Context: 'Global (not while typing in a text field)'),
-    (Action: 'Redo'; Keys: 'Ctrl+Y or Ctrl+Shift+Z'; Context: 'Global (not while typing in a text field)'),
-    (Action: 'Delete active channel (Timeline track + Mixer strip)'; Keys: 'Delete'; Context: 'Timeline tab'),
-    (Action: 'Delete selected clip'; Keys: 'Backspace'; Context: 'Timeline tab, with a clip selected'),
-    (Action: 'New Timeline (add channel)'; Keys: 'Insert'; Context: 'Timeline tab'),
-    (Action: 'Go to start of Timeline'; Keys: 'Home'; Context: 'Timeline tab'),
-    (Action: 'Go to end of Timeline'; Keys: 'End'; Context: 'Timeline tab'),
-    (Action: 'Project: Open'; Keys: 'Ctrl+O'; Context: 'Global (not while typing in a text field)'),
-    (Action: 'Project: Save'; Keys: 'Ctrl+S'; Context: 'Global (not while typing in a text field)'),
-    (Action: 'Project: Save As'; Keys: 'Ctrl+Shift+S'; Context: 'Global (not while typing in a text field)'),
-    (Action: 'Pan the Timeline horizontally'; Keys: 'Middle mouse button + drag'; Context: 'Timeline tab'),
-    (Action: 'Position the playhead (start point)'; Keys: 'Left click'; Context: 'Timeline ruler (top time area) only'),
-    (Action: 'Highlight / select a time range'; Keys: 'Left mouse button + drag'; Context: 'Timeline ruler or empty lane space'),
-    (Action: 'Move the selected range'; Keys: 'Right mouse button + drag'; Context: 'Timeline lane, with a range selected'),
-    (Action: 'Open Timeline context menu'; Keys: 'Right click (no drag)'; Context: 'Timeline lane / ruler'),
-    (Action: 'Resize the channel header column'; Keys: 'Left mouse button + drag'; Context: 'Timeline, header-side edge of the column divider'),
-    (Action: 'Move clip(s)'; Keys: 'Left mouse button + drag'; Context: 'Timeline, on a clip'),
-    (Action: 'Duplicate clip(s) while dragging'; Keys: 'Alt + left drag'; Context: 'Timeline, on a clip'),
-    (Action: 'Add to / toggle clip selection'; Keys: 'Ctrl or Shift + click'; Context: 'Timeline, on a clip'),
-    (Action: 'Rubber-band select clips'; Keys: 'Ctrl or Shift + left drag'; Context: 'Timeline, empty lane space'),
-    (Action: 'Zoom the Timeline'; Keys: 'Mouse wheel'; Context: 'Timeline tab')
+    (Action: 'Project: New'; Keys: 'Ctrl+N'; Context: 'Global (not while typing in a text field)'; Description: 'Starts a new, empty project (asks first if the current one has unsaved changes).'),
+    (Action: 'Undo'; Keys: 'Ctrl+Z'; Context: 'Global (not while typing in a text field)'; Description: 'Reverses the last edit. Every tab shares one undo history, so this works the same wherever you are.'),
+    (Action: 'Redo'; Keys: 'Ctrl+Y or Ctrl+Shift+Z'; Context: 'Global (not while typing in a text field)'; Description: 'Re-applies the edit you just undid.'),
+    (Action: 'Delete active channel (Timeline track + Mixer strip)'; Keys: 'Delete'; Context: 'Timeline tab'; Description: 'Removes the selected Timeline track and the Mixer strip it feeds (two undoable steps). Refused while anything is playing.'),
+    (Action: 'Delete selected clip'; Keys: 'Backspace'; Context: 'Timeline tab, with a clip selected'; Description: 'Deletes only the selected clip and leaves its track in place.'),
+    (Action: 'New Timeline (add channel)'; Keys: 'Insert'; Context: 'Timeline tab'; Description: 'Adds a new audio track below the existing ones.'),
+    (Action: 'Go to start of Timeline'; Keys: 'Home'; Context: 'Timeline tab'; Description: 'Moves the playhead to 0:00.'),
+    (Action: 'Go to end of Timeline'; Keys: 'End'; Context: 'Timeline tab'; Description: 'Moves the playhead to the end of the last clip.'),
+    (Action: 'Project: Open'; Keys: 'Ctrl+O'; Context: 'Global (not while typing in a text field)'; Description: 'Opens a saved project file.'),
+    (Action: 'Project: Save'; Keys: 'Ctrl+S'; Context: 'Global (not while typing in a text field)'; Description: 'Saves the project (asks for a name the first time).'),
+    (Action: 'Project: Save As'; Keys: 'Ctrl+Shift+S'; Context: 'Global (not while typing in a text field)'; Description: 'Saves the project under a new name or in a new place.'),
+    (Action: 'Pan the Timeline horizontally'; Keys: 'Middle mouse button + drag'; Context: 'Timeline tab'; Description: 'Slides the view left and right without moving the playhead or any clip.'),
+    (Action: 'Position the playhead (start point)'; Keys: 'Left click'; Context: 'Timeline ruler (top time area) only'; Description: 'Sets where playback starts and where Space plays from.'),
+    (Action: 'Highlight / select a time range'; Keys: 'Left mouse button + drag'; Context: 'Timeline ruler or empty lane space'; Description: 'Marks a time range that Cut, Copy, Fade, Normalize and the other range commands then act on.'),
+    (Action: 'Move the selected range'; Keys: 'Right mouse button + drag'; Context: 'Timeline lane, with a range selected'; Description: 'Drags the highlighted range, with its audio, to a new position.'),
+    (Action: 'Open Timeline context menu'; Keys: 'Right click (no drag)'; Context: 'Timeline lane / ruler'; Description: 'Shows the commands that apply to whatever is under the mouse.'),
+    (Action: 'Resize the channel header column'; Keys: 'Left mouse button + drag'; Context: 'Timeline, header-side edge of the column divider'; Description: 'Makes the track-name column wider or narrower.'),
+    (Action: 'Move clip(s)'; Keys: 'Left mouse button + drag'; Context: 'Timeline, on a clip'; Description: 'Moves the clip, or all selected clips together, in time and between tracks.'),
+    (Action: 'Duplicate clip(s) while dragging'; Keys: 'Alt + left drag'; Context: 'Timeline, on a clip'; Description: 'Drags a copy and leaves the original where it was.'),
+    (Action: 'Add to / toggle clip selection'; Keys: 'Ctrl or Shift + click'; Context: 'Timeline, on a clip'; Description: 'Builds up a selection of several clips for moving, nudging, locking or deleting together.'),
+    (Action: 'Rubber-band select clips'; Keys: 'Ctrl or Shift + left drag'; Context: 'Timeline, empty lane space'; Description: 'Draws a box that selects every clip it touches.'),
+    (Action: 'Zoom the Timeline'; Keys: 'Mouse wheel'; Context: 'Timeline tab'; Description: 'Zooms the time axis in and out around the mouse.'),
+    (Action: 'Split clip at the playhead'; Keys: 'S'; Context: 'Timeline tab'; Description: 'Cuts the selected clip in two at the playhead.'),
+    (Action: 'Add marker at the playhead'; Keys: 'M'; Context: 'Timeline tab'; Description: 'Drops a named marker at the playhead; , and . jump between markers.'),
+    (Action: 'Toggle loop playback'; Keys: 'L'; Context: 'Timeline tab'; Description: 'Turns looping of the loop region on or off.'),
+    (Action: 'Set loop start'; Keys: '['; Context: 'Timeline tab'; Description: 'Makes the playhead position the start of the loop region.'),
+    (Action: 'Set loop end'; Keys: ']'; Context: 'Timeline tab'; Description: 'Makes the playhead position the end of the loop region.'),
+    (Action: 'Zoom to fit'; Keys: 'F'; Context: 'Timeline tab'; Description: 'Zooms so the whole project is visible.'),
+    (Action: 'Zoom to selection'; Keys: 'Z'; Context: 'Timeline tab'; Description: 'Zooms so the selected range or clip fills the view.'),
+    (Action: 'Zoom in'; Keys: '+'; Context: 'Timeline tab'; Description: 'Zooms in one step.'),
+    (Action: 'Zoom out'; Keys: '-'; Context: 'Timeline tab'; Description: 'Zooms out one step.'),
+    (Action: 'Previous marker'; Keys: ','; Context: 'Timeline tab'; Description: 'Moves the playhead to the marker before it.'),
+    (Action: 'Next marker'; Keys: '.'; Context: 'Timeline tab'; Description: 'Moves the playhead to the marker after it.'),
+    (Action: 'Nudge selected clip(s)'; Keys: 'Left / Right arrow'; Context: 'Timeline tab, with clips selected'; Description: 'Moves the selection one snap-grid step earlier or later (a few pixels when snapping is off).'),
+    (Action: 'Nudge selected clip(s) coarsely'; Keys: 'Shift + Left / Right arrow'; Context: 'Timeline tab, with clips selected'; Description: 'Moves the selection four grid steps at a time.'),
+    (Action: 'Play / stop the Timeline'; Keys: 'Space'; Context: 'Timeline tab, when no button or list has the focus'; Description: 'Starts playback from the playhead, or stops it (the playhead rewinds to where it started).'),
+    (Action: 'Play the Timeline from the beginning'; Keys: 'Shift + Space'; Context: 'Timeline tab, when no button or list has the focus'; Description: 'Starts playback from 0:00 whatever the playhead says.'),
+    (Action: 'Cut'; Keys: 'Ctrl+X'; Context: 'Timeline tab'; Description: 'Cuts the highlighted range, or the selected clip, to the clipboard.'),
+    (Action: 'Copy'; Keys: 'Ctrl+C'; Context: 'Timeline tab'; Description: 'Copies the highlighted range, or the selected clip, to the clipboard.'),
+    (Action: 'Paste'; Keys: 'Ctrl+V'; Context: 'Timeline tab'; Description: 'Pastes the clipboard at the playhead.'),
+    (Action: 'Lock / unlock selected clip(s)'; Keys: 'Ctrl+L'; Context: 'Timeline tab, with clips selected'; Description: 'A locked clip cannot be moved, trimmed, split or deleted until unlocked.'),
+    (Action: 'Move the selected track up'; Keys: 'Ctrl + Up arrow'; Context: 'Timeline tab, with a track selected'; Description: 'Swaps the track with the one above it (its Mixer strip follows).'),
+    (Action: 'Move the selected track down'; Keys: 'Ctrl + Down arrow'; Context: 'Timeline tab, with a track selected'; Description: 'Swaps the track with the one below it.'),
+    (Action: 'Previous main tab'; Keys: 'Ctrl + Page Up'; Context: 'Global (not while typing in a text field)'; Description: 'Switches to the tab on the left (Timeline, Mixer, Tracker ...).'),
+    (Action: 'Next main tab'; Keys: 'Ctrl + Page Down'; Context: 'Global (not while typing in a text field)'; Description: 'Switches to the tab on the right.')
   );
 
 procedure TfrmMain.LoadKeyHooksTab;
@@ -4166,6 +4456,7 @@ begin
       it.Caption := KeyHookTable[i].Action;
       it.SubItems.Add(KeyHookTable[i].Keys);
       it.SubItems.Add(KeyHookTable[i].Context);
+      it.SubItems.Add(KeyHookTable[i].Description);
       it.SubItems.Add('built-in (not reassignable)');
       it.Data := nil;
     end;
@@ -4178,6 +4469,7 @@ begin
         it.Caption := KeyHookActionName(h.Action);
         it.SubItems.Add(FKeyHooks.KeysToString(h.Modifiers, h.VirtualKey));
         it.SubItems.Add('Global (works even when UDAW is not the focused window)');
+        it.SubItems.Add(KeyHookDescription(h.Action));
         if not h.Enabled then status := 'disabled'
         else if h.Registered then status := 'OK'
         else status := 'FAILED: ' + h.LastError;
@@ -4349,6 +4641,40 @@ end;
   Ctrl+Y here is just another caller of the same thing.
   Every branch below corresponds to one row of KeyHookTable above - keep both
   in sync when adding, removing or rebinding a shortcut. }
+{ The Timeline tab's transport / clipboard keys that are not plain letters: Space, Shift+Space and
+  the Ctrl combinations. Space is left to a focused button, check box or list (it activates them);
+  Ctrl+X / C / V are the Tracker grid's own while that grid has the focus (TrkGridKey runs first). }
+function TfrmMain.TlTransportKey(var Key: Word; Shift: TShiftState): Boolean;
+begin
+  Result := True;
+  if FProject = nil then Exit(False);
+  if (Key = VK_SPACE) and ((Shift = []) or (Shift = [ssShift])) then
+  begin
+    if (ActiveControl is TGLButton) or (ActiveControl is TGLCheck) or (ActiveControl is TGLList) or
+       (ActiveControl is TGLTree) or (ActiveControl is TGLListView) or (ActiveControl is TGLCombo) then
+      Exit(False);
+    if FTlPlaying then btnTlStopClick(Self)
+    else if Shift = [ssShift] then TlPlayFromBeginningClick(Self)
+    else btnTlPlayClick(Self);
+  end
+  else if Shift = [ssCtrl] then
+    case Key of
+      Ord('X'): btnTlCutClick(Self);
+      Ord('C'): btnTlCopyClick(Self);
+      Ord('V'): btnTlPasteClick(Self);
+      Ord('L'): btnTlLockClipClick(Self);
+      VK_UP, VK_DOWN:
+        begin
+          if FTlSelectedTrackId >= 0 then FTlCtxTrackId := FTlSelectedTrackId;
+          if Key = VK_UP then btnTlTrackUpClick(Self) else btnTlTrackDownClick(Self);
+        end;
+    else
+      Result := False;
+    end
+  else
+    Result := False;
+end;
+
 { the main menu is drawn by mbMain (the form's own Menu is unassigned), so its
   shortcut keys are offered to the TMainMenu here }
 function TfrmMain.IsShortCut(var Message: TWMKey): Boolean;
@@ -4396,6 +4722,16 @@ begin
   inTextEditor := (ActiveControl is TCustomEdit) or (ActiveControl is TCustomMemo) or (ActiveControl is TGLEdit);
   if inTextEditor then Exit;   // leave native single-field undo/typing alone
 
+  { the Foley pads take their keys while the Foley page is in front }
+  if (Shift * [ssCtrl, ssAlt] = []) and FoleyPageShowing and (TFoleySampler.PadForKey(Key) >= 0) then
+  begin
+    FoleyEnsure;
+    if FFoley.KeyDown(TFoleySampler.PadForKey(Key)) then
+      FFoley.Hit(TFoleySampler.PadForKey(Key), True, chkFoleyTimeline.Checked, chkFoleyRecord.Checked);
+    Key := 0;
+    Exit;
+  end;
+
   { the Tracker's pattern grid takes its own editing keys while it has the focus }
   if TabIs(tabTracker) and (pgcTrk.ActivePage = tsTrkModule) and pbTracker.Focused then
     if TrkGridKey(Key, Shift) then Exit;
@@ -4412,6 +4748,20 @@ begin
   begin
     FCmds.Redo;
     RefreshTimelineTab;
+    Key := 0;
+    Exit;
+  end;
+
+  { Ctrl+Page Up / Page Down: the previous / next main tab }
+  if (Shift = [ssCtrl]) and ((Key = VK_PRIOR) or (Key = VK_NEXT)) then
+  begin
+    pgc.SelectNextPage(Key = VK_NEXT);
+    Key := 0;
+    Exit;
+  end;
+
+  if (pgc.ActivePage = tabTimeline) and not DockHasFocus and TlTransportKey(Key, Shift) then
+  begin
     Key := 0;
     Exit;
   end;
@@ -4553,7 +4903,7 @@ begin
   end;
   AInfo.Row('Window', '%d x %d at %d,%d', [Width, Height, Left, Top]);
   AInfo.Row('Client area', '%d x %d', [ClientWidth, ClientHeight]);
-  AInfo.Row('Frame rate display', IfThen(lblGlFps.Visible, 'shown', 'hidden'));
+  AInfo.Row('Frame rate display', IfThen(mbMain.StatusText <> '', 'shown', 'hidden'));
 
   AInfo.Section(Format('OpenGL extensions (%d)', [Length(ext)]));
   for e in ext do AInfo.Row(e, 'supported');
@@ -4809,21 +5159,127 @@ begin
     FPS_FULLSCREEN: want := want and full;
     FPS_WINDOWED: want := want and not full;
   end;
-  lblGlFps.Visible := want;
-  tmrGlFps.Enabled := want;
-  if want then
+  { the read-out is drawn by the menu bar itself, in a lowered bevel box at its far right }
+  lblGlFps.Visible := False;
+  FFpsInMenu := want;
+  { the timer always runs: the Timeline's own FPS read-out needs the sample whether or not the menu bar shows it }
+  tmrGlFps.Enabled := True;
+  tmrGlFpsTimer(nil);
+  UpdateTopStatus;
+end;
+
+{ the box at the right of the menu bar: the frame rate (when Settings asks for it) and the audio output
+  device the engine really opened - what Settings > Output device resolved to - with its backend }
+{ "Speaker/Headphone (Realtek High Definition Audio)" -> "Speaker (Realtek)": the first word of the
+  endpoint name plus the first word of the driver/adapter name - short, but still recognisable }
+function ShortDeviceName(const AName: string): string;
+
+  function FirstWord(const S: string; AMax: Integer): string;
+  var
+    i: Integer;
   begin
-    lblGlFps.Left := ClientWidth - lblGlFps.Width - 8;
-    lblGlFps.BringToFront;
+    Result := Trim(S);
+    for i := 1 to Length(Result) do
+      if CharInSet(Result[i], [' ', '/', '-', ',']) then
+      begin
+        Result := Copy(Result, 1, i - 1);
+        Break;
+      end;
+    if Length(Result) > AMax then Result := Copy(Result, 1, AMax);
   end;
+
+var
+  p, q: Integer;
+  vendor: string;
+begin
+  p := Pos('(', AName);
+  if p <= 1 then
+  begin
+    if ContainsText(AName, 'headphone') then Exit('Headphones');
+    Exit(FirstWord(AName, 14));
+  end;
+  vendor := Copy(AName, p + 1, MaxInt);
+  q := Pos(')', vendor);
+  if q > 0 then vendor := Copy(vendor, 1, q - 1);
+  if ContainsText(Copy(AName, 1, p - 1), 'headphone') then Result := 'Headphones'
+  else Result := FirstWord(Copy(AName, 1, p - 1), 10);
+  vendor := FirstWord(vendor, 9);
+  if vendor <> '' then Result := Result + ' (' + vendor + ')';
+end;
+
+procedure TfrmMain.UpdateTopStatus;
+var
+  txt, out, nm: string;
+begin
+  mbMain.OnOutClick := OutFieldClick;
+  mbMain.OnCloseClick := CloseButtonClick;
+  txt := '';
+  if FFpsInMenu then
+    txt := Format('%.0f FPS  (%.0f draws/s)  %s', [FGlFps, FGlDraws,
+      IfThen(FDisplay.IsFullScreen, 'full screen', 'window')]);
+  if (App = nil) or (App.Audio = nil) or (App.Audio.State in [aesIdle, aesFailed]) then
+    out := 'Audio: not open'
+  else
+  begin
+    nm := App.Audio.Granted.RenderDeviceName;
+    if nm = '' then nm := 'System default';
+    out := 'Out: ' + ShortDeviceName(nm);
+  end;
+  mbMain.StatusText := txt;
+  mbMain.OutText := out;
+end;
+
+{ the Out field in the menu bar: lists the output devices; picking one changes Settings > Output
+  device and goes through the same auto-save as the Settings page (saved, and the stream re-opened) }
+{ the X in the menu bar's top right corner (windowed and full screen): closes the application }
+procedure TfrmMain.CloseButtonClick(Sender: TObject);
+begin
+  Close;
+end;
+
+procedure TfrmMain.OutFieldClick(Sender: TObject);
+var
+  pm: TPopupMenu;
+  mi: TMenuItem;
+  i: Integer;
+  r: TRect;
+  nm, curId: string;
+begin
+  if App = nil then Exit;
+  curId := App.Config.GetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_DEVICE, '');
+  RefreshOutputDeviceCombo(curId);
+  pm := TPopupMenu.Create(Self);
+  for i := 0 to cboSetOutDevice.Items.Count - 1 do
+  begin
+    nm := cboSetOutDevice.Items[i];
+    if Length(nm) > 26 then nm := Copy(nm, 1, 25) + '...';
+    mi := TMenuItem.Create(pm);
+    mi.Caption := nm;
+    mi.Tag := i;
+    mi.RadioItem := True;
+    mi.Checked := i = cboSetOutDevice.ItemIndex;
+    mi.OnClick := OutDevicePicked;
+    pm.Items.Add(mi);
+  end;
+  if FOutPopup <> nil then FOutPopup.Free;
+  FOutPopup := pm;
+  r := mbMain.OutRectOnScreen;
+  GLShowPopup(pm, r.Left, r.Bottom);
+end;
+
+procedure TfrmMain.OutDevicePicked(Sender: TObject);
+begin
+  if not (Sender is TMenuItem) then Exit;
+  if TMenuItem(Sender).Tag = cboSetOutDevice.ItemIndex then Exit;
+  cboSetOutDevice.ItemIndex := TMenuItem(Sender).Tag;
+  SettingsAutoSave(cboSetOutDevice);
+  UpdateTopStatus;
 end;
 
 procedure TfrmMain.tmrGlFpsTimer(Sender: TObject);
 begin
   GLSampleFrames(FGlFps, FGlDraws, FGlSurfaceCount);
-  if lblGlFps.Visible then
-    lblGlFps.Caption := Format('%.0f FPS  (%.0f draws/s)  %s', [FGlFps, FGlDraws,
-      IfThen(FDisplay.IsFullScreen, 'full screen', 'window')]);
+  UpdateTopStatus;
 end;
 
 { the drag-in registration belongs to the window handle: a screen mode change re-creates the
@@ -4894,6 +5350,7 @@ end;
 procedure TfrmMain.tmrUITimer(Sender: TObject);
 begin
   if FSyncProgressActive then JobRefreshStatus;   // elapsed time keeps moving for background jobs too
+  if GetTickCount64 - FPlgLast > 5000 then RefreshPluginsMenu(False);   // new plug-in files appear in the menu
   RenderJobsPollEscape;
   if FTlPlaying then ScoreFollowPlayhead;
   {$IFNDEF FPC}
@@ -5809,7 +6266,7 @@ var
   client: TLumaClient;
   cents: Double;
 begin
-  if not RequireRegistration('Testing an AI provider') then Exit;
+  if not RequireRegistration('Testing an AI/SI provider') then Exit;
   if edtAiApiKey.Text = '' then
   begin
     memAiLog.Lines.Add('Luma: no key entered.');
@@ -5870,7 +6327,7 @@ begin
     end;
   if pid = '' then
   begin
-    memAiLog.Lines.Add('Music tab: needs a Claude, OpenAI or DeepSeek key (Luma cannot write music). Save one on the AI Selection tab.');
+    memAiLog.Lines.Add('Music tab: needs a Claude, OpenAI or DeepSeek key (Luma cannot write music). Save one on the AI/SI Selection tab.');
     Exit;
   end;
   provider := CreateAIProvider(pid, key);
@@ -5923,7 +6380,7 @@ var
   req: TLumaRequest;
   i: Integer;
 begin
-  if not RequireRegistration('AI video/image generation (Luma)') then Exit;
+  if not RequireRegistration('AI/SI video/image generation (Luma)') then Exit;
   if chkLumaTabOnly.Checked then
   begin
     GenerateMusicTabPdf;
@@ -6079,7 +6536,7 @@ var
   resp: TAIResponse;
   msg: TAIMessage;
 begin
-  if not RequireRegistration('Testing an AI provider') then Exit;
+  if not RequireRegistration('Testing an AI/SI provider') then Exit;
   if (cboAiProvider.ItemIndex < 0) or (cboAiProvider.ItemIndex > High(AI_KNOWN_PROVIDERS)) then Exit;
   pid := AI_KNOWN_PROVIDERS[cboAiProvider.ItemIndex];
   if not (HasAIApiKey(pid) and GetAIApiKey(pid, key) and (key <> '')) then
@@ -6698,7 +7155,7 @@ end;
 
 procedure TfrmMain.chkAiMcpExposeClick(Sender: TObject);
 begin
-  if chkAiMcpExpose.Checked and not RequireRegistration('The MCP server (AI tool access)') then
+  if chkAiMcpExpose.Checked and not RequireRegistration('The MCP server (AI/SI tool access)') then
   begin
     chkAiMcpExpose.Checked := False;
     Exit;
@@ -6847,7 +7304,7 @@ var
   errMsg, resultText, mcpFragment, confirmList, roundResultsLog: string;
   batchAllowed, truncated, hadMutatingCall, keepGoing, sawTrackOrSampleTool, placedSampleEver, execOk: Boolean;
 begin
-  if not RequireRegistration('AI chat') then Exit;
+  if not RequireRegistration('AI/SI chat') then Exit;
   if (cboAiProvider.ItemIndex < 0) or (cboAiProvider.ItemIndex > High(AI_KNOWN_PROVIDERS)) then Exit;
   pid := AI_KNOWN_PROVIDERS[cboAiProvider.ItemIndex];
 
@@ -6974,7 +7431,7 @@ begin
               if destructiveCount > 0 then
               begin
                 batchAllowed := MessageDlg(Format(
-                  'The AI wants to make %d change(s) to build this arrangement:' + sLineBreak + sLineBreak +
+                  'The AI/SI wants to make %d change(s) to build this arrangement:' + sLineBreak + sLineBreak +
                   '%s' + IfThen(destructiveCount > 20, '  ... and ' + IntToStr(destructiveCount - 20) + ' more' + sLineBreak, '') +
                   sLineBreak + 'Apply all of them?',
                   [destructiveCount, confirmList]), mtConfirmation, [mbYes, mbNo], 0) = mrYes;
@@ -6985,7 +7442,7 @@ begin
 
             if batchAllowed then
             begin
-              ShowStatusProgress('Applying AI actions...', Length(calls));
+              ShowStatusProgress('Applying AI/SI actions...', Length(calls));
               dispatcher := TAIToolDispatcher.Create(FProject, FCmds);
               try
                 dispatcher.OnGetBrowserRoots := GetAiBrowserRoots;
@@ -7004,7 +7461,7 @@ begin
                     Continue;
                   end;
                   if IsDestructiveTool(calls[i].Kind) and not ABatchConfirm then
-                    if MessageDlg(Format('The AI wants to run %s. Allow it?', [AIToolKindId(calls[i].Kind)]),
+                    if MessageDlg(Format('The AI/SI wants to run %s. Allow it?', [AIToolKindId(calls[i].Kind)]),
                       mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
                     begin
                       LogAiToolResult(Format('%s: declined by user', [AIToolKindId(calls[i].Kind)]));
@@ -7115,7 +7572,7 @@ begin
         { Esc: JobCancelNow undid this round; undo the earlier rounds of this prompt too }
         while (FCmds <> nil) and (FCmds.UndoCount > chatMark) and FCmds.CanUndo do FCmds.Undo;
         RefreshTimelineTab;
-        stbMain.SimpleText := 'AI request CANCELLED (Esc) - all changes it made were discarded.';
+        stbMain.SimpleText := 'AI/SI request CANCELLED (Esc) - all changes it made were discarded.';
         memAiLog.Lines.Add('--- cancelled with Esc: every change this request made was undone ---');
       end;
       on E: Exception do
@@ -7156,7 +7613,7 @@ var
   pid, brief, prompt: string;
   roots: TArray<string>;
 begin
-  if not RequireRegistration('AI tune generation') then Exit;
+  if not RequireRegistration('AI/SI tune generation') then Exit;
   if (cboAiProvider.ItemIndex < 0) or (cboAiProvider.ItemIndex > High(AI_KNOWN_PROVIDERS)) then Exit;
   pid := AI_KNOWN_PROVIDERS[cboAiProvider.ItemIndex];
   if SameText(pid, 'suno') then
@@ -7275,7 +7732,7 @@ var
   analysis: TAudioAnalysisResult;
   i: Integer;
 begin
-  if not RequireRegistration('The AI mixing assistant') then Exit;
+  if not RequireRegistration('The AI/SI mixing assistant') then Exit;
   if FProject = nil then Exit;
   FAiSessionDoc := FProject;
   EnsureMixSession;
@@ -7306,7 +7763,7 @@ procedure TfrmMain.btnAiMixCompareClick(Sender: TObject);
 begin
   if FMixSession = nil then Exit;
   FMixSession.CompareToggle;
-  memAiLog.Lines.Add('Mixing: toggled Original <-> AI Recommendation.');
+  memAiLog.Lines.Add('Mixing: toggled Original <-> AI/SI Recommendation.');
 end;
 
 procedure TfrmMain.btnAiMixApplyClick(Sender: TObject);
@@ -7327,7 +7784,7 @@ procedure TfrmMain.btnAiSuggestMasteringClick(Sender: TObject);
 var
   analysis: TAudioAnalysisResult;
 begin
-  if not RequireRegistration('The AI mastering assistant') then Exit;
+  if not RequireRegistration('The AI/SI mastering assistant') then Exit;
   if FProject = nil then Exit;
   FAiSessionDoc := FProject;
   EnsureMasterSession;
@@ -7354,7 +7811,7 @@ procedure TfrmMain.btnAiMasterCompareClick(Sender: TObject);
 begin
   if FMasterSession = nil then Exit;
   FMasterSession.CompareToggle;
-  memAiLog.Lines.Add('Mastering: toggled Original <-> AI Recommendation.');
+  memAiLog.Lines.Add('Mastering: toggled Original <-> AI/SI Recommendation.');
 end;
 
 procedure TfrmMain.btnAiMasterApplyClick(Sender: TObject);
@@ -7497,7 +7954,7 @@ var
   req: TSunoGenerationRequest;
   kind: TSunoApiKind;
 begin
-  if not RequireRegistration('AI music generation (Suno)') then Exit;
+  if not RequireRegistration('AI/SI music generation (Suno)') then Exit;
   if (FProject = nil) or (FSunoJob <> nil) then Exit;
   if chkSunoCustom.Checked and (Length(memSunoLyrics.Text) > SUNO_LYRICS_MAX_CHARS) then
   begin
@@ -8591,7 +9048,7 @@ begin
   end;
   dlg := TfrmProjectStart.Create(Self);
   try
-    dlg.Prepare('Version ' + UDAWDisplayVersionString, recent, True);
+    dlg.Prepare(UDAWVersionBannerText, recent, True);
     dlg.ShowModal;
     if dlg.ShowOnStartup <> App.Config.GetBool(CFG_SEC_GENERAL, CFG_GEN_SHOW_START, True) then
     begin
@@ -8610,6 +9067,17 @@ begin
         end;
       pscHelp: btnHelpAboutClick(nil);
       pscAbout: btnAboutClick(nil);
+      pscSettings:
+        begin
+          pgc.ActivePage := tabSettings;
+          pgcChange(pgc);
+        end;
+      pscTracker: ShowDockPage(tabTracker);
+      pscFoley: ShowDockPage(tabFoley);
+      pscDrumPad: ShowDockPage(tabPattern);
+      pscPianoRoll: ShowDockPage(tabMIDI);
+      pscInstrument: ShowDockPage(tabInst);
+      pscAiSi: ShowDockPage(tabDockAi);
     end;
   finally
     dlg.Free;
@@ -8660,6 +9128,8 @@ begin
     project-specific, so they are left as-is across the switch. }
   while (FOpenVST2Editors <> nil) and (FOpenVST2Editors.Count > 0) do
     FOpenVST2Editors[0].Close;
+  while (FOpenPyWindows <> nil) and (FOpenPyWindows.Count > 0) do
+    FOpenPyWindows[0].Close;
   if FSunoJob <> nil then FSunoJob.Cancel;
   FSunoJob := nil;
   if FLumaJob <> nil then FLumaJob.Cancel;
@@ -8735,6 +9205,7 @@ begin
   { the Mixer strips (and the effects assigned to them) come from the project just read }
   FMixSig := '';
   RefreshMixerTab;
+  PyRestoreInsertsOnLoad;
 end;
 
 procedure TfrmMain.btnProjectNewClick(Sender: TObject);
@@ -8752,6 +9223,8 @@ begin
   StopAllPlayback;
   while (FOpenVST2Editors <> nil) and (FOpenVST2Editors.Count > 0) do
     FOpenVST2Editors[0].Close;
+  while (FOpenPyWindows <> nil) and (FOpenPyWindows.Count > 0) do
+    FOpenPyWindows[0].Close;
   if FRecoverySessionActive then
   begin
     FRecovery.EndSessionClean;
@@ -8839,7 +9312,8 @@ procedure SelOrAddCombo(ACombo: TGLCombo; const AValue: string); forward;
   includes right after a project is opened. }
 procedure TfrmMain.RefreshExportSettings;
 const
-  BITRATES: array[0..7] of Integer = (0, 1000, 2000, 4000, 8000, 12000, 20000, 40000);
+  BITRATES: array[0..11] of Integer = (0, EXPORT_VIDEO_PRESERVE, 1000, 2000, 4000, 8000, 12000, 20000,
+    30000, 40000, 60000, 80000);
   WIDTHS: array[0..6] of Integer = (0, 640, 1280, 1920, 2560, 3840, 7680);
   AUDIO_RATES: array[0..6] of Integer = (0, 96, 128, 160, 192, 256, 320);
 var
@@ -8852,6 +9326,7 @@ begin
     if cboExpBitrate.Items.Count = 0 then
       for i := 0 to High(BITRATES) do
         if BITRATES[i] = 0 then cboExpBitrate.Items.Add('Automatic')
+        else if BITRATES[i] < 0 then cboExpBitrate.Items.Add('Preserve original')
         else cboExpBitrate.Items.Add(IntToStr(BITRATES[i]) + ' kbps');
     if cboExpAudio.Items.Count = 0 then
       for i := 0 to High(AUDIO_RATES) do
@@ -8864,6 +9339,7 @@ begin
     es := FProject.ExportSettings;
     { a value saved by another build that is not in the list is shown as-is }
     if es.VideoBitrateKbps = 0 then cboExpBitrate.ItemIndex := 0
+    else if es.VideoBitrateKbps < 0 then SelOrAddCombo(cboExpBitrate, 'Preserve original')
     else SelOrAddCombo(cboExpBitrate, IntToStr(es.VideoBitrateKbps) + ' kbps');
     if es.AudioBitrateKbps = 0 then cboExpAudio.ItemIndex := 0
     else SelOrAddCombo(cboExpAudio, IntToStr(es.AudioBitrateKbps) + ' kbps');
@@ -8886,7 +9362,9 @@ begin
   es.AudioBitrateKbps := 0;
   if cboExpAudio.ItemIndex > 0 then
     es.AudioBitrateKbps := StrToIntDef(Copy(cboExpAudio.Text, 1, Pos(' ', cboExpAudio.Text) - 1), 0);
-  if cboExpBitrate.ItemIndex > 0 then
+  if SameText(cboExpBitrate.Text, 'Preserve original') then
+    es.VideoBitrateKbps := EXPORT_VIDEO_PRESERVE
+  else if cboExpBitrate.ItemIndex > 0 then
     es.VideoBitrateKbps := StrToIntDef(Copy(cboExpBitrate.Text, 1, Pos(' ', cboExpBitrate.Text) - 1), 0);
   if cboExpWidth.ItemIndex > 0 then
     es.MaxWidth := StrToIntDef(Copy(cboExpWidth.Text, 1, Pos(' ', cboExpWidth.Text) - 1), 0);
@@ -10133,7 +10611,7 @@ begin
   MessageDlg(AFeature + ' is not available in the unregistered version of UDAW.' +
     sLineBreak + sLineBreak +
     'Enter the username, password and serial number key from your ultimanium.com ' +
-    'account on this Registration tab to unlock exporting and AI.',
+    'account on this Registration tab to unlock exporting and AI/SI.',
     mtInformation, [mbOK], 0);
   }
   {$ENDIF}
@@ -10196,7 +10674,7 @@ begin
       edtRegSerial.Text := TUDAWLicense.CachedSerial;
     end;
     lblRegStatus.Font.Color := clMaroon;
-    lblRegDetail.Caption := Trim(TUDAWLicense.LastMessage + ' Exporting and AI are disabled.');
+    lblRegDetail.Caption := Trim(TUDAWLicense.LastMessage + ' Exporting and AI/SI are disabled.');
     Caption := baseCaption + ' - UNREGISTERED';
   end;
   btnRegUnregister.Enabled := TUDAWLicense.IsRegistered or TUDAWLicense.HasCachedCredentials;
@@ -10232,7 +10710,7 @@ begin
           begin
             edtRegPassword.Text := '';
             TUDAWLicense.StartHeartbeat;
-            MessageDlg('UDAW is now registered. Exporting and AI are unlocked.',
+            MessageDlg('UDAW is now registered. Exporting and AI/SI are unlocked.',
               mtInformation, [mbOK], 0);
           end;
         lsOffline:
@@ -10258,7 +10736,7 @@ end;
 procedure TfrmMain.btnRegUnregisterClick(Sender: TObject);
 begin
   {$IFNDEF FPC}
-  if MessageDlg('Unregister UDAW on this computer? Exporting and AI will be ' +
+  if MessageDlg('Unregister UDAW on this computer? Exporting and AI/SI will be ' +
     'disabled until you register again.', mtConfirmation, [mbYes, mbNo], 0) <> mrYes then Exit;
   TUDAWLicense.Unregister;
   edtRegPassword.Text := '';
@@ -10274,7 +10752,7 @@ begin
   btnRegInstallUpdate.Enabled := False;
   lblRegUpdateStatus.Caption := 'Checking for updates...';
   ShowStatusBusy('Checking for updates...');
-  TThread.CreateAnonymousThread(
+  UDAWAnonymousThread('update check',
     procedure
     var
       info: TUDAWUpdateInfo;
@@ -10324,7 +10802,7 @@ begin
   btnRegCheckUpdate.Enabled := False;
   btnRegInstallUpdate.Enabled := False;
   ShowStatusProgress('Downloading the update...', 100);
-  TThread.CreateAnonymousThread(
+  UDAWAnonymousThread('update download',
     procedure
     var
       err: string;
@@ -10762,6 +11240,7 @@ begin
     begin
       if not FileLooksLikeMptm(APath) then
         raise Exception.Create('not a recognisable IMPM (IT / MPTM) module');
+      MptmSetSampleFolder(ExtractFilePath(ExpandFileName(APath)));
       MptmToModule(data, mptmInfo).Free;
       FCmds.Perform(TImportMptmCommand.Create(FProject, data, name));
       summary := mptmInfo.Summary;
@@ -10852,7 +11331,7 @@ begin
   end;
 end;
 
-{ Import > ScreamTracker .s3m / .stm or Composer .669 module onto the Timeline (the project's
+{ Import > ScreamTracker .s3m module onto the Timeline (the project's
   own tracker module is left alone, as with the other module imports) }
 procedure TfrmMain.mnuTlImportLegacyClick(Sender: TObject);
 var
@@ -10897,6 +11376,7 @@ begin
     finally
       fs.Free;
     end;
+    MptmSetSampleFolder(ExtractFilePath(ExpandFileName(dlgOpenMptm.FileName)));
     module := MptmToModule(data, info);
     try
       ImportTrackerModuleToTimeline(module, dlgOpenMptm.FileName, 'IT/MPTM');
@@ -11633,6 +12113,7 @@ end;
   between ticks and all of which are wasted work at near-frame rate. }
 procedure TfrmMain.RefreshTimelineTab(AFull: Boolean);
 var
+  masterDb: Double;
   tl: TTimeline;
   sel: TTimelineClip;
   trk: TTimelineTrack;
@@ -11692,12 +12173,13 @@ begin
   ibTlTransport.ActiveIndex := IfThen(FTlPlaying, 1, -1);   // 'play' is the second button
   ibTlTransport.LitMask := TlTransportLit;
 
-  lblTlMasterVol.Caption := Format('Master Vol  %.1f dB', [tl.MasterVolumeDb]);
+  masterDb := TlMasterVolumeDb;
+  lblTlMasterVol.Caption := Format('%s  %.1f dB', [IfThen(TlMasterIsTracker, 'Tracker Master', 'Master Vol'), masterDb]);
   if not FTlVolGuard then
   begin
     FTlVolGuard := True;
     try
-      tbTlMasterVol.Position := Round(EnsureRange(tl.MasterVolumeDb, -60.0, 12.0));
+      tbTlMasterVol.Position := Round(EnsureRange(masterDb, -60.0, 12.0));
     finally
       FTlVolGuard := False;
     end;
@@ -11794,13 +12276,37 @@ begin
 end;
 
 procedure TfrmMain.tbTlMasterVolChange(Sender: TObject);
+var
+  cmd: TSetMixStripFloatCommand;
 begin
   if FTlVolGuard or (FProject = nil) then Exit;
   { A real gain stage (UDAW.Timeline.Playback.TTimelinePlayer.RenderBlock),
     not just a slider - and undo-safe/mergeable like every other DAW edit
     here, so riding this during playback is one undo step. }
-  FCmds.Perform(TSetTimelineMasterVolumeCommand.Create(FProject, tbTlMasterVol.Position));
-  lblTlMasterVol.Caption := Format('Master Vol  %.1f dB', [FProject.Timeline.MasterVolumeDb]);
+  if TlMasterIsTracker then
+  begin
+    { the Tracker is the active source: this slider IS the Tracker mixer's master fader
+      (the player reads that strip live), same mergeable command the Mixer tab uses }
+    cmd := TSetMixStripFloatCommand.Create(FProject, FProject.TrackerMixer.MasterStrip.Id, mffFader, tbTlMasterVol.Position);
+    cmd.TrackerSide := True;
+    FCmds.Perform(cmd);
+  end
+  else
+    FCmds.Perform(TSetTimelineMasterVolumeCommand.Create(FProject, tbTlMasterVol.Position));
+  lblTlMasterVol.Caption := Format('%s  %.1f dB', [IfThen(TlMasterIsTracker, 'Tracker Master', 'Master Vol'), TlMasterVolumeDb]);
+end;
+
+{ The Tracker plays through FProject.TrackerMixer, the Timeline through its own gain stage;
+  the Timeline's master slider follows whichever source is playing. }
+function TfrmMain.TlMasterIsTracker: Boolean;
+begin
+  Result := FTrkPlaying and (FProject <> nil) and (FProject.TrackerMixer.MasterStrip <> nil);
+end;
+
+function TfrmMain.TlMasterVolumeDb: Double;
+begin
+  if TlMasterIsTracker then Result := FProject.TrackerMixer.MasterStrip.FaderDb
+  else Result := FProject.Timeline.MasterVolumeDb;
 end;
 
 procedure TfrmMain.btnTlZoomInClick(Sender: TObject);
@@ -12207,6 +12713,7 @@ begin
     FTlVideo.Prepare(FProject.Timeline, FProject.Timeline.PlayheadSeconds);
   end;
   TlStagePushToPlayer;   // a launch made while stopped starts with the transport
+  PyAuditionReleaseAll;   // a Python plug-in window that was listening is told the output moved on
   App.Audio.SetSource(FTlPlayer.AsSource);
   if (FTlMixerProc.LastError <> '') and not FTlMixerProc.IsPrepared then
     Logger.Warn('ui', 'Mixer routing is invalid (' + FTlMixerProc.LastError +
@@ -13515,6 +14022,7 @@ begin
     FChordsVisible := not FChordsVisible;
     RefreshTimelineTab;
   end
+  else if AId = 'foley' then TlToggleFoley
   else if AId = 'tostart' then TlGotoEnd(False)
   else if AId = 'toend' then TlGotoEnd(True)
   else if AId = 'record' then ShowDockPage(tabRecording)
@@ -13814,14 +14322,47 @@ begin
 end;
 
 { the master volume + meter group sits at the band's right edge }
-procedure TfrmMain.pnlTimelineTopResize(Sender: TObject);
+{ the master volume block sits in the tab row, after the last tab (Browser) and a separator: it fits
+  the height of the tab row and never makes it taller }
+procedure TfrmMain.PlaceMasterBlock;
 var
-  right: Integer;
+  r: TRect;
+  x, rowH: Integer;
+
+  function Mid(AHeight: Integer): Integer;
+  begin
+    Result := r.Top + (rowH - AHeight) div 2;
+  end;
+
 begin
-  right := pnlTimelineTop.Width - 12;
-  pbTlMeters.Left := right - pbTlMeters.Width;
-  tbTlMasterVol.Left := pbTlMeters.Left - tbTlMasterVol.Width - 8;
-  lblTlMasterVol.Left := tbTlMasterVol.Left + 2;
+  if (pgc = nil) or (bvlTlMasterSep = nil) or (pbTlMeters = nil) then Exit;   // still being streamed
+  r := pgc.LastTabRect;
+  rowH := r.Bottom - r.Top;
+  x := r.Right + 14;
+  bvlTlMasterSep.SetBounds(x, Mid(20), 2, 20);
+  Inc(x, 14);
+  lblTlMasterVol.SetBounds(x, Mid(15), lblTlMasterVol.Width, 15);
+  Inc(x, lblTlMasterVol.Width + 6);
+  tbTlMasterVol.SetBounds(x, Mid(22), tbTlMasterVol.Width, 22);
+  Inc(x, tbTlMasterVol.Width + 10);
+  pbTlMeters.SetBounds(x, Mid(24), pbTlMeters.Width, 24);
+  { too narrow a window: leave the block out rather than draw it over the edge }
+  bvlTlMasterSep.Visible := x + pbTlMeters.Width <= pgc.ClientWidth;
+  lblTlMasterVol.Visible := bvlTlMasterSep.Visible;
+  tbTlMasterVol.Visible := bvlTlMasterSep.Visible;
+  pbTlMeters.Visible := bvlTlMasterSep.Visible;
+  if bvlTlMasterSep.Visible then
+  begin
+    bvlTlMasterSep.BringToFront;
+    lblTlMasterVol.BringToFront;
+    tbTlMasterVol.BringToFront;
+    pbTlMeters.BringToFront;
+  end;
+end;
+
+procedure TfrmMain.pgcResize(Sender: TObject);
+begin
+  PlaceMasterBlock;
 end;
 
 
@@ -14284,7 +14825,7 @@ begin
       cv.TextRect(Rect(x1, y0 + 3, x2, y0 + LANE_MARK_H - 2), x1 + 4,
         y0 + 3 + (LANE_MARK_H - 5 - cv.TextHeight(rg.Name)) div 2, rg.Name);
       if rg.Locked and (x2 - x1 > 40) then
-        TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, y0 + 3, x2 - 3, y0 + LANE_MARK_H - 2), theme.Text);
+        TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, y0 + 3, x2 - 3, y0 + LANE_MARK_H - 2), theme.LockColor);
     end;
     for j := 0 to tl.MarkerCount - 1 do
     begin
@@ -14300,7 +14841,7 @@ begin
       cv.Font.Color := theme.Text;
       cv.TextOut(Round(sx) + 11, y0 + 3, mk.Name);
       if mk.Locked then
-        TGLIconBar.DrawIcon(cv, 'lock', Rect(Round(sx) + 14 + cv.TextWidth(mk.Name), y0 + 3, Round(sx) + 30 + cv.TextWidth(mk.Name), y0 + 18), theme.Text);
+        TGLIconBar.DrawIcon(cv, 'lock', Rect(Round(sx) + 14 + cv.TextWidth(mk.Name), y0 + 3, Round(sx) + 30 + cv.TextWidth(mk.Name), y0 + 18), theme.LockColor);
     end;
     if FLaneDragging then
     begin
@@ -14340,7 +14881,7 @@ begin
         cv.Font.Color := clBlack;
         cv.TextRect(Rect(x1 + 2, yC + 3, Max(x2 - 1, x1 + 6), yT - 3), x1 + 6, yC + 6, chd.Name);
         if chd.Locked and (x2 - x1 > 40) then
-          TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, yC + 3, x2 - 3, yT - 3), clBlack);
+          TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, yC + 3, x2 - 3, yT - 3), theme.LockColor);
       end;
     end;
 
@@ -15170,7 +15711,7 @@ end;
 procedure TfrmMain.trTlRightDblClick(Sender: TObject);
 var
   node: TGLTreeNode;
-  n, trackId: Integer;
+  n: Integer;
   it: TRightItem;
   strip: TMixStrip;
   mi: TMenuItem;
@@ -15190,8 +15731,11 @@ begin
       end;
     RK_TRKINSTR:
       begin
+        { opens the instrument in the WAV editor (adding it to the Timeline stays on the
+          Instruments page's Add button) }
         cboTrkInstrSel.ItemIndex := it.Index;
-        btnTrkInstrAddTimelineClick(nil);
+        cboTrkInstrSelChange(nil);
+        TrkInstrEditWav;
       end;
     RK_FXSCAN:
       begin
@@ -15223,12 +15767,7 @@ begin
         RefreshMixerTab;
       end;
     RK_FILE:
-      begin
-        trackId := TlSelectedAudioTrackId;
-        if trackId < 0 then trackId := TlNewAudioTrackId;
-        if ImportBrowserFileToTimeline(it.Path, trackId, FProject.Timeline.PlayheadSeconds) then
-          RefreshTimelineTab;
-      end;
+      TlEditLibrarySample(it.Path);   // dragging the sample onto the Timeline adds it at the playhead
     RK_TRKFILE:
       ImportTrackerFileToTimeline(it.Path);
     RK_DIR:
@@ -15444,6 +15983,9 @@ begin
     begin
       pnl := TDrumInstrumentPanel.CreateForNote(Self, n);
       pnl.Parent := sbDrumPanels;
+      { folded or open as the project last left it (set before the toggle handler is connected) }
+      i := FProject.DrumKit.IndexOfNote(n);
+      if (i >= 0) and FProject.DrumKit[i].Collapsed then pnl.Collapsed := True;
       pnl.HeadColor := DrumPadColor(n);
       pnl.OnChanged := DrumPanelChanged;
       pnl.OnLoad := DrumPanelLoad;
@@ -15502,7 +16044,11 @@ begin
   x := 5;
   for i := 0 to FDrumPanels.Count - 1 do
   begin
-    FDrumPanels[i].SetBounds(x - posX, 6 - pos, FDrumPanels[i].Width, FDrumPanels[i].Height);
+    { a collapsed panel is exactly as tall as the pad grid beside it, and starts level with it }
+    if FDrumPanels[i].Collapsed then
+      FDrumPanels[i].SetBounds(x - posX, -pos, FDrumPanels[i].Width, pbDrumPads.Height)
+    else
+      FDrumPanels[i].SetBounds(x - posX, 6 - pos, FDrumPanels[i].Width, DRUM_PANEL_H);
     Inc(x, FDrumPanels[i].Width + 5);
   end;
   lblDrumEmpty.Visible := FDrumPanels.Count = 0;
@@ -15600,7 +16146,25 @@ begin
 end;
 
 procedure TfrmMain.DrumPanelToggle(Sender: TObject);
+var
+  i: Integer;
+  d: TDrumKitPadData;
 begin
+  { the project remembers which instrument panels are folded }
+  if (FProject <> nil) and (Sender is TDrumInstrumentPanel) then
+  begin
+    i := FProject.DrumKit.IndexOfNote(TDrumInstrumentPanel(Sender).Note);
+    if i >= 0 then
+    begin
+      d := FProject.DrumKit[i];
+      if d.Collapsed <> TDrumInstrumentPanel(Sender).Collapsed then
+      begin
+        d.Collapsed := TDrumInstrumentPanel(Sender).Collapsed;
+        FProject.DrumKit.Put(d);
+        FProject.Touch;
+      end;
+    end;
+  end;
   DrumPanelsLayout;
 end;
 
@@ -15810,9 +16374,9 @@ var
   cv: TGLCanvas;
   th: TUDAWTheme;
   slot, note: Integer;
-  r: TRect;
+  r, body: TRect;
   base, face: TColor;
-  loaded: Boolean;
+  loaded, held: Boolean;
   pad: TDrumPad;
   s: string;
 begin
@@ -15834,18 +16398,23 @@ begin
     else face := TlMix(th.PanelBackground, base, 0.14);
     if pad.Muted then face := TlMix(face, th.Background, 0.5);
     if pad.Activity > 0 then face := TlMix(face, clWhite, pad.Activity * 0.55);
-    cv.Brush.Color := face;
-    cv.RoundRect(r.Left, r.Top, r.Right, r.Bottom, 8, 8);
+    { the pad is a raised key standing on a drop shadow; held down it sinks into its place }
+    held := note = FDrumHeld;
+    body := Rect(r.Left, r.Top, r.Right, r.Bottom - 4);
+    if not held then DrawDropShadow(cv, body, 8, 4, 1.4);
+    DrawBox3D(cv, body, face, not held, 8);
     { the colour stripe along the top edge }
+    cv.Brush.Style := bsSolid;
+    cv.Pen.Style := psClear;
     cv.Brush.Color := base;
-    cv.FillRect(Rect(r.Left + 6, r.Top, r.Right - 6, r.Top + 3));
+    cv.FillRect(Rect(r.Left + 8, body.Top + 2, r.Right - 8, body.Top + 5));
     if note = FDrumPad then
     begin
       cv.Pen.Style := psSolid;
       cv.Pen.Color := th.Text;
       cv.Pen.Width := 2;
       cv.Brush.Style := bsClear;
-      cv.RoundRect(r.Left, r.Top, r.Right, r.Bottom, 8, 8);
+      cv.RoundRect(body.Left, body.Top, body.Right, body.Bottom, 8, 8);
       cv.Pen.Width := 1;
       cv.Pen.Style := psClear;
       cv.Brush.Style := bsSolid;
@@ -15884,7 +16453,7 @@ begin
     cv.Font.Size := 12;
     cv.Font.Style := [fsBold];
     cv.Font.Color := th.SecondaryText;
-    cv.TextOut(r.Right - 22, r.Bottom - 24, '+');
+    cv.TextOut(r.Right - 22, r.Bottom - 28, '+');
     cv.Font.Style := [];
     cv.Font.Size := 8;
     cv.Brush.Style := bsSolid;
@@ -15997,6 +16566,7 @@ const
   MODE_TRACKER = 6;
   MODE_REC = 7;
   MODE_AI = 8;
+  MODE_FOLEY = 9;
 
 { ======================= Timeline clip icons =======================
   Every clip carries a small icon at the left end of its header strip that says what
@@ -18236,6 +18806,7 @@ begin
   else if ATab = tabTracker then Result := MODE_TRACKER
   else if ATab = tabRecording then Result := MODE_REC
   else if ATab = tabDockAi then Result := MODE_AI
+  else if ATab = tabFoley then Result := MODE_FOLEY
   else Result := MODE_PIANO;
 end;
 
@@ -18250,6 +18821,7 @@ begin
     MODE_TRACKER: Result := tabTracker;
     MODE_REC: Result := tabRecording;
     MODE_AI: Result := tabDockAi;
+    MODE_FOLEY: Result := tabFoley;
   else
     Result := nil;
   end;
@@ -18278,6 +18850,23 @@ begin
   end;
 end;
 
+{ The dock (Mixer, MIDI, Tracker ...) never gets smaller than 45% of the Timeline page's height:
+  once the splitter gives the lanes more than 55%, the dock keeps that height and a vertical scroll
+  bar appears at its far right instead of squeezing the mixer. Below that point (and in the
+  full-page editor) it fills the dock exactly and there is no bar. }
+procedure TfrmMain.sbTlDockResize(Sender: TObject);
+var
+  ph, w, minH: Integer;
+begin
+  if (sbTlDock = nil) or (pgcDock = nil) then Exit;   // still being streamed from the form file
+  minH := 0;
+  if pnlTlDock.Align = alBottom then minH := Round(tabTimeline.ClientHeight * 0.45);
+  ph := Max(sbTlDock.ClientHeight, minH);
+  w := Max(100, sbTlDock.ClientWidth - 12);     // the bar lives in the right-hand 12 px
+  if (pgcDock.Width <> w) or (pgcDock.Height <> ph) then
+    pgcDock.SetBounds(pgcDock.Left, pgcDock.Top, w, ph);
+end;
+
 { puts the dock at the remembered splitter height, keeping both the lanes and the dock usable }
 procedure TfrmMain.TlApplyDockHeight;
 begin
@@ -18290,6 +18879,7 @@ begin
       pnlTlDock.Height := Max(splTlDock.MinSize, FTlDockHeight);
   end;
   if pnlTlDock.Align = alBottom then TlStackDock;
+  sbTlDockResize(nil);
 end;
 
 { the splitter was dragged: its position is recorded in the project at once }
@@ -18324,6 +18914,12 @@ begin
   else if ATab = tabRecording then RefreshRecordingTab
   else if ATab = tabTracker then RefreshTrackerTab(True)
   else if ATab = tabMIDI then RefreshMidiTab
+  else if ATab = tabFoley then
+  begin
+    FoleyEnsure;
+    FoleyRefreshPage;
+    FFoley.AttachToEngine;
+  end
   else if ATab = tabScore then pbScore.Invalidate
   else if ATab = tabInst then begin DrumFitToPage; DrumRefreshEditor; end
   else if ATab = tabPattern then
@@ -18396,6 +18992,21 @@ begin
   else pgcChange(pgc);
 end;
 
+{ the Foley icon button: shows the Foley page in the dock under the Timeline lanes (the lanes stay
+  in view), or hides the dock again when that page is already the one showing }
+procedure TfrmMain.TlToggleFoley;
+begin
+  if (FTlMode = MODE_ARRANGE) and FEditorOn and (pgcDock.ActivePage = tabFoley) then
+    TlSetEditor(False)
+  else
+  begin
+    if FTlMode <> MODE_ARRANGE then TlSetMode(MODE_ARRANGE);
+    pgcDock.ActivePage := tabFoley;
+    TlSetEditor(True);
+  end;
+  RefreshTimelineTab;
+end;
+
 { which transport buttons are lit: loop, video panel, editor, clip stage }
 function TfrmMain.TlTransportLit: Integer;
 begin
@@ -18408,6 +19019,8 @@ begin
   if FMetronomeOn then Result := Result or 1024;                                        // metronome
   if FLanesVisible then Result := Result or 2048;                                       // marker / tempo / signature lanes
   if FChordsVisible then Result := Result or 4096;                                      // chords lane
+  if (FTlMode = MODE_ARRANGE) and FEditorOn and (pgcDock.ActivePage = tabFoley) then
+    Result := Result or 8192;                                                           // Foley page
 end;
 
 { ARRANGE tools: what a plain left-press in the lanes does }
@@ -21555,7 +22168,7 @@ begin
   if (FSunoJob <> nil) and not FSunoJob.IsTerminal then
   begin
     FSunoJob.Cancel;
-    memAiLog.Lines.Add('AI generation cancelled with Esc.');
+    memAiLog.Lines.Add('AI/SI generation cancelled with Esc.');
     hit := True;
   end;
   if (FLumaJob <> nil) and not FLumaJob.IsTerminal then
@@ -22772,7 +23385,7 @@ begin
   prgStatus.Position := 0;
   prgStatus.Visible := True;
   stbMain.SimpleText := 'Delete Cache - deleting unused files';
-  FCacheThread := TThread.CreateAnonymousThread(
+  FCacheThread := UDAWAnonymousThread('delete cache',
     procedure
     var
       j: Integer;
@@ -23355,14 +23968,15 @@ begin
     end;
     FTlRulerCtxActive := False;
 
-    { right-button down inside the lane with a range selected: dragging moves
-      the selected range; a plain click (no movement) still opens the menu }
+    { right-button down inside the lane with a range selected cancels and
+      clears the range immediately (no popup on release) }
+    FTlRangeCancelled := False;
     if (Button = mbRight) and FTlRangeActive and (X >= FTlView.HeaderWidth) then
     begin
-      FTlRangeMoving := True;
-      FTlRangeMoveMoved := False;
-      FTlRangeMoveDownX := X;
-      FTlRangeMoveLastSec := FTlView.XToSeconds(X);
+      FTlRangeActive := False;
+      FTlRangeCancelled := True;
+      RefreshTimelineTab;
+      Exit;
     end;
 
     { right/middle click must never start a drag/trim before the popup
@@ -23947,6 +24561,11 @@ begin
       Exit;
     end;
   end;
+  if FTlRangeCancelled and (Button = mbRight) then
+  begin
+    FTlRangeCancelled := False;
+    Exit;   // the press cleared the range - no context menu
+  end;
   if FTlRangeMoving then
   begin
     FTlRangeMoving := False;
@@ -24475,7 +25094,7 @@ begin
       DrawFittedLabel(clipLabel, labelX, top + 3, loopRight, bodyTop);
       if clip.Locked and (cw >= 18) then
       begin
-        TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, top + 2, x2 - 3, top + 2 + 15), theme.MeterClip);
+        TGLIconBar.DrawIcon(cv, 'lock', Rect(x2 - 19, top + 2, x2 - 3, top + 2 + 15), theme.LockColor);
         cv.Brush.Style := bsClear;
       end;
       cv.Brush.Style := bsSolid;
@@ -24943,46 +25562,83 @@ procedure TfrmMain.pbTlMetersPaint(Sender: TObject);
 const
   LABEL_W = 16;
   SEGMENT_COUNT = 20;
-  SEGMENT_W = 3;
+  SEGMENT_W = 6;
   SEGMENT_GAP = 1;
-  UNLIT_COLOR = $00303030;
+  PAD = 2;          // margin round the LEDs
+  DEPTH = 3;        // room under the LEDs for their shadow
+  UNLIT_COLOR = $00282828;
 var
   cv: TGLCanvas;
-  w, h, barH, gap, y: Integer;
+  w, h, barH, gap, y, bodyH: Integer;
+  face: TColor;
+  par: TWinControl;
 
-  { Classic LED-ladder meter: a FIXED-size gauge - exactly SEGMENT_COUNT
-    (20) blocks, each exactly SEGMENT_W (3) px wide, never stretched to
-    fill whatever width pbTlMeters happens to have. Any leftover control
-    width past the fixed gauge just stays black, so resizing the header
-    never distorts the block size back into unreadable slivers. }
+  function Blend(A, B: TColor; T: Double): TColor;
+  var
+    ca, cb: Integer;
+  begin
+    ca := ColorToRGB(A);
+    cb := ColorToRGB(B);
+    Result := RGB(Round(GetRValue(ca) + (GetRValue(cb) - GetRValue(ca)) * T),
+      Round(GetGValue(ca) + (GetGValue(cb) - GetGValue(ca)) * T),
+      Round(GetBValue(ca) + (GetBValue(cb) - GetBValue(ca)) * T));
+  end;
+
+  { Classic LED-ladder meter in a raised housing: a FIXED-size gauge - exactly SEGMENT_COUNT (20)
+    blocks, each SEGMENT_W px wide, never stretched to fill the control. Each LED is a little lens:
+    a lit one has a glow around it, a bright top edge and a darker underside; an unlit one is
+    sunk into the housing. }
+  procedure DrawLed(AX0, AY0, AX1, AY1: Integer; ALit: Boolean; AColor: TColor);
+  begin
+    { each LED casts its own soft shadow - there is no box around the meter }
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.30;
+    cv.FillRect(Rect(AX0, AY0 + 1, AX1 + 1, AY1 + 3));
+    cv.Alpha := 0.45;
+    cv.FillRect(Rect(AX0 + 1, AY0 + 2, AX1 + 1, AY1 + 2));
+    cv.Alpha := 1;
+    if ALit then
+    begin
+      { glow spilling onto the housing }
+      cv.Brush.Color := AColor;
+      cv.Alpha := 0.22;
+      cv.FillRect(Rect(AX0 - 1, AY0 - 1, AX1 + 1, AY1 + 1));
+      cv.Alpha := 1;
+      cv.GradientRect(Rect(AX0, AY0, AX1, AY1), Blend(AColor, clWhite, 0.45), Blend(AColor, clBlack, 0.35));
+      cv.Brush.Color := clWhite;
+      cv.Alpha := 0.55;
+      cv.FillRect(Rect(AX0, AY0, AX1, AY0 + 1));
+      cv.Alpha := 1;
+    end
+    else
+    begin
+      cv.GradientRect(Rect(AX0, AY0, AX1, AY1), Blend(UNLIT_COLOR, clBlack, 0.55), UNLIT_COLOR);
+      cv.Brush.Color := clWhite;
+      cv.Alpha := 0.10;
+      cv.FillRect(Rect(AX0, AY1 - 1, AX1, AY1));   // the lip catching light under the recess
+      cv.Alpha := 1;
+    end;
+  end;
+
   procedure DrawBar(const ALabel: string; ALevel: Single; AY: Integer);
   var
-    litCount, i, segX0, segX1: Integer;
+    litCount, i, segX0: Integer;
     segColor: TColor;
   begin
     cv.Brush.Style := bsClear;
     cv.Font.Color := clSilver;
-    cv.TextOut(0, AY + (barH - cv.TextHeight(ALabel)) div 2, ALabel);
-
-    litCount := Round(ALevel * SEGMENT_COUNT);
-    cv.Pen.Style := psClear;
+    cv.TextOut(PAD + 2, AY + (barH - cv.TextHeight(ALabel)) div 2, ALabel);
     cv.Brush.Style := bsSolid;
+    cv.Pen.Style := psClear;
+    litCount := Round(ALevel * SEGMENT_COUNT);
     for i := 0 to SEGMENT_COUNT - 1 do
     begin
-      segX0 := LABEL_W + i * (SEGMENT_W + SEGMENT_GAP);
-      segX1 := segX0 + SEGMENT_W;
-      if i < litCount then
-      begin
-        if i >= SEGMENT_COUNT - 2 then segColor := clRed
-        else if i >= SEGMENT_COUNT - 5 then segColor := clYellow
-        else segColor := clLime;
-      end
-      else
-        segColor := UNLIT_COLOR;
-      cv.Brush.Color := segColor;
-      cv.Rectangle(segX0, AY, segX1, AY + barH);
+      segX0 := PAD + LABEL_W + i * (SEGMENT_W + SEGMENT_GAP);
+      if i >= SEGMENT_COUNT - 2 then segColor := clRed
+      else if i >= SEGMENT_COUNT - 5 then segColor := clYellow
+      else segColor := clLime;
+      DrawLed(segX0, AY, segX0 + SEGMENT_W, AY + barH, i < litCount, segColor);
     end;
-    cv.Pen.Style := psSolid;
   end;
 
 begin
@@ -24990,20 +25646,36 @@ begin
   h := pbTlMeters.Height;
   if (w <= 0) or (h <= 0) then Exit;
   cv := pbTlMeters.GL;
-  cv.Brush.Color := clBlack;
   cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  { the meter has no background of its own: this is only the colour the strip behind it is painted
+    with (the active style's face colour, or the colour of the panel it sits on), so nothing shows }
+  if not GLParentBackdrop(pbTlMeters, face) then
+  begin
+    face := ColorToRGB(StyleServices.GetSystemColor(clBtnFace));
+    par := pbTlMeters.Parent;
+    while par <> nil do
+    begin
+      if (par is TGLPanel) and (TGLPanel(par).Color <> clBtnFace) then
+      begin
+        face := ColorToRGB(StyleServices.GetSystemColor(TGLPanel(par).Color));
+        Break;
+      end;
+      par := par.Parent;
+    end;
+  end;
+  cv.Brush.Color := face;
   cv.FillRect(Rect(0, 0, w, h));
-
+  bodyH := h - DEPTH;
   gap := 2;
-  barH := (h - gap) div 2;
+  barH := (bodyH - 2 * PAD - gap) div 2;
   if barH > 0 then
   begin
-    y := 0;
+    y := PAD;
     DrawBar('L', FTlMeterL, y);
     Inc(y, barH + gap);
     DrawBar('R', FTlMeterR, y);
   end;
-
 end;
 
 { One master-output spectrum (log frequency, 0..-90 dB) filling ARect - the
@@ -25867,6 +26539,7 @@ var
   keepParam: TAutomationParam;
   snd: TMixSend;
   ins: TMixInsert;
+  pyNames: TArray<string>;
 
   function InsertInt(const AText, AKey: string; ADefault: Integer): Integer;
   var
@@ -25926,6 +26599,14 @@ begin
       for i := 0 to AStrip.InsertCount - 1 do
       begin
         ins := AStrip.GetInsert(i);
+        if SameText(ins.Kind, 'python') then
+        begin
+          pyNames := PyDecode(PyParamGet(ins.Params, 'pn')).Split([#10]);
+          for j := 0 to High(pyNames) do
+            if pyNames[j] <> '' then
+              AddParam(Format('Python %d: %s', [i + 1, pyNames[j]]), apInsertParam, i, j);
+          Continue;
+        end;
         if not SameText(ins.Kind, 'vst2') then Continue;
         n := InsertInt(ins.Params, 'paramcount', 0);
         if n < 0 then n := 0 else if n > 16384 then n := 16384;
@@ -26817,7 +27498,12 @@ begin
   if FMixPickBusy then Exit;
   FMixPickBusy := True;
   try
-    if FMixPickTag < 0 then btnMixAddVSTClick(nil)
+    if FMixPickTag >= MIXPICK_PY_BASE then
+    begin
+      if FMixPickTag - MIXPICK_PY_BASE <= High(FPlgEntries) then
+        MixAddPythonPlugin(FPlgEntries[FMixPickTag - MIXPICK_PY_BASE].Path);
+    end
+    else if FMixPickTag < 0 then btnMixAddVSTClick(nil)
     else
     begin
       cboMixInsertKind.ItemIndex := FMixPickTag;
@@ -26884,6 +27570,8 @@ begin
   cv.Brush.Style := bsSolid;
   cv.Brush.Color := CurrentTheme.Background;
   cv.FillRect(Rect(0, 0, pbMixer.Width, pbMixer.Height));
+  { the EQ strip's rounded corners show this background, not a grey block }
+  if pnlMixEq.CornerColor <> CurrentTheme.Background then pnlMixEq.CornerColor := CurrentTheme.Background;
   MixTick;
 end;
 
@@ -26944,6 +27632,11 @@ begin
   else if SameText(AKind, 'vst2') then Result := 'VST Plugin'
   else if SameText(AKind, 'clap') then Result := 'CLAP Plugin'
   else if SameText(AKind, 'vst3') then Result := 'VST3 Plugin'
+  else if SameText(AKind, 'python') then
+  begin
+    Result := ChangeFileExt(PyDecode(MixInsertKV(AParams, 'file')), '');
+    if Result = '' then Result := 'Python Plug-in' else Result := 'Python: ' + Result;
+  end
   else Result := AKind;
 end;
 
@@ -27070,8 +27763,9 @@ const
 var
   s, t: TMixStrip;
   i, k, idx: Integer;
-  mi, sub: TMenuItem;
+  mi, sub, parent: TMenuItem;
   parts: TArray<string>;
+  pyAny: Boolean;
 begin
   if FProject = nil then Exit;
   s := MixCur.StripById(AStripId);
@@ -27099,6 +27793,44 @@ begin
         sub.Add(mi);
       end;
       FMixPickMenu.Items.Add(sub);
+    end;
+    { Python plug-ins: the scripts in the plug-ins folder, one sub-menu per sub-folder }
+    RefreshPluginsMenu(False);
+    sub := TMenuItem.Create(FMixPickMenu);
+    sub.Caption := 'Python Plug-ins';
+    FMixPickMenu.Items.Add(sub);
+    pyAny := False;
+    for i := 0 to High(FPlgEntries) do
+    begin
+      if FPlgEntries[i].Kind <> 0 then Continue;
+      pyAny := True;
+      parent := sub;
+      if FPlgEntries[i].Group <> '' then
+      begin
+        parent := nil;
+        for k := 0 to sub.Count - 1 do
+          if sub[k].Hint = FPlgEntries[i].Group then parent := sub[k];
+        if parent = nil then
+        begin
+          parent := TMenuItem.Create(FMixPickMenu);
+          parent.Caption := StringReplace(FPlgEntries[i].Group, '&', '&&', [rfReplaceAll]);
+          parent.Hint := FPlgEntries[i].Group;
+          sub.Add(parent);
+        end;
+      end;
+      mi := TMenuItem.Create(FMixPickMenu);
+      mi.Caption := StringReplace(FPlgEntries[i].Name, '&', '&&', [rfReplaceAll]);
+      mi.Hint := FPlgEntries[i].Path;
+      mi.Tag := MIXPICK_PY_BASE + i;
+      mi.OnClick := MixPickClick;
+      parent.Add(mi);
+    end;
+    if not pyAny then
+    begin
+      mi := TMenuItem.Create(FMixPickMenu);
+      mi.Caption := '(none in the plug-ins folder)';
+      mi.Enabled := False;
+      sub.Add(mi);
     end;
     mi := TMenuItem.Create(FMixPickMenu);
     mi.Caption := '-';
@@ -27178,6 +27910,11 @@ begin
   if (AIndex < 0) or (AIndex >= s.InsertCount) then Exit;
   MixSelectById(s.Id);
   ins := s.GetInsert(AIndex);
+  if SameText(ins.Kind, 'python') then
+  begin
+    OpenPythonInsertWindow(FMixViewTracker, s.Id, AIndex);
+    Exit;
+  end;
   if SameText(ins.Kind, 'vst2') then
   begin
     MessageDlg('This is a VST plugin insert - use "Edit VST..." to open its ' +
@@ -27673,7 +28410,7 @@ begin
   if (FMcpServer = nil) or not FMcpServer.IsRunning then
   begin
     MessageDlg('Python scripts drive UDAW through its MCP server, which is off.'#13#10#13#10 +
-      'Turn on "expose UDAW" in the AI settings, then run the script again.', mtInformation, [mbOK], 0);
+      'Turn on "expose UDAW" in the AI/SI settings, then run the script again.', mtInformation, [mbOK], 0);
     Exit;
   end;
   if ScriptsDir = '' then Exit;
@@ -27725,6 +28462,911 @@ begin
   end;
   RefreshTimelineTab;
   RefreshMixerTab;
+end;
+
+{ ---- Python plug-ins: editor, window, mixer inserts ---- }
+
+{ the default Python plug-ins folder: plugins next to UDAW.exe }
+function DefaultPluginsDir: string;
+begin
+  Result := IncludeTrailingPathDelimiter(ExtractFilePath(ParamStr(0))) + 'plugins';
+end;
+
+{ where the user's plug-ins live: the folder chosen in Settings, else plugins next to UDAW.exe. The SDK
+  module and the bundled example are (re)written there, so the folder is always usable. }
+function TfrmMain.PluginsDir: string;
+begin
+  Result := '';
+  if App = nil then Exit;
+  { the folder chosen under Settings > Working Directories, or plugins next to UDAW.exe }
+  Result := Trim(App.Config.GetString(CFG_SEC_PATHS, CFG_PATH_PYPLUGINS, ''));
+  if Result = '' then
+    Result := DefaultPluginsDir
+  else
+    Result := ExcludeTrailingPathDelimiter(Result);
+end;
+
+procedure TfrmMain.PyPluginSetup;
+begin
+  if (App = nil) or (PyPluginsFolder <> '') then Exit;
+  PyPluginsFolder := PluginsDir;
+  PyScratchFolder := IncludeTrailingPathDelimiter(App.Paths.Cache) + 'PythonPlugins';
+  ForceDirectories(PyScratchFolder);
+  PyEnsureSdk(PyPluginsFolder);
+end;
+
+function TfrmMain.PyEditorForm: TfrmPyEditor;
+begin
+  PyPluginSetup;
+  if FPyEditor = nil then
+  begin
+    FPyEditor := TfrmPyEditor.Create(Self);
+    FPyEditor.OnAddToMixer := PyEditorAddToMixer;
+    FPyEditor.OnRefreshTargets := PyEditorRefreshTargets;
+    FPyEditor.OnClosed := PyEditorClosed;
+  end;
+  if FProject <> nil then
+    FPyEditor.SetFormat(FProject.SampleRate, FProject.Channels, UDAW_DEFAULT_BUFFER_FRAMES);
+  PyEditorRefreshTargets(FPyEditor);
+  Result := FPyEditor;
+end;
+
+procedure TfrmMain.PyEditorClosed(Sender: TObject);
+begin
+  FPyEditor := nil;
+end;
+
+procedure TfrmMain.mnuPyEditorClick(Sender: TObject);
+begin
+  PyEditorForm.Show;
+  FPyEditor.BringToFront;
+end;
+
+procedure TfrmMain.mnuPyNewClick(Sender: TObject);
+begin
+  PyEditorForm.NewScript;
+  FPyEditor.Show;
+  FPyEditor.BringToFront;
+end;
+
+procedure TfrmMain.mnuPyExampleClick(Sender: TObject);
+var
+  f: string;
+begin
+  PyEditorForm;
+  f := IncludeTrailingPathDelimiter(PluginsDir) + 'Guitar_Overdrive_Distortion.py';
+  if not FileExists(f) then
+  begin
+    MessageDlg('The example plug-in is not in the plug-ins folder:'#13#10 + f, mtWarning, [mbOK], 0);
+    Exit;
+  end;
+  FPyEditor.OpenScript(f);
+  FPyEditor.Show;
+  FPyEditor.BringToFront;
+end;
+
+procedure TfrmMain.mnuPyFolderClick(Sender: TObject);
+begin
+  PyPluginSetup;
+  if PluginsDir = '' then Exit;
+  ForceDirectories(PluginsDir);
+  ShellExecute(0, 'open', PChar(PluginsDir), nil, nil, SW_SHOWNORMAL);
+end;
+
+{ the lanes / buses / channels a plug-in can go on, Timeline and Tracker; the strip the Mixer tab shows is
+  preselected }
+procedure TfrmMain.PyEditorRefreshTargets(Sender: TObject);
+var
+  list: TArray<TPyTarget>;
+  sel, selId, k: Integer;
+
+  procedure AddAll(AModel: TMixerModel; ATracker: Boolean; const APrefix: string);
+  var
+    i: Integer;
+    s: TMixStrip;
+    t: TPyTarget;
+  begin
+    for i := 0 to AModel.StripCount - 1 do
+    begin
+      s := AModel.GetStrip(i);
+      if s.Kind = skVCA then Continue;
+      t.Tracker := ATracker;
+      t.StripId := s.Id;
+      t.Caption := APrefix + s.Name + ' (' + MixStripKindDisplay(s.Kind) + ')';
+      k := Length(list);
+      SetLength(list, k + 1);
+      list[k] := t;
+      if (ATracker = FMixViewTracker) and (s.Id = selId) then sel := k;
+    end;
+  end;
+
+begin
+  if (FPyEditor = nil) or (FProject = nil) then Exit;
+  SetLength(list, 0);
+  sel := -1;
+  selId := SelectedMixStripId;
+  AddAll(FProject.Mixer, False, 'Timeline: ');
+  AddAll(FProject.TrackerMixer, True, 'Tracker: ');
+  FPyEditor.SetTargets(list, sel);
+end;
+
+procedure TfrmMain.PyEditorAddToMixer(const ATarget: TPyTarget; const AFilePath, APluginName,
+  AValuesJson, AStateJson, ANames: string);
+var
+  guid: TGUID;
+  iid, params: string;
+  cmd: TAddMixInsertCommand;
+begin
+  if FProject = nil then
+  begin
+    MessageDlg('Open or create a project first.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  CreateGUID(guid);
+  iid := StringReplace(StringReplace(StringReplace(GUIDToString(guid), '{', '', []), '}', '', []), '-', '', [rfReplaceAll]);
+  { the insert points at the script file; only its settings live in the project }
+  params := Format('path=%s;vals=%s;state=%s;iid=%s;file=%s;pn=%s',
+    [PyEncode(AFilePath), PyEncode(AValuesJson), PyEncode(AStateJson), iid,
+     PyEncode(ExtractFileName(AFilePath)), PyEncode(ANames)]);
+  cmd := TAddMixInsertCommand.Create(FProject, ATarget.StripId, 'python', params, -1,
+    IfThen(APluginName <> '', APluginName, ChangeFileExt(ExtractFileName(AFilePath), '')));
+  cmd.TrackerSide := ATarget.Tracker;
+  if FCmds.Perform(cmd) then
+  begin
+    RefreshMixerTab;
+    RefreshTimelineTab;
+    Logger.Info('ui', 'Python plug-in "' + APluginName + '" added to ' + ATarget.Caption);
+  end;
+end;
+
+{ the window's settings go back into the insert as an ordinary undoable parameter change }
+procedure TfrmMain.PySaveInsertState(ATracker: Boolean; AStripId: Integer; const AIid, AState: string);
+var
+  model: TMixerModel;
+  s: TMixStrip;
+  ins: TMixInsert;
+  i, idx: Integer;
+  v: TJSONValue;
+  o: TJSONObject;
+  vals, custom, newParams: string;
+  cmd: TSetMixInsertParamsCommand;
+begin
+  if FProject = nil then Exit;
+  if ATracker then model := FProject.TrackerMixer else model := FProject.Mixer;
+  s := model.StripById(AStripId);
+  if s = nil then Exit;
+  idx := -1;
+  for i := 0 to s.InsertCount - 1 do
+  begin
+    ins := s.GetInsert(i);
+    if SameText(ins.Kind, 'python') and (PyParamGet(ins.Params, 'iid') = AIid) then
+    begin
+      idx := i;
+      Break;
+    end;
+  end;
+  if idx < 0 then Exit;
+  vals := '';
+  custom := '';
+  v := TJSONObject.ParseJSONValue(AState);
+  try
+    if v is TJSONObject then
+    begin
+      o := TJSONObject(v);
+      if o.GetValue('values') <> nil then vals := o.GetValue('values').ToJSON;
+      if (o.GetValue('custom') <> nil) and not (o.GetValue('custom') is TJSONNull) then
+        custom := o.GetValue('custom').ToJSON;
+    end;
+  finally
+    v.Free;
+  end;
+  newParams := PyParamSet(PyParamSet(ins.Params, 'vals', PyEncode(vals)), 'state', PyEncode(custom));
+  if newParams = ins.Params then Exit;
+  cmd := TSetMixInsertParamsCommand.Create(FProject, s.Id, idx, newParams);
+  cmd.TrackerSide := ATracker;
+  FCmds.Perform(cmd);
+  RefreshMixerTab;
+end;
+
+{ ---- the Plugins menu: everything the application found, sorted into sub-menus when it is long ---- }
+
+const
+  PLG_MENU_MAX = 16;      // more items than this in one menu and it is split into sub-menus
+  PLG_BUCKET = 12;        // about this many per alphabetical sub-menu
+
+procedure TfrmMain.mnuPluginsClick(Sender: TObject);
+begin
+  RefreshPluginsMenu(False);
+end;
+
+procedure TfrmMain.AddPlgItem(AParent: TMenuItem; AIndex: Integer);
+var
+  item: TMenuItem;
+begin
+  item := TMenuItem.Create(AParent);
+  item.Caption := StringReplace(FPlgEntries[AIndex].Name, '&', '&&', [rfReplaceAll]);
+  item.Hint := FPlgEntries[AIndex].Path;
+  item.Tag := AIndex;
+  item.OnClick := PluginMenuItemClick;
+  AParent.Add(item);
+end;
+
+{ AList is sorted by name. Short lists go in as they are; long ones become "A - D", "E - K" ... sub-menus
+  of about a dozen entries each (a letter is never split across two sub-menus) }
+procedure TfrmMain.AddPlgBucketed(AParent: TMenuItem; const AList: TArray<Integer>);
+var
+  i, j, k: Integer;
+  sub: TMenuItem;
+  a, b: string;
+begin
+  if Length(AList) <= PLG_MENU_MAX then
+  begin
+    for i := 0 to High(AList) do AddPlgItem(AParent, AList[i]);
+    Exit;
+  end;
+  i := 0;
+  while i < Length(AList) do
+  begin
+    j := Min(i + PLG_BUCKET, Length(AList));
+    while (j < Length(AList)) and (j - i < PLG_MENU_MAX) and
+          (UpperCase(Copy(FPlgEntries[AList[j]].Name, 1, 1)) = UpperCase(Copy(FPlgEntries[AList[j - 1]].Name, 1, 1))) do
+      Inc(j);
+    a := UpperCase(Copy(FPlgEntries[AList[i]].Name, 1, 1));
+    b := UpperCase(Copy(FPlgEntries[AList[j - 1]].Name, 1, 1));
+    sub := TMenuItem.Create(AParent);
+    if a = b then sub.Caption := a else sub.Caption := a + ' - ' + b;
+    AParent.Add(sub);
+    for k := i to j - 1 do AddPlgItem(sub, AList[k]);
+    i := j;
+  end;
+end;
+
+procedure TfrmMain.RefreshPluginsMenu(AForce: Boolean);
+var
+  files: TArray<string>;
+  entries: TList<TPlgEntry>;
+  e: TPlgEntry;
+  f, rel, sig, txt: string;
+  sp: TScannedPlugin;
+  i, j, at: Integer;
+  root: string;
+  top, sub: TMenuItem;
+
+  function Sorted(AKind: Integer): TArray<Integer>;
+  var
+    k, n: Integer;
+    sl: TStringList;
+  begin
+    sl := TStringList.Create;
+    try
+      sl.CaseSensitive := False;
+      for k := 0 to High(FPlgEntries) do
+        if FPlgEntries[k].Kind = AKind then
+          sl.AddObject(LowerCase(FPlgEntries[k].Name) + #1 + IntToStr(k), TObject(NativeInt(k)));
+      sl.Sort;
+      SetLength(Result, sl.Count);
+      for n := 0 to sl.Count - 1 do Result[n] := Integer(NativeInt(sl.Objects[n]));
+    finally
+      sl.Free;
+    end;
+  end;
+
+  { Python: the root folder's scripts first, then one sub-menu per sub-folder. VST: by vendor when the list is
+    long and the vendors are few enough to be a sensible menu; otherwise alphabetical sub-menus. }
+  procedure BuildKind(AKind: Integer; const ACaption: string);
+  var
+    idx, part: TArray<Integer>;
+    groups: TStringList;
+    k, g, cnt: Integer;
+    gm: TMenuItem;
+    byGroup: Boolean;
+  begin
+    idx := Sorted(AKind);
+    if Length(idx) = 0 then Exit;
+    top := TMenuItem.Create(mnuPlugins);
+    top.Caption := ACaption + ' (' + IntToStr(Length(idx)) + ')';
+    mnuPlugins.Insert(at, top);
+    Inc(at);
+    Inc(FPlgDyn);
+    groups := TStringList.Create;
+    try
+      groups.CaseSensitive := False;
+      groups.Sorted := True;
+      groups.Duplicates := dupIgnore;
+      for k := 0 to High(idx) do
+        if FPlgEntries[idx[k]].Group <> '' then groups.Add(FPlgEntries[idx[k]].Group);
+      if AKind = 0 then byGroup := groups.Count > 0
+      else byGroup := (Length(idx) > PLG_MENU_MAX) and (groups.Count >= 2) and (groups.Count <= PLG_MENU_MAX);
+      if not byGroup then
+        AddPlgBucketed(top, idx)
+      else
+      begin
+        { items without a group first }
+        SetLength(part, 0);
+        for k := 0 to High(idx) do
+          if FPlgEntries[idx[k]].Group = '' then
+          begin
+            SetLength(part, Length(part) + 1);
+            part[High(part)] := idx[k];
+          end;
+        if Length(part) > 0 then AddPlgBucketed(top, part);
+        for g := 0 to groups.Count - 1 do
+        begin
+          SetLength(part, 0);
+          for k := 0 to High(idx) do
+            if SameText(FPlgEntries[idx[k]].Group, groups[g]) then
+            begin
+              cnt := Length(part);
+              SetLength(part, cnt + 1);
+              part[cnt] := idx[k];
+            end;
+          gm := TMenuItem.Create(top);
+          gm.Caption := StringReplace(groups[g], '&', '&&', [rfReplaceAll]) + ' (' + IntToStr(Length(part)) + ')';
+          top.Add(gm);
+          AddPlgBucketed(gm, part);
+        end;
+      end;
+    finally
+      groups.Free;
+    end;
+  end;
+
+begin
+  if (App = nil) or (mnuPlugins = nil) then Exit;
+  FPlgLast := GetTickCount64;
+  PyPluginSetup;
+  entries := TList<TPlgEntry>.Create;
+  try
+    { Python plug-ins: every script in the plug-ins folder that uses the plug-in module }
+    root := IncludeTrailingPathDelimiter(PluginsDir);
+    sig := '';
+    if DirectoryExists(root) then
+    begin
+      try
+        files := TDirectory.GetFiles(root, '*.py', TSearchOption.soAllDirectories);
+      except
+        SetLength(files, 0);
+      end;
+      for f in files do
+      begin
+        if SameText(ExtractFileName(f), 'udaw_plugin.py') or StartsText('_', ExtractFileName(f)) then Continue;
+        sig := sig + f + '|' + FormatDateTime('yyyymmddhhnnsszzz', TFile.GetLastWriteTime(f)) + ';';
+      end;
+    end;
+    for i := 0 to PluginScanner.Count - 1 do sig := sig + PluginScanner.Item(i).Path + ';';
+    if (not AForce) and (sig = FPlgSig) then Exit;
+    FPlgSig := sig;
+
+    for f in files do
+    begin
+      if SameText(ExtractFileName(f), 'udaw_plugin.py') or StartsText('_', ExtractFileName(f)) then Continue;
+      try
+        txt := TFile.ReadAllText(f, TEncoding.UTF8);
+      except
+        Continue;
+      end;
+      if Pos('udaw_plugin', txt) = 0 then Continue;
+      e.Kind := 0;
+      e.Path := f;
+      e.Name := StringReplace(ChangeFileExt(ExtractFileName(f), ''), '_', ' ', [rfReplaceAll]);
+      rel := ExtractFilePath(Copy(f, Length(root) + 1, MaxInt));
+      rel := ExcludeTrailingPathDelimiter(rel);
+      j := Pos(PathDelim, rel);
+      if j > 0 then rel := Copy(rel, 1, j - 1);
+      e.Group := rel;
+      entries.Add(e);
+    end;
+    { scanned VST effects (the cached list; Rescan Plug-ins refreshes it) }
+    for i := 0 to PluginScanner.Count - 1 do
+    begin
+      sp := PluginScanner.Item(i);
+      e.Kind := IfThen(sp.Format = pfVST3, 2, 1);
+      e.Path := sp.Path;
+      e.Name := IfThen(sp.Name <> '', sp.Name, ChangeFileExt(ExtractFileName(sp.Path), ''));
+      e.Group := sp.Vendor;
+      entries.Add(e);
+    end;
+    FPlgEntries := entries.ToArray;
+  finally
+    entries.Free;
+  end;
+
+  { rebuild the dynamic part (everything above the first separator) }
+  while FPlgDyn > 0 do
+  begin
+    mnuPlugins.Delete(0);
+    Dec(FPlgDyn);
+  end;
+  at := 0;
+  BuildKind(0, 'Python Plug-ins');
+  BuildKind(2, 'VST 3 Plug-ins');
+  BuildKind(1, 'VST 2 Plug-ins');
+  if FPlgDyn = 0 then
+  begin
+    sub := TMenuItem.Create(mnuPlugins);
+    sub.Caption := '(no plug-ins found yet - Rescan Plug-ins)';
+    sub.Enabled := False;
+    mnuPlugins.Insert(0, sub);
+    FPlgDyn := 1;
+  end;
+end;
+
+{ Rescan: walks the VST folders, then rebuilds the menu }
+procedure TfrmMain.mnuPlgRescanClick(Sender: TObject);
+begin
+  ScanPluginsNow;
+  RefreshPluginsMenu(True);
+end;
+
+procedure TfrmMain.PluginMenuItemClick(Sender: TObject);
+var
+  idx: Integer;
+begin
+  idx := TMenuItem(Sender).Tag;
+  if (idx < 0) or (idx > High(FPlgEntries)) then Exit;
+  { a Python plug-in opens its own window (to try it, listen to it, and Add to Mixer from there) }
+  if FPlgEntries[idx].Kind = 0 then
+  begin
+    OpenPythonScriptWindow(FPlgEntries[idx].Path);
+    Exit;
+  end;
+  if (FProject = nil) or (SelectedMixStripId = 0) then
+  begin
+    MessageDlg('Choose where the plug-in goes first: open the Mixer tab and select a strip (a lane, bus or ' +
+      'Tracker channel), then pick the plug-in again.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  MixAddPluginFile(FPlgEntries[idx].Path);
+end;
+
+procedure TfrmMain.mnuPlgLoadVst2Click(Sender: TObject);
+begin
+  if (FProject = nil) or (SelectedMixStripId = 0) then
+  begin
+    MessageDlg('Select a mixer strip first (Mixer tab), then load the plug-in onto it.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  dlgOpenVst.FilterIndex := 2;    // VST2 plugin (*.dll)
+  try
+    if dlgOpenVst.Execute then MixAddPluginFile(dlgOpenVst.FileName);
+  finally
+    dlgOpenVst.FilterIndex := 1;
+  end;
+end;
+
+procedure TfrmMain.mnuPlgLoadVst3Click(Sender: TObject);
+begin
+  if (FProject = nil) or (SelectedMixStripId = 0) then
+  begin
+    MessageDlg('Select a mixer strip first (Mixer tab), then load the plug-in onto it.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  dlgOpenVst.FilterIndex := 4;    // VST3 plugin (*.vst3)
+  try
+    if dlgOpenVst.Execute then MixAddPluginFile(dlgOpenVst.FileName);
+  finally
+    dlgOpenVst.FilterIndex := 1;
+  end;
+end;
+
+{ a script picked from the Plugins menu: its window opens on a fresh instance. Listen plays program material
+  through it, the controls can be tried, and Add to Mixer puts it on the strip selected in the Mixer tab with
+  the settings shown }
+procedure TfrmMain.OpenPythonScriptWindow(const AFileName: string);
+var
+  src, err: string;
+  host: TPyPluginHost;
+  frm: TfrmPyPlugin;
+  rate: Integer;
+begin
+  PyPluginSetup;
+  try
+    src := TFile.ReadAllText(AFileName, TEncoding.UTF8);
+  except
+    on E: Exception do
+    begin
+      MessageDlg('Could not read ' + AFileName + ':'#13#10 + E.Message, mtError, [mbOK], 0);
+      Exit;
+    end;
+  end;
+  rate := 0;
+  if Assigned(PyAuditionRate) then rate := PyAuditionRate();
+  if rate <= 0 then
+    if FProject <> nil then rate := FProject.SampleRate else rate := UDAW_DEFAULT_SAMPLE_RATE;
+  stbMain.SimpleText := 'Starting ' + ExtractFileName(AFileName) + '...';
+  host := TPyPluginHost.Create;
+  if not host.Start(src, ExtractFileName(AFileName), ExtractFilePath(AFileName), '', '', rate, 2,
+       UDAW_DEFAULT_BUFFER_FRAMES, err) then
+  begin
+    host.Release;
+    MessageDlg('The Python plug-in could not start:'#13#10#13#10 + err, mtError, [mbOK], 0);
+    Exit;
+  end;
+  frm := TfrmPyPlugin.Create(Self);
+  frm.SourceFile := AFileName;
+  frm.OnAddToMixer := PyWindowAddToMixer;
+  frm.AutoListen := True;
+  if not frm.Open(host, '', ChangeFileExt(ExtractFileName(AFileName), ''), nil) then
+  begin
+    frm.Free;
+    host.Release;
+    Exit;
+  end;
+  host.Release;   // the window holds its own reference
+  frm.Show;
+  stbMain.SimpleText := host.Name + ' is open - Listen plays it on a guitar phrase or your highlighted Timeline range.';
+end;
+
+{ A Python plug-in picked from a strip's + FX menu: started once for its name, parameters and starting
+  settings, then inserted on that strip (double-click the insert for its window) }
+procedure TfrmMain.MixAddPythonPlugin(const AFileName: string);
+var
+  src, err, st, vals, custom: string;
+  host: TPyPluginHost;
+  v: TJSONValue;
+  o: TJSONObject;
+  target: TPyTarget;
+  strip: TMixStrip;
+  rate: Integer;
+begin
+  if (FProject = nil) or (SelectedMixStripId = 0) then Exit;
+  PyPluginSetup;
+  try
+    src := TFile.ReadAllText(AFileName, TEncoding.UTF8);
+  except
+    on E: Exception do
+    begin
+      MessageDlg('Could not read ' + AFileName + ':'#13#10 + E.Message, mtError, [mbOK], 0);
+      Exit;
+    end;
+  end;
+  rate := 0;
+  if Assigned(PyAuditionRate) then rate := PyAuditionRate();
+  if rate <= 0 then rate := FProject.SampleRate;
+  stbMain.SimpleText := 'Starting ' + ExtractFileName(AFileName) + '...';
+  host := TPyPluginHost.Create;
+  if not host.Start(src, ExtractFileName(AFileName), ExtractFilePath(AFileName), '', '', rate, 2,
+       UDAW_DEFAULT_BUFFER_FRAMES, err) then
+  begin
+    host.Release;
+    MessageDlg('The Python plug-in could not start:'#13#10#13#10 + err, mtError, [mbOK], 0);
+    Exit;
+  end;
+  try
+    st := host.CaptureState;
+    vals := '';
+    custom := '';
+    v := TJSONObject.ParseJSONValue(st);
+    try
+      if v is TJSONObject then
+      begin
+        o := TJSONObject(v);
+        if o.GetValue('values') <> nil then vals := o.GetValue('values').ToJSON;
+        if (o.GetValue('custom') <> nil) and not (o.GetValue('custom') is TJSONNull) then
+          custom := o.GetValue('custom').ToJSON;
+      end;
+    finally
+      v.Free;
+    end;
+    target.Tracker := FMixViewTracker;
+    target.StripId := SelectedMixStripId;
+    strip := MixCur.StripById(target.StripId);
+    if strip <> nil then target.Caption := strip.Name else target.Caption := 'the selected strip';
+    PyEditorAddToMixer(target, AFileName, host.Name, vals, custom, host.ParamNames);
+    stbMain.SimpleText := 'Added "' + host.Name + '" to ' + target.Caption +
+      ' - double-click it in the strip to open its window.';
+  finally
+    host.Release;
+  end;
+end;
+
+{ Add to Mixer pressed in a plug-in window }
+procedure TfrmMain.PyWindowAddToMixer(Sender: TObject);
+var
+  frm: TfrmPyPlugin;
+  st, vals, custom: string;
+  v: TJSONValue;
+  o: TJSONObject;
+  target: TPyTarget;
+  strip: TMixStrip;
+begin
+  frm := TfrmPyPlugin(Sender);
+  if (FProject = nil) or (SelectedMixStripId = 0) then
+  begin
+    MessageDlg('Choose where the plug-in goes: open the Mixer tab and select a strip (a lane, bus or ' +
+      'Tracker channel), then press Add to Mixer again.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  st := frm.Host.CaptureState;
+  vals := '';
+  custom := '';
+  v := TJSONObject.ParseJSONValue(st);
+  try
+    if v is TJSONObject then
+    begin
+      o := TJSONObject(v);
+      if o.GetValue('values') <> nil then vals := o.GetValue('values').ToJSON;
+      if (o.GetValue('custom') <> nil) and not (o.GetValue('custom') is TJSONNull) then
+        custom := o.GetValue('custom').ToJSON;
+    end;
+  finally
+    v.Free;
+  end;
+  target.Tracker := FMixViewTracker;
+  target.StripId := SelectedMixStripId;
+  strip := MixCur.StripById(target.StripId);
+  if strip <> nil then target.Caption := strip.Name else target.Caption := 'the selected strip';
+  PyEditorAddToMixer(target, frm.SourceFile, frm.Host.Name, vals, custom, frm.Host.ParamNames);
+  stbMain.SimpleText := 'Added "' + frm.Host.Name + '" to ' + target.Caption +
+    ' - double-click it in the strip to open its window.';
+end;
+
+{ the plug-in windows listen through the application's audio engine }
+procedure TfrmMain.InstallPyAuditionHooks;
+begin
+  PyAuditionRate :=
+    function: Integer
+    begin
+      Result := 0;
+      if (App = nil) or (App.Audio = nil) then Exit;
+      if App.Audio.State in [aesIdle, aesFailed] then App.Audio.Open(True);
+      Result := App.Audio.Granted.SampleRate;
+    end;
+  PyAuditionAttach :=
+    function(const ASource: IAudioSource): Boolean
+    begin
+      Result := False;
+      if (App = nil) or (App.Audio = nil) then Exit;
+      if ASource = nil then
+      begin
+        App.Audio.ClearSource;
+        Exit(True);
+      end;
+      if FTlPlaying then StopTimelinePlayback;
+      if App.Audio.State in [aesIdle, aesFailed] then App.Audio.Open(True)
+      else if App.Audio.State <> aesRunning then App.Audio.Start;
+      App.Audio.SetSource(ASource);
+      Result := True;
+    end;
+  PyAuditionRange :=
+    function(ARate: Integer; out APlanar: TPyPlanar): Boolean
+    begin
+      Result := PyRenderTimelineRange(ARate, APlanar);
+    end;
+end;
+
+{ the Timeline range the user highlighted (at most 30 s), as the dry sum of the lanes, for listening }
+function TfrmMain.PyRenderTimelineRange(ARate: Integer; out APlanar: TPyPlanar): Boolean;
+const
+  BLK = 1024;
+  MAX_SECONDS = 30.0;
+var
+  st, en, oldPlayhead, peak, g: Double;
+  oldLoop: Boolean;
+  player: TTimelinePlayer;
+  buf: TAudioBuffer;
+  total, done, n, c, i: Integer;
+begin
+  Result := False;
+  SetLength(APlanar, 0);
+  if (FProject = nil) or not FTlRangeActive then Exit;
+  st := Min(FTlRangeStartSec, FTlRangeEndSec);
+  en := Max(FTlRangeStartSec, FTlRangeEndSec);
+  if en - st < 0.05 then Exit;
+  en := Min(en, st + MAX_SECONDS);
+  total := Round((en - st) * ARate);
+  oldPlayhead := FProject.Timeline.PlayheadSeconds;
+  oldLoop := FProject.Timeline.LoopEnabled;
+  player := nil;
+  buf := nil;
+  stbMain.SimpleText := 'Rendering the highlighted range for listening...';
+  try
+    try
+      FProject.Timeline.PlayheadSeconds := st;
+      FProject.Timeline.LoopEnabled := False;
+      player := TTimelinePlayer.Create(FProject.Timeline);
+      player.AttachMidi(FProject.Midi);
+      player.SetStretchTempo(FProject.TempoBPM);
+      player.SetTempoMap(FProject.TempoBPM, FProject.TempoMap);
+      player.EnsureSourcesLoaded(
+        procedure(AFraction: Double)
+        begin
+          Application.ProcessMessages;
+        end);
+      player.ValidateLoadedSources;
+      player.Prepare(ARate, BLK, 2);
+      buf := TAudioBuffer.Create(2, BLK, ARate);
+      SetLength(APlanar, 2);
+      for c := 0 to 1 do SetLength(APlanar[c], total);
+      done := 0;
+      while done < total do
+      begin
+        n := Min(BLK, total - done);
+        buf.SetActiveFrames(n);
+        player.RenderBlock(buf);
+        for c := 0 to 1 do Move(buf.ChannelPtr(c)^, APlanar[c][done], n * SizeOf(Single));
+        Inc(done, n);
+      end;
+      peak := 0;
+      for c := 0 to 1 do
+        for i := 0 to total - 1 do
+          if Abs(APlanar[c][i]) > peak then peak := Abs(APlanar[c][i]);
+      if peak < 0.00001 then
+      begin
+        SetLength(APlanar, 0);
+        Exit;
+      end;
+      if peak > 0.9 then
+      begin
+        g := 0.9 / peak;
+        for c := 0 to 1 do
+          for i := 0 to total - 1 do APlanar[c][i] := APlanar[c][i] * g;
+      end;
+      Result := True;
+    except
+      on E: Exception do
+      begin
+        Logger.Warn('ui', 'Could not render the highlighted range for listening: ' + E.Message);
+        SetLength(APlanar, 0);
+      end;
+    end;
+  finally
+    buf.Free;
+    player.Free;
+    FProject.Timeline.PlayheadSeconds := oldPlayhead;
+    FProject.Timeline.LoopEnabled := oldLoop;
+  end;
+end;
+
+{ A project that uses Python plug-ins: their inserts come back on the Mixer strips with the project (each one
+  points at its script file and keeps its settings). Here every script is located and read, so a plug-in whose
+  file has moved or gone is reported at once instead of silently passing sound through when the project plays. }
+procedure TfrmMain.PyRestoreInsertsOnLoad;
+var
+  missing: TStringList;
+  total, mi, i, k: Integer;
+  model: TMixerModel;
+  s: TMixStrip;
+  ins: TMixInsert;
+  src, name, dir, err: string;
+begin
+  if FProject = nil then Exit;
+  total := 0;
+  missing := TStringList.Create;
+  try
+    for mi := 0 to 1 do
+    begin
+      if mi = 0 then model := FProject.Mixer else model := FProject.TrackerMixer;
+      for i := 0 to model.StripCount - 1 do
+      begin
+        s := model.GetStrip(i);
+        for k := 0 to s.InsertCount - 1 do
+        begin
+          ins := s.GetInsert(k);
+          if not SameText(ins.Kind, 'python') then Continue;
+          Inc(total);
+          if not PyInsertSource(ins.Params, src, name, dir, err) then
+            missing.Add(s.Name + ': ' + IfThen(PyParamGet(ins.Params, 'path') <> '',
+              PyDecode(PyParamGet(ins.Params, 'path')), name));
+        end;
+      end;
+    end;
+    if total = 0 then Exit;
+    PyPluginSetup;
+    if missing.Count > 0 then
+    begin
+      Logger.Warn('ui', 'Python plug-in script(s) not found: ' + missing.CommaText);
+      stbMain.SimpleText := Format('%d of %d Python plug-in(s) could not be loaded - script file missing.', [missing.Count, total]);
+      MessageDlg('This project uses Python plug-ins whose script files could not be found:'#13#10#13#10 +
+        missing.Text + #13#10'Until the files are back those inserts pass the sound through unchanged. ' +
+        'Put the scripts back where they were, or add the plug-ins again from their new location.',
+        mtWarning, [mbOK], 0);
+    end
+    else
+      stbMain.SimpleText := Format('%d Python plug-in(s) restored on the mixer from their script files.', [total]);
+  finally
+    missing.Free;
+  end;
+end;
+
+procedure TfrmMain.PyWindowClosing(Sender: TObject);
+var
+  frm: TfrmPyPlugin;
+begin
+  { closing the window means "do not reopen it next time", like the VST editors; one still open when the
+    project is saved is captured by CaptureOpenWindowLayout }
+  frm := TfrmPyPlugin(Sender);
+  if (FProject <> nil) and (frm.WindowKey <> '') then FProject.Windows.Remove(frm.WindowKey);
+  if FOpenPyWindows <> nil then FOpenPyWindows.Remove(frm);
+end;
+
+function TfrmMain.OpenPythonInsertWindowByIid(ATracker: Boolean; AStripId: Integer; const AIid: string): Boolean;
+var
+  model: TMixerModel;
+  s: TMixStrip;
+  i: Integer;
+begin
+  Result := False;
+  if FProject = nil then Exit;
+  if ATracker then model := FProject.TrackerMixer else model := FProject.Mixer;
+  s := model.StripById(AStripId);
+  if s = nil then Exit;
+  for i := 0 to s.InsertCount - 1 do
+    if SameText(s.GetInsert(i).Kind, 'python') and (PyParamGet(s.GetInsert(i).Params, 'iid') = AIid) then
+    begin
+      OpenPythonInsertWindow(ATracker, AStripId, i);
+      Exit(True);
+    end;
+end;
+
+{ double-click on a Python insert: its window, attached to the instance that is playing when there is one }
+procedure TfrmMain.OpenPythonInsertWindow(ATracker: Boolean; AStripId, AIndex: Integer);
+var
+  model: TMixerModel;
+  s: TMixStrip;
+  ins: TMixInsert;
+  iid, err, plugName, key, scriptText, scriptName, scriptDir: string;
+  host: TPyPluginHost;
+  frm: TfrmPyPlugin;
+  stripId, k: Integer;
+begin
+  if FProject = nil then Exit;
+  if ATracker then model := FProject.TrackerMixer else model := FProject.Mixer;
+  s := model.StripById(AStripId);
+  if (s = nil) or (AIndex < 0) or (AIndex >= s.InsertCount) then Exit;
+  ins := s.GetInsert(AIndex);
+  if not SameText(ins.Kind, 'python') then Exit;
+  PyPluginSetup;
+  stripId := s.Id;
+  iid := PyParamGet(ins.Params, 'iid');
+  key := '';
+  if iid <> '' then
+  begin
+    key := Format('%s%s:%d:%s', [WINKEY_PY_PREFIX, IfThen(ATracker, 'T', 'M'), stripId, iid]);
+    for k := 0 to FOpenPyWindows.Count - 1 do
+      if FOpenPyWindows[k].WindowKey = key then
+      begin
+        FOpenPyWindows[k].BringToFront;
+        Exit;
+      end;
+  end;
+  plugName := ChangeFileExt(PyDecode(PyParamGet(ins.Params, 'file')), '');
+  host := nil;
+  if iid <> '' then host := PyLive.Acquire(iid);
+  if host = nil then
+  begin
+    if not PyInsertSource(ins.Params, scriptText, scriptName, scriptDir, err) then
+    begin
+      MessageDlg(err, mtWarning, [mbOK], 0);
+      Exit;
+    end;
+    host := TPyPluginHost.Create;
+    if not host.Start(scriptText, scriptName, scriptDir,
+         PyDecode(PyParamGet(ins.Params, 'vals')), PyDecode(PyParamGet(ins.Params, 'state')),
+         FProject.SampleRate, FProject.Channels, UDAW_DEFAULT_BUFFER_FRAMES, err) then
+    begin
+      host.Release;
+      MessageDlg('The Python plug-in could not start:'#13#10#13#10 + err, mtError, [mbOK], 0);
+      Exit;
+    end;
+  end;
+  frm := TfrmPyPlugin.Create(Self);
+  if not frm.Open(host, iid, IfThen(plugName <> '', plugName, host.Name),
+       procedure(AState: string)
+       begin
+         PySaveInsertState(ATracker, stripId, iid, AState);
+       end) then
+  begin
+    frm.Free;
+    host.Release;
+    Exit;
+  end;
+  host.Release;   // the window holds its own reference
+  frm.WindowKey := key;
+  frm.OnEditorClosing := PyWindowClosing;
+  FOpenPyWindows.Add(frm);
+  if key <> '' then ApplySavedGeometry(frm, FProject.Windows.Find(key));
+  frm.Show;
 end;
 
 function TfrmMain.PluginCacheFile: string;
@@ -27780,6 +29422,7 @@ begin
     [found, PluginScanner.Skipped]);
   stbMain.SimpleText := msg;
   Logger.Info('ui', msg);
+  RefreshPluginsMenu(True);
   for i := 0 to PluginScanner.LastErrors.Count - 1 do
     Logger.Info('ui', 'plug-in skipped: ' + PluginScanner.LastErrors[i]);
 end;
@@ -28258,6 +29901,26 @@ procedure TfrmMain.MixEqPresetClick(Sender: TObject; AIndex: Integer; const AId:
 begin
   if AId = 'save' then MixEqSavePreset
   else if AId = 'load' then MixEqLoadPreset;
+end;
+
+{ The Score tab's Parts / Tracker column keeps room for all of its sections: when the splitter
+  leaves it shorter than that, the column scrolls (the box's bar) instead of cutting the lower
+  sections off; when it is taller, the column stretches to fill it and there is no bar. }
+procedure TfrmMain.sbScorePartsResize(Sender: TObject);
+const
+  SCORE_PARTS_MIN_H = 420;   // head, parts list, tracker section and the foot buttons
+var
+  ph: Integer;
+begin
+  if (sbScoreParts = nil) or (pnlScoreParts = nil) then Exit;   // still being streamed from the form file
+  ph := Max(sbScoreParts.ClientHeight, SCORE_PARTS_MIN_H);
+  if pnlScoreParts.Height <> ph then pnlScoreParts.Height := ph;
+end;
+
+{ choosing a preset in the drop-down loads it straight away }
+procedure TfrmMain.cboMixEqPresetSelect(Sender: TObject);
+begin
+  MixEqLoadPreset;
 end;
 
 procedure TfrmMain.MixEqFlatClick(Sender: TObject);
@@ -29130,6 +30793,7 @@ begin
     presents each complete frame without rebuilding controls. }
   tmrUI.Interval := TRK_UI_PLAY_INTERVAL_MS;
   RefreshTrackerTab;
+  RefreshTimelineTab(False);   // the Timeline master slider now rides the Tracker mixer's master
 end;
 
 procedure TfrmMain.btnTrkStopClick(Sender: TObject);
@@ -29142,6 +30806,7 @@ begin
   FTrkPreview := '(stopped)';
   tmrUI.Interval := TRK_UI_IDLE_INTERVAL_MS;
   RefreshTrackerTab;
+  RefreshTimelineTab(False);   // slider returns to the Timeline master volume
 end;
 
 procedure TfrmMain.btnTrkUndoClick(Sender: TObject);
@@ -29327,7 +30992,7 @@ begin
   RefreshTrackerTab;
 end;
 
-{ Tracker > Import > ScreamTracker / Composer module into the Tracker player }
+{ Tracker > Import > ScreamTracker 3 module into the Tracker player }
 procedure TfrmMain.btnTrkImportLegacyClick(Sender: TObject);
 begin
   if not dlgOpenTrkAny.Execute then Exit;
@@ -29359,6 +31024,7 @@ begin
     finally
       fs.Free;
     end;
+    MptmSetSampleFolder(ExtractFilePath(ExpandFileName(dlgOpenMptm.FileName)));
     MptmToModule(data, info).Free;   { parse once for the report }
     FCmds.Perform(TImportMptmCommand.Create(FProject, data,
       ExtractFileName(dlgOpenMptm.FileName)));
@@ -31236,7 +32902,7 @@ end;
 
 function TfrmMain.TrkSeqStepWidth: Integer;
 begin
-  Result := 64;
+  Result := 84;   { wide enough for a label such as "pat 255" with room either side }
 end;
 
 procedure TfrmMain.pbTrkSequencePaint(Sender: TObject);
@@ -31244,7 +32910,9 @@ const
   STEPH = 24;
 var
   cv: TGLCanvas;
-  w, h, i, x, stepW, visCount: Integer;
+  w, h, i, x, stepW, visCount, lineH, y0: Integer;
+  capTop, capBot: string;
+  outer, inner: TRect;
   m: TTrackerModule;
   patIdx: Integer;
   isPlayingStep, isShownPattern: Boolean;
@@ -31281,29 +32949,45 @@ begin
     else if isShownPattern then stepCol := th.Trk[Ord(tcSeqCurrent)]
     else if (i mod 2) = 0 then stepCol := th.Trk[Ord(tcSeqStep)]
     else stepCol := TrkMix(th.Trk[Ord(tcSeqStep)], clBlack, 0.25);
-    cv.GradientRect(Rect(x, 0, x + stepW - 2, h), TrkMix(stepCol, clWhite, 0.22), TrkMix(stepCol, clBlack, 0.25));
-    cv.Brush.Color := clWhite;
-    cv.Alpha := 0.35;
-    cv.FillRect(Rect(x, 0, x + stepW - 2, 1));
-    cv.Alpha := 1;
+    { each step is a raised key (its face lit from above, a shaded underside) ... }
+    outer := Rect(x + 1, 1, x + stepW - 3, h - 3);
+    DrawDropShadow(cv, outer, 6, 2);
+    DrawBox3D(cv, outer, stepCol, True, 6);
     if TrkSeqIsSelected(i) then
     begin
       { Ctrl+click selection: a lit wash and an accent frame }
       cv.Brush.Color := clWhite;
-      cv.Alpha := 0.22;
-      cv.FillRect(Rect(x, 0, x + stepW - 2, h));
+      cv.Alpha := 0.18;
+      cv.RoundRect(outer.Left + 1, outer.Top + 1, outer.Right - 1, outer.Bottom - 1, 10, 10);
       cv.Alpha := 1;
-      cv.Brush.Color := th.Trk[Ord(tcSeqPlaying)];
-      cv.FillRect(Rect(x, 0, x + stepW - 2, 2));
-      cv.FillRect(Rect(x, h - 2, x + stepW - 2, h));
-      cv.FillRect(Rect(x, 0, x + 2, h));
-      cv.FillRect(Rect(x + stepW - 4, 0, x + stepW - 2, h));
+      cv.Pen.Style := psSolid;
+      cv.Pen.Width := 2;
+      cv.Pen.Color := th.Trk[Ord(tcSeqPlaying)];
+      cv.Brush.Style := bsClear;
+      cv.RoundRect(outer.Left, outer.Top, outer.Right, outer.Bottom, 12, 12);
+      cv.Pen.Width := 1;
+      cv.Pen.Style := psClear;
+      cv.Brush.Style := bsSolid;
     end;
+    { ... with a recessed window set into it that holds the label }
+    inner := Rect(outer.Left + 5, outer.Top + 5, outer.Right - 5, outer.Bottom - 5);
+    DrawBox3D(cv, inner, TrkMix(stepCol, clBlack, 0.55), False, 4);
     cv.Brush.Style := bsClear;
 
-    if isPlayingStep then cv.Font.Color := TrkMix(stepCol, clBlack, 0.8) else cv.Font.Color := th.Trk[Ord(tcHeaderText)];
-    cv.TextOut(x + 4, 1, Format('%.2d', [i]));
-    cv.TextOut(x + 4, 12, Format('pat %d', [patIdx]));
+    if isPlayingStep then cv.Font.Color := TrkMix(stepCol, clWhite, 0.8) else cv.Font.Color := th.Trk[Ord(tcHeaderText)];
+    { both lines centred in the window, across and down; the type shrinks until they fit }
+    capTop := Format('%.2d', [i]);
+    capBot := Format('pat %d', [patIdx]);
+    cv.Font.Size := 8;
+    while (cv.Font.Size > 6) and
+          ((cv.TextWidth(capBot) > inner.Right - inner.Left - 6) or
+           (2 * cv.TextHeight('Ag') > inner.Bottom - inner.Top - 2)) do
+      cv.Font.Size := cv.Font.Size - 1;
+    lineH := cv.TextHeight('Ag');
+    y0 := inner.Top + Max(0, (inner.Bottom - inner.Top - 2 * lineH) div 2);
+    cv.TextOut(inner.Left + (inner.Right - inner.Left - cv.TextWidth(capTop)) div 2, y0, capTop);
+    cv.TextOut(inner.Left + (inner.Right - inner.Left - cv.TextWidth(capBot)) div 2, y0 + lineH, capBot);
+    cv.Font.Size := 8;
   end;
   finally
   end;
@@ -31497,6 +33181,42 @@ begin
     on E: Exception do
       MessageDlg('Could not open the UDAW Help Centre window:' + sLineBreak + E.Message,
         mtError, [mbOK], 0);
+  end;
+end;
+{$ENDIF}
+
+{ Project > Exit UDAW (Alt+F4): closes the main window, so the usual unsaved-changes prompt and
+  shutdown run exactly as when the window's own close button is used }
+procedure TfrmMain.mnuProjectExitClick(Sender: TObject);
+begin
+  Close;
+end;
+
+{ Help > License and EULA: shows udaw-license.dat (the same text as LICENSE.md) in the Help
+  window, styled like the Help Centre. }
+procedure TfrmMain.mnuHelpLicenseClick(Sender: TObject);
+{$IFDEF FPC}
+begin
+  OpenInShell(ExtractFilePath(ParamStr(0)) + 'LICENSE.md');
+end;
+{$ELSE}
+var
+  htmlText, errMsg: string;
+begin
+  if not FetchUDAWLicensePage(htmlText, errMsg) then
+  begin
+    MessageDlg('Could not open the UDAW License:' + sLineBreak + errMsg, mtError, [mbOK], 0);
+    Exit;
+  end;
+  try
+    with TfrmHelp.Create(Application) do
+    begin
+      ShowLicense(htmlText);
+      Show;
+    end;
+  except
+    on E: Exception do
+      MessageDlg('Could not open the UDAW License window:' + sLineBreak + E.Message, mtError, [mbOK], 0);
   end;
 end;
 {$ENDIF}
@@ -33333,6 +35053,13 @@ begin
     dlgSaveProject.InitialDir := edDirProjects.Text;
   end;
   if edDirScripts.Text <> '' then dlgOpenPy.InitialDir := edDirScripts.Text;
+  { a different plug-ins folder: the helper module and bundled plug-ins go there and the menu follows }
+  if (App <> nil) and (PyPluginsFolder <> '') and not SameText(PyPluginsFolder, PluginsDir) then
+  begin
+    PyPluginsFolder := '';
+    PyPluginSetup;
+    RefreshPluginsMenu(True);
+  end;
 end;
 
 procedure TfrmMain.RefreshInputDeviceCombo(const ASelectedDeviceId: string);
@@ -33361,6 +35088,36 @@ begin
       selIdx := High(FInputDeviceIds);
   end;
   cboSetInDevice.ItemIndex := selIdx;
+end;
+
+{ the playback device picker: same pattern as RefreshInputDeviceCombo. The choice is saved as
+  [audio] output_device and used by every playback path (Timeline, WAV editor, tracker, graph, tone) }
+procedure TfrmMain.RefreshOutputDeviceCombo(const ASelectedDeviceId: string);
+var
+  devices: TAudioDeviceList;
+  i, selIdx: Integer;
+  displayName: string;
+begin
+  if App = nil then Exit;
+  cboSetOutDevice.Items.Clear;
+  SetLength(FOutputDeviceIds, 1);
+  FOutputDeviceIds[0] := '';
+  cboSetOutDevice.Items.Add('Default (system)');
+  selIdx := 0;
+
+  devices := App.Audio.EnumerateOutputs;
+  for i := 0 to High(devices) do
+  begin
+    displayName := devices[i].Name;
+    if devices[i].IsDefault then
+      displayName := displayName + ' (default)';
+    SetLength(FOutputDeviceIds, Length(FOutputDeviceIds) + 1);
+    FOutputDeviceIds[High(FOutputDeviceIds)] := devices[i].Id;
+    cboSetOutDevice.Items.Add(displayName);
+    if (ASelectedDeviceId <> '') and SameText(devices[i].Id, ASelectedDeviceId) then
+      selIdx := High(FOutputDeviceIds);
+  end;
+  cboSetOutDevice.ItemIndex := selIdx;
 end;
 
 { Phase 38 - MIDI device I/O: same "sentinel + parallel id array" pattern as
@@ -33525,7 +35282,7 @@ end;
   system-wide setting (Settings > Show hints), not per project. }
 procedure TfrmMain.InstallControlHints;
 const
-  TABLE: array[0..60] of array[0..2] of string = (
+  TABLE: array[0..61] of array[0..2] of string = (
     ('edtProjectName', 'Project name', 'Shown in the title bar and used for the saved project file.'),
     ('edtProjectTempo', 'Tempo (BPM)', 'Project tempo. Drives the Timeline grid, tracker/MIDI timing and tempo-stretched clips.'),
     ('cboProjectSampleRate', 'Project sample rate', 'Internal rate for rendering and export. Clips at other rates are resampled.'),
@@ -33552,7 +35309,8 @@ const
     ('ibTrkInstr', 'Instrument actions', 'Add to Timeline: bounce this instrument to a WAV in the Recordings folder and place it on the Timeline. Export sample: export as WAV, raw PCM or FLAC (WAV carries loop points and all applied settings; PCM/FLAC get a .txt sidecar). WAV editor: edit the instrument''s sound (trim, cut, fades, effects...); also opened by double-clicking the waveform. OK replaces the sample, Cancel leaves it unchanged.'),
     ('cboMidiGrid', 'Grid', 'Note-length grid used for piano roll edits.'),
     ('chkMidiScaleHighlight', 'Scale highlight', 'Tint piano roll rows that belong to the chosen scale.'),
-    ('cboSetBackend', 'Audio backend', 'auto picks the best device API; wasapi is Windows native; software renders without hardware.'),
+    ('cboSetBackend', 'Audio backend', 'auto picks the best device API; wasapi is the modern Windows API; directsound is the older Windows API, for devices and drivers that work better with it; software renders without hardware.'),
+    ('cboSetOutDevice', 'Output device', 'The device everything plays through - the Timeline, WAV editor, tracker and previews. Default follows the Windows default output.'),
     ('cboSetRate', 'Device rate', 'Sample rate requested from the audio device.'),
     ('cboSetBuffer', 'Buffer size', 'Smaller = lower latency but more risk of dropouts.'),
     ('chkSetExclusive', 'Exclusive mode', 'Take exclusive control of the device for the lowest latency. Other apps lose audio.'),
@@ -33580,16 +35338,16 @@ const
     ('edtValue', 'Secret value', 'Value to protect. Only encrypted data is written to disk.'),
     ('btnBrowserRefresh', 'Refresh', 'Rescan the browser folders.'),
     ('btnBrowserImport', 'Import', 'Import the selected file into the project.'),
-    ('cboAiProvider', 'AI provider', 'Which AI service handles chat, mixing help and composition.'),
+    ('cboAiProvider', 'AI/SI provider', 'Which AI/SI service handles chat, mixing help and composition.'),
     ('edtAiApiKey', 'API key', 'Stored encrypted in the OS secure store, never in the project or log.'),
     ('btnAiTest', 'Test', 'Verify the key and load the provider''s models.'),
-    ('btnAiSend', 'Send', 'Send the prompt to the AI provider.'),
+    ('btnAiSend', 'Send', 'Send the prompt to the AI/SI provider.'),
     ('btnSunoGenerate', 'Generate', 'Send the prompt to Suno and import the result on the Timeline.'),
     ('btnSunoCancel', 'Cancel', 'Cancel the running generation.'),
     ('chkSunoInstrumental', 'Instrumental', 'Generate without vocals.'));
-  TABLE2: array[0..161] of array[0..2] of string = (
+  TABLE2: array[0..163] of array[0..2] of string = (
     ('edtProjectAuthor', 'Author', 'Name stored in the project file as its author.'),
-    ('cboExpBitrate', 'Video quality', 'Video bitrate used when exporting MP4 / MKV. Higher = better picture, larger file. Saved with the project.'),
+    ('cboExpBitrate', 'Video quality', 'Video bitrate used when exporting MP4 / MKV. Higher = better picture, larger file. Preserve original keeps the source size and frame rate at a very high bitrate (15-80 Mbps). Saved with the project.'),
     ('cboExpAudio', 'Audio quality', 'Audio bitrate used for MP3, MP4, M4A and MKV exports. Higher = better sound, larger file. Video exports use the nearest rate the AAC encoder offers (96-192 kbps). Saved with the project.'),
     ('cboExpWidth', 'Video size', 'Largest picture width for video exports; bigger pictures are scaled down. Saved with the project.'),
     ('edExpAuthor', 'Author', 'Author name written into the header of every exported file. Saved with the project.'),
@@ -33670,6 +35428,8 @@ const
     ('btnDirCache', 'Browse', 'Choose the cache files folder.'),
     ('edDirScripts', 'Default scripting folder', 'Where Run Python Script opens and where the helper module for scripts is written. Leave empty to use a Scripts folder under the config folder. Saved with your settings.'),
     ('btnDirScripts', 'Browse', 'Choose the default scripting folder.'),
+    ('edDirPlugins', 'Python plug-ins folder', 'Where your Python plug-ins live: the Plugins menu lists the scripts in this folder, and plug-ins added to a project point at their file here. Leave it as the default to use the plugins folder next to UDAW.exe. Saved with your settings.'),
+    ('btnDirPlugins', 'Browse', 'Choose the Python plug-ins folder.'),
     ('memSysPaths', 'System locations', 'Read-only fixed folders UDAW uses for config, data, cache and logs.'),
     ('cboColorTheme', 'Colour theme', 'Colour set for waveforms, meters, piano roll and tracker.'),
     ('btnColorThemeSave', 'Save copy', 'Save the current colours as a new named theme.'),
@@ -33727,7 +35487,7 @@ const
     ('btnBrowserAddToSelected', 'Add to selected track', 'Place the selected file on the currently selected Timeline track.'),
     ('memBrowser', 'Browser info', 'Details of the selected file.'),
     ('tvBrowser', 'File browser', 'Drag a sample onto the Timeline, or a .dll onto the Mixer.'),
-    ('cboAiModel', 'AI model', 'Model version to use with the chosen provider.'),
+    ('cboAiModel', 'AI/SI model', 'Model version to use with the chosen provider.'),
     ('btnAiSave', 'Save key', 'Encrypt and store the API key.'),
     ('btnAiDelete', 'Delete key', 'Remove the stored API key.'),
     ('edtAiMcpName', 'MCP server name', 'Friendly name for the MCP server you are adding.'),
@@ -33735,7 +35495,7 @@ const
     ('edtAiMcpToken', 'MCP bearer token', 'Optional. Token sent to an HTTP MCP server; stored in the OS secure store, not in the server list.'),
     ('edtAiMcpCommand', 'MCP command', 'Command line that starts the MCP server.'),
     ('btnAiMcpTest', 'Test MCP', 'Start the server and list the tools it offers.'),
-    ('chkAiMcpExpose', 'Expose UDAW', 'Let other AI clients control UDAW through an MCP server.'),
+    ('chkAiMcpExpose', 'Expose UDAW', 'Let other AI/SI clients control UDAW through an MCP server.'),
     ('edtAiMcpExposePort', 'MCP port', 'TCP port the UDAW MCP server listens on.'),
     ('chkAiMcpAllowDestructive', 'Allow destructive tools', 'Permit tools that delete or overwrite project content.'),
     ('lstAiMcpServers', 'MCP servers', 'Configured MCP servers.'),
@@ -33746,7 +35506,7 @@ const
     ('edtSunoPrompt', 'Song prompt', 'Describe the song you want Suno to generate.'),
     ('chkSunoCustom', 'Custom lyrics/style', 'Supply your own lyrics and style instead of a text prompt.'),
     ('edtSunoTitle', 'Song title', 'Title of the generated song.'),
-    ('edtAiPrompt', 'AI prompt', 'Type a request for the AI: mixing help, composition or commands.'),
+    ('edtAiPrompt', 'AI/SI prompt', 'Type a request for the AI/SI: mixing help, composition or commands.'),
     ('btnAiClear', 'Clear', 'Clear the conversation.'),
     ('btnSunoTest', 'Test connection', 'Check the Suno server address and key.'),
     ('cboSunoApi', 'Suno API type', 'Which Suno service or proxy to talk to.'),
@@ -33779,7 +35539,8 @@ var
 begin
   if App = nil then Exit;
   cfg := App.Config;
-
+  FSettingsLoading := True;
+  try
   { the scrollbox auto-scrolls to keep whatever control last had focus in
     view, so a control focused deep in the page (e.g. while editing) can
     leave it scrolled down the next time this tab is shown - always land on
@@ -33790,6 +35551,7 @@ begin
   cboSetBackend.Items.Clear;
   cboSetBackend.Items.Add('auto');
   cboSetBackend.Items.Add('wasapi');
+  cboSetBackend.Items.Add('directsound');
   cboSetBackend.Items.Add('software');
   SelOrAddCombo(cboSetBackend, cfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, 'auto'));
 
@@ -33814,6 +35576,7 @@ begin
 
   edSetOutCh.Text := IntToStr(cfg.GetInt(CFG_SEC_AUDIO, CFG_AUDIO_OUT_CH, 2));
   edSetInCh.Text := IntToStr(cfg.GetInt(CFG_SEC_AUDIO, CFG_AUDIO_IN_CH, 2));
+  RefreshOutputDeviceCombo(cfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_DEVICE, ''));
   RefreshInputDeviceCombo(cfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_IN_DEVICE, ''));
   RefreshMidiDeviceCombos(cfg.GetString(CFG_SEC_MIDI, CFG_MIDI_IN_DEVICE, ''),
     cfg.GetString(CFG_SEC_MIDI, CFG_MIDI_OUT_DEVICE, ''));
@@ -33875,6 +35638,8 @@ begin
   edDirRecordings.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_RECORDINGS, '');
   edDirScripts.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_SCRIPTS, '');
   edDirPresets.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_PRESETS, '');
+  edDirPlugins.Text := cfg.GetString(CFG_SEC_PATHS, CFG_PATH_PYPLUGINS, '');
+  if Trim(edDirPlugins.Text) = '' then edDirPlugins.Text := DefaultPluginsDir;
   var ovTemp, ovCache: string;
   LoadFolderOverrides(ovTemp, ovCache);
   edDirTemp.Text := ovTemp;
@@ -33899,6 +35664,94 @@ begin
   edSysExe.Text := Paths.ExecutableFile;
 
   lblSettingsStatus.Caption := ' ';
+  finally
+    FSettingsLoading := False;
+  end;
+  if not FSettingsWired then
+  begin
+    FSettingsWired := True;
+    WireSettingsAutoSave(sbSettings);
+  end;
+end;
+
+{ every setting is saved - and applied - the moment it is changed, so nothing depends on remembering
+  to choose "Save settings": drop-down picks and ticks save at once, text fields when they are left.
+  A change to the audio device settings re-opens the audio stream so it takes effect now, unless
+  something is playing (it then applies the next time the stream opens). }
+procedure TfrmMain.SettingsAutoSave(Sender: TObject);
+
+  function AudioSignature(ACfg: TConfig): string;
+  begin
+    Result := ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_RATE, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BUFFER, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_CH, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_IN_CH, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_IN_DEVICE, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_DEVICE, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_CAPTURE, '') + '|' +
+      ACfg.GetString(CFG_SEC_AUDIO, CFG_AUDIO_EXCLUSIVE, '');
+  end;
+
+var
+  before, backendBefore: string;
+  backendChanged: Boolean;
+begin
+  if FSettingsLoading or (App = nil) or (App.Config = nil) or (FRecWriter <> nil) then Exit;
+  before := AudioSignature(App.Config);
+  backendBefore := LowerCase(Trim(App.Config.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, 'auto')));
+  SaveSettingsTab;
+  backendChanged := backendBefore <> LowerCase(Trim(App.Config.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, 'auto')));
+  { a device id belongs to one backend: a new backend starts on the system default devices }
+  if backendChanged then
+  begin
+    App.Config.SetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_DEVICE, '');
+    App.Config.SetString(CFG_SEC_AUDIO, CFG_AUDIO_IN_DEVICE, '');
+  end;
+  if (AudioSignature(App.Config) <> before) and (App.Audio <> nil) and
+     not (FGraphPlaying or FWavPlaying or FTrkPlaying or FTlPlaying) then
+  begin
+    App.Audio.Reopen;
+    RefreshAudio;
+    UpdateTopStatus;
+    if backendChanged then
+    begin
+      FSettingsLoading := True;
+      try
+        RefreshOutputDeviceCombo('');
+        RefreshInputDeviceCombo('');
+      finally
+        FSettingsLoading := False;
+      end;
+    end;
+  end;
+end;
+
+{ connects the Settings page's drop-downs, tick boxes and text fields to SettingsAutoSave; a control
+  that already has its own handler keeps it (it saves or applies itself) }
+procedure TfrmMain.WireSettingsAutoSave(AParent: TWinControl);
+var
+  i: Integer;
+  c: TControl;
+
+  function Wanted(const AName: string): Boolean;
+  begin
+    Result := AName.StartsWith('cboSet') or AName.StartsWith('chkSet') or AName.StartsWith('edSet') or
+      AName.StartsWith('edDir') or (AName = 'cboColorTheme');
+  end;
+
+begin
+  for i := 0 to AParent.ControlCount - 1 do
+  begin
+    c := AParent.Controls[i];
+    if Wanted(c.Name) then
+    begin
+      if c is TGLCombo then TGLCombo(c).OnSelect := SettingsAutoSave
+      else if (c is TGLCheck) and not Assigned(TGLCheck(c).OnClick) then TGLCheck(c).OnClick := SettingsAutoSave
+      else if (c is TGLEdit) and not Assigned(TGLEdit(c).OnExit) then TGLEdit(c).OnExit := SettingsAutoSave;
+    end;
+    if c is TWinControl then WireSettingsAutoSave(TWinControl(c));
+  end;
 end;
 
 procedure TfrmMain.SaveSettingsTab;
@@ -33926,6 +35779,11 @@ begin
     cfg.SetString(CFG_SEC_AUDIO, CFG_AUDIO_IN_DEVICE, FInputDeviceIds[cboSetInDevice.ItemIndex])
   else
     cfg.SetString(CFG_SEC_AUDIO, CFG_AUDIO_IN_DEVICE, '');
+
+  if (cboSetOutDevice.ItemIndex >= 0) and (cboSetOutDevice.ItemIndex <= High(FOutputDeviceIds)) then
+    cfg.SetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_DEVICE, FOutputDeviceIds[cboSetOutDevice.ItemIndex])
+  else
+    cfg.SetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_DEVICE, '');
 
   cfg.SetBool(CFG_SEC_AUDIO, CFG_AUDIO_AUTOSTART, chkSetAutostart.Checked);
   cfg.SetBool(CFG_SEC_AUDIO, CFG_AUDIO_CAPTURE, chkSetCapture.Checked);
@@ -33970,6 +35828,11 @@ begin
   cfg.SetString(CFG_SEC_PATHS, CFG_PATH_RECORDINGS, Trim(edDirRecordings.Text));
   cfg.SetString(CFG_SEC_PATHS, CFG_PATH_SCRIPTS, Trim(edDirScripts.Text));
   cfg.SetString(CFG_SEC_PATHS, CFG_PATH_PRESETS, Trim(edDirPresets.Text));
+  { the default is stored as empty, so it keeps following the exe if UDAW is moved }
+  if SameText(ExcludeTrailingPathDelimiter(Trim(edDirPlugins.Text)), DefaultPluginsDir) then
+    cfg.SetString(CFG_SEC_PATHS, CFG_PATH_PYPLUGINS, '')
+  else
+    cfg.SetString(CFG_SEC_PATHS, CFG_PATH_PYPLUGINS, Trim(edDirPlugins.Text));
   ApplyDirDialogs;
 
   { Temp / Cache live in a bootstrap file (they are read before the config
@@ -34337,6 +36200,7 @@ begin
     7: begin ed := edDirCache;      cap := 'Cache files folder'; end;
     8: begin ed := edDirScripts;    cap := 'Default scripting folder'; end;
     9: begin ed := edDirPresets;    cap := 'Presets folder'; end;
+    10: begin ed := edDirPlugins;   cap := 'Python plug-ins folder'; end;
   end;
   if ed = nil then Exit;
   dir := ed.Text;
@@ -34530,8 +36394,36 @@ end;
 procedure TfrmMain.tvBrowserMouseDown(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
-  node: TGLTreeNode;
+  node, parentNode: TGLTreeNode;
+  pt: TPoint;
 begin
+  if Button = mbRight then
+  begin
+    { the Windows shell menu for the file or folder under the mouse (Open, Open with, Send to,
+      Copy, Delete, Properties ...); a command that changes the folder refreshes the Browser }
+    node := tvBrowser.GetNodeAt(X, Y);
+    if (node = nil) or not ((node.Data = BRND_FILE) or (node.Data = BRND_DIR)) then Exit;
+    node.Selected := True;
+    pt := tvBrowser.ClientToScreen(Point(X, Y));
+    parentNode := node;
+    if not ShowShellContextMenu(Handle, BrowserNodePath(node), pt.X, pt.Y,
+      procedure
+      var
+        dirNode: TGLTreeNode;
+      begin
+        { re-read just the folder that holds the item (it may have been renamed, deleted or pasted into) }
+        dirNode := parentNode;
+        if dirNode.Parent <> nil then dirNode := dirNode.Parent;
+        if (dirNode.Data = BRND_DIR) and (tvBrowser.Items.Count > 0) then
+        begin
+          dirNode.DeleteChildren;
+          tvBrowser.Items.AddChild(dirNode, '(loading...)').Data := BRND_PLACEHOLDER;
+          BrowserExpandNode(dirNode);
+        end;
+      end) then
+      memBrowser.Lines.Insert(0, 'shell menu unavailable: ' + ShellMenuLastError);
+    Exit;
+  end;
   if Button <> mbLeft then Exit;
   node := tvBrowser.GetNodeAt(X, Y);
   if (node = nil) or (node.Data <> BRND_FILE) then Exit;
@@ -34734,9 +36626,196 @@ begin
   end;
 end;
 
+{ Left-click-and-hold on a tracker instrument, tracker module file or sample in the Browser panel starts
+  an in-app drag (a plain click still just selects; double-click edits / loads it) }
+procedure TfrmMain.trTlRightMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState;
+  X, Y: Integer);
+var
+  node: TGLTreeNode;
+  n: Integer;
+begin
+  if Button <> mbLeft then Exit;
+  node := trTlRight.GetNodeAt(X, Y);
+  if (node = nil) or (node.Data = nil) then Exit;
+  n := Integer(NativeInt(node.Data)) - 1;
+  if (n < 0) or (n > High(FRightItems)) or
+     not (FRightItems[n].Kind in [RK_TRKINSTR, RK_TRKFILE, RK_FILE]) then Exit;
+  node.Selected := True;
+  trTlRight.BeginDrag(False);
+end;
+
+{ the selected Browser-panel node's tracker instrument item index, or -1 }
+function TfrmMain.TlRightSelectedInstr: Integer;
+var
+  node: TGLTreeNode;
+  n: Integer;
+begin
+  Result := -1;
+  node := trTlRight.Selected;
+  if (node = nil) or (node.Data = nil) then Exit;
+  n := Integer(NativeInt(node.Data)) - 1;
+  if (n < 0) or (n > High(FRightItems)) or (FRightItems[n].Kind <> RK_TRKINSTR) then Exit;
+  Result := FRightItems[n].Index;
+end;
+
+{ the selected Browser-panel node's library sample file path, or '' }
+function TfrmMain.TlRightSelectedSample: string;
+var
+  node: TGLTreeNode;
+  n: Integer;
+begin
+  Result := '';
+  node := trTlRight.Selected;
+  if (node = nil) or (node.Data = nil) then Exit;
+  n := Integer(NativeInt(node.Data)) - 1;
+  if (n < 0) or (n > High(FRightItems)) or (FRightItems[n].Kind <> RK_FILE) then Exit;
+  Result := FRightItems[n].Path;
+end;
+
+{ a library sample goes onto the selected audio track (or a new one) at the playhead }
+procedure TfrmMain.TlAddSampleAtPlayhead(const APath: string);
+var
+  trackId: Integer;
+begin
+  if FProject = nil then Exit;
+  trackId := TlSelectedAudioTrackId;
+  if trackId < 0 then trackId := TlNewAudioTrackId;
+  if ImportBrowserFileToTimeline(APath, trackId, FProject.Timeline.PlayheadSeconds) then
+    RefreshTimelineTab;
+end;
+
+{ Opens a library sample in the WAV editor (WAV, FLAC and MP3 files). The original file is never
+  touched: when the edit is kept (OK) the edited audio is added to the Timeline at the playhead. }
+procedure TfrmMain.TlEditLibrarySample(const APath: string);
+var
+  ext, outDir, wavPath, convertedFile, newPath: string;
+  flacRes: TFLACDecodeResult;
+  mp3Res: TMP3DecodeResult;
+begin
+  if FProject = nil then Exit;
+  if not FileExists(APath) then
+  begin
+    MessageDlg('The sample file cannot be found:' + sLineBreak + APath, mtWarning, [mbOK], 0);
+    Exit;
+  end;
+  ext := LowerCase(ExtractFileExt(APath));
+  outDir := IncludeTrailingPathDelimiter(RecordingRootPath);
+  wavPath := APath;
+  convertedFile := '';
+  newPath := '';
+  try
+    if ext <> '.wav' then
+    begin
+      ForceDirectories(outDir);
+      convertedFile := outDir + Format('src-%s-%s.wav',
+        [SafeSunoFileName(ChangeFileExt(ExtractFileName(APath), '')),
+         FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
+      if ext = '.flac' then
+      begin
+        if not FlacDecodeFile(APath, flacRes) or (flacRes.TotalFrames = 0) then
+          raise Exception.Create('This FLAC file could not be decoded.');
+        SaveWavFile(convertedFile, flacRes.Pcm, flacRes.Channels, flacRes.SampleRate,
+          flacRes.TotalFrames, wsfPCM24);
+      end
+      else if ext = '.mp3' then
+      begin
+        if not Mp3DecodeFile(APath, mp3Res) or (mp3Res.Frames = 0) then
+          raise Exception.Create('This MP3 file could not be decoded.');
+        SaveWavFile(convertedFile, mp3Res.Pcm, mp3Res.Channels, mp3Res.SampleRate,
+          mp3Res.Frames, wsfPCM24);
+      end
+      else
+      begin
+        convertedFile := '';
+        MessageDlg('The WAV editor opens WAV, FLAC and MP3 samples. Add this one to the Timeline ' +
+          'and edit the clip there.', mtInformation, [mbOK], 0);
+        Exit;
+      end;
+      JobNoteFile(convertedFile);
+      wavPath := convertedFile;
+    end
+    else if not FileLooksLikeWav(APath) then
+      raise Exception.Create('This is not a readable WAV file.');
+    if TfrmInstrumentEditor.EditFile(Self, ExtractFileName(APath), wavPath, $0060C0A0, outDir, newPath)
+       and (newPath <> '') then
+      TlAddSampleAtPlayhead(newPath);
+  except
+    on E: Exception do
+      MessageDlg('WAV editor failed:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+  end;
+  if convertedFile <> '' then DeleteFile(convertedFile);
+end;
+
+{ the selected Browser-panel node's tracker module file path, or '' }
+function TfrmMain.TlRightSelectedModule: string;
+var
+  node: TGLTreeNode;
+  n: Integer;
+begin
+  Result := '';
+  node := trTlRight.Selected;
+  if (node = nil) or (node.Data = nil) then Exit;
+  n := Integer(NativeInt(node.Data)) - 1;
+  if (n < 0) or (n > High(FRightItems)) or (FRightItems[n].Kind <> RK_TRKFILE) then Exit;
+  Result := FRightItems[n].Path;
+end;
+
+{ A tracker module dropped on the Timeline: loaded and offered to the same prompt as the
+  Timeline's Import menu items (live notation clip / one-off audio clip / cancel); either clip
+  lands at the playhead. }
+procedure TfrmMain.TlDropTrackerModule(const APath: string);
+var
+  fs: TFileStream;
+  data: TBytes;
+  module: TTrackerModule;
+  ext, kind: string;
+begin
+  ext := LowerCase(ExtractFileExt(APath));
+  try
+    fs := TFileStream.Create(APath, fmOpenRead or fmShareDenyWrite);
+    try
+      SetLength(data, fs.Size);
+      if Length(data) > 0 then fs.ReadBuffer(data[0], Length(data));
+    finally
+      fs.Free;
+    end;
+    if ext = '.mod' then
+    begin
+      module := ModToModule(data); kind := 'MOD';
+    end
+    else if ext = '.xm' then
+    begin
+      module := XmToModule(data); kind := 'XM';
+    end
+    else if IsLegacyModuleExt(ext) then
+    begin
+      module := LegacyToModule(data); kind := 'S3M';
+    end
+    else
+    begin
+      MptmSetSampleFolder(ExtractFilePath(ExpandFileName(APath)));
+      module := MptmToModule(data); kind := 'IT/MPTM';
+    end;
+    try
+      ImportTrackerModuleToTimeline(module, APath, kind);
+    finally
+      module.Free;
+    end;
+  except
+    on E: Exception do
+      MessageDlg('Module import to timeline FAILED:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+  end;
+end;
+
 procedure TfrmMain.pbTimelineDragOver(Sender, Source: TObject; X, Y: Integer;
   State: TDragState; var Accept: Boolean);
 begin
+  if Source = trTlRight then
+  begin
+    Accept := (FProject <> nil) and ((TlRightSelectedInstr >= 0) or (TlRightSelectedModule <> '') or
+      (TlRightSelectedSample <> ''));
+    Exit;
+  end;
   Accept := (Source = tvBrowser) and (FProject <> nil) and
     (tvBrowser.Selected <> nil) and (tvBrowser.Selected.Data = BRND_FILE) and
     BrowserIsAudioExt(LowerCase(ExtractFileExt(BrowserNodePath(tvBrowser.Selected))));
@@ -34749,9 +36828,31 @@ end;
 procedure TfrmMain.pbTimelineDragDrop(Sender, Source: TObject; X, Y: Integer);
 var
   path: string;
-  trackId: Integer;
+  trackId, instrItem: Integer;
   sec: Double;
 begin
+  if Source = trTlRight then
+  begin
+    { a library sample dropped on the Timeline goes in at the playhead }
+    if (FProject <> nil) and (TlRightSelectedSample <> '') then
+    begin
+      TlAddSampleAtPlayhead(TlRightSelectedSample);
+      Exit;
+    end;
+    { a tracker module dropped on the Timeline asks how to add it, at the playhead }
+    if (FProject <> nil) and (TlRightSelectedModule <> '') then
+    begin
+      TlDropTrackerModule(TlRightSelectedModule);
+      Exit;
+    end;
+    { a tracker instrument dropped on the Timeline goes in at the playhead }
+    instrItem := TlRightSelectedInstr;
+    if (instrItem < 0) or (FProject = nil) then Exit;
+    cboTrkInstrSel.ItemIndex := instrItem;
+    cboTrkInstrSelChange(nil);
+    btnTrkInstrAddTimelineClick(nil);
+    Exit;
+  end;
   if (Source <> tvBrowser) or (tvBrowser.Selected = nil) or
      (tvBrowser.Selected.Data <> BRND_FILE) or (FProject = nil) then Exit;
   path := BrowserNodePath(tvBrowser.Selected);

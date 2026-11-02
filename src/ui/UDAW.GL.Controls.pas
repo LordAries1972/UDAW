@@ -373,6 +373,17 @@ begin
     cv.FillRect(Rect(x + 7, y + 10, x + 9, y + 14));
     cv.FillRect(Rect(x + 11, y + 10, x + 13, y + 14));
   end
+  else if AId = 'foley' then
+  begin
+    { a sound pad struck, with level bars rising beside it: the Foley sampler }
+    cv.Brush.Style := bsClear;
+    cv.Rectangle(x + 1, y + 7, x + 9, y + 15);
+    cv.Brush.Style := bsSolid;
+    cv.FillRect(Rect(x + 3, y + 9, x + 7, y + 13));
+    cv.FillRect(Rect(x + 11, y + 10, x + 13, y + 15));
+    cv.FillRect(Rect(x + 13, y + 6, x + 15, y + 15));
+    cv.FillRect(Rect(x + 11, y + 2, x + 13, y + 8));
+  end
   else if AId = 'open' then
   begin
     { an open folder }
@@ -415,15 +426,14 @@ begin
   end
   else if AId = 'help' then
   begin
-    { a question mark in a ring }
+    { a speech bubble with a question mark: ask for help }
     cv.Brush.Style := bsClear;
-    cv.Ellipse(x + 1, y + 1, x + 15, y + 15);
-    cv.Pen.Width := 2;
-    cv.MoveTo(x + 6, y + 6); cv.LineTo(x + 6, y + 5); cv.LineTo(x + 8, y + 4); cv.LineTo(x + 10, y + 5);
-    cv.LineTo(x + 10, y + 7); cv.LineTo(x + 8, y + 9); cv.LineTo(x + 8, y + 10);
-    cv.Pen.Width := 1;
+    cv.RoundRect(x + 1, y + 1, x + 15, y + 12, 7, 7);
     cv.Brush.Style := bsSolid;
-    cv.FillRect(Rect(x + 7, y + 11, x + 9, y + 13));
+    cv.Polygon([Point(x + 3, y + 11), Point(x + 3, y + 15), Point(x + 8, y + 11)]);
+    cv.MoveTo(x + 6, y + 4); cv.LineTo(x + 7, y + 3); cv.LineTo(x + 9, y + 3); cv.LineTo(x + 10, y + 4);
+    cv.LineTo(x + 10, y + 5); cv.LineTo(x + 8, y + 6); cv.LineTo(x + 8, y + 7);
+    cv.FillRect(Rect(x + 7, y + 8, x + 9, y + 9));
   end
   else if AId = 'tostart' then
   begin
@@ -848,12 +858,15 @@ var
   cv: TGLCanvas;
   i: Integer;
   r: TRect;
-  face, ink, accent: TColor;
+  face, back, ink, accent: TColor;
   dis: Boolean;
 begin
   cv := GL;
   face := Sys(clBtnFace);
-  if FTransparent then GLParentBackdrop(Self, face);   // stays the face colour when nothing paints behind it
+  { the bar always takes the colour of a container that paints its own body (a recessed panel, a
+    title bar, a form with its own background); it stays the face colour when nothing does }
+  if not GLParentBackdrop(Self, back) then back := face;
+  face := back;
   ink := Sys(clBtnText);
   accent := Sys(clHighlight);
   cv.Brush.Style := bsSolid;
@@ -878,8 +891,7 @@ begin
       cv.FillRect(Rect(r.Left + 4, r.Bottom - 3, r.Right - 4, r.Bottom - 1));
     end;
     if dis then DrawIcon(cv, FIds[i], r, Blend(face, ink, 0.35))
-    else if FTransparent and (i = FPressed) then DrawIcon(cv, FIds[i], r, accent)
-    else if FTransparent and ((i = FHover) or IsLit(i)) then DrawIcon(cv, FIds[i], r, Blend(ink, accent, 0.7))
+    else if FTransparent and ((i = FPressed) or (i = FHover) or IsLit(i)) then DrawIcon(cv, FIds[i], r, accent)   // lights up like the collapse arrow
     else DrawIcon(cv, FIds[i], r, ink);
   end;
 end;

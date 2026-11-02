@@ -144,6 +144,7 @@ type
     procedure Solid(X0, Y0, X1, Y1: Single; AColor: TColor);
     procedure BeginPrim(AMode: Integer; ATex: Cardinal);
     procedure SegmentF(X1, Y1, X2, Y2: Single; AWidth: Single; AColor: TColor);
+    procedure FeatherPoly(const APts: array of TPointF; AColor: TColor);
     procedure DashedSegmentF(X1, Y1, X2, Y2: Single; AWidth: Single; AColor: TColor);
     procedure OutlinePoly(const APts: array of TPointF; AClosed: Boolean);
     procedure FillPoly(const APts: array of TPointF; AColor: TColor);
@@ -758,6 +759,24 @@ begin
     AColor, 0, 0, 0, 0, 0, 0);
 end;
 
+{ Anti-aliases the edge of a filled curved shape: a 1 px line of the fill colour at half strength along
+  the outline, so the edge pixels take half coverage (half inside, half outside the shape) instead of
+  stepping from fill to nothing. The jagged stair-steps on curves are what this removes. }
+procedure TGLCanvas.FeatherPoly(const APts: array of TPointF; AColor: TColor);
+var
+  i, n: Integer;
+  keep: Single;
+begin
+  n := Length(APts);
+  if n < 3 then Exit;
+  keep := FAlpha;
+  FAlpha := keep * 0.5;
+  for i := 0 to n - 2 do
+    SegmentF(APts[i].X, APts[i].Y, APts[i + 1].X, APts[i + 1].Y, 1, AColor);
+  SegmentF(APts[n - 1].X, APts[n - 1].Y, APts[0].X, APts[0].Y, 1, AColor);
+  FAlpha := keep;
+end;
+
 procedure TGLCanvas.DashedSegmentF(X1, Y1, X2, Y2: Single; AWidth: Single; AColor: TColor);
 var
   dx, dy, len, pos, e: Single;
@@ -941,9 +960,8 @@ begin
 end;
 
 procedure TGLCanvas.RoundRect(L, T, R, B, RW, RH: Integer);
-const
-  ARC_STEPS = 5;
 var
+  ARC_STEPS: Integer;   // segments per corner: enough that a segment is about a pixel long
   rx, ry, ins: Single;
   pts: TArray<TPointF>;
   inner: TArray<TPointF>;
@@ -980,10 +998,12 @@ begin
   if (R <= L) or (B <= T) then Exit;
   rx := Min(RW / 2, (R - L) / 2);
   ry := Min(RH / 2, (B - T) / 2);
+  ARC_STEPS := EnsureRange(Ceil(Max(rx, ry) * 1.1), 6, 24);
   if FBrush.Style = bsSolid then
   begin
     pts := Build(0);
     FillPoly(pts, FBrush.Color);
+    if (rx >= 1) and (ry >= 1) then FeatherPoly(pts, FBrush.Color);
   end;
   if FPen.Style <> psClear then
   begin
@@ -994,9 +1014,8 @@ begin
 end;
 
 procedure TGLCanvas.Ellipse(L, T, R, B: Integer);
-const
-  STEPS = 24;
 var
+  STEPS: Integer;
   pts: TArray<TPointF>;
   i: Integer;
   cx, cy, rx, ry, ins, a: Single;
@@ -1012,13 +1031,18 @@ begin
   cy := (T + B) / 2;
   rx := (R - L) / 2;
   ry := (B - T) / 2;
+  STEPS := EnsureRange(Ceil(Pi * (rx + ry) / 1.5), 24, 120);   // a segment about 1.5 px long
   SetLength(pts, STEPS);
   for i := 0 to STEPS - 1 do
   begin
     a := i * 2 * Pi / STEPS;
     pts[i] := PointF(cx + FastCos(a) * rx, cy + FastSin(a) * ry);
   end;
-  if FBrush.Style = bsSolid then FillPoly(pts, FBrush.Color);
+  if FBrush.Style = bsSolid then
+  begin
+    FillPoly(pts, FBrush.Color);
+    FeatherPoly(pts, FBrush.Color);
+  end;
   if FPen.Style <> psClear then
   begin
     ins := Max(1, FPen.Width) / 2;
@@ -1611,7 +1635,7 @@ begin
      not (csDesigning in ComponentState) then
   begin
     pt := Point(Msg.XPos, Msg.YPos);
-    if (pt.X = -1) and (pt.Y = -1) then pt := ClientToScreen(Point(Width div 2, Height div 2));
+    if (pt.X = -1) and (pt.Y = -1) then pt := ClientToScreen(Point(Width shr 1, Height shr 1));
     GLContextMenuHandler(Self, PopupMenu, pt.X, pt.Y);
     Msg.Result := 1;
   end

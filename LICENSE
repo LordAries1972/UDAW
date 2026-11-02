@@ -1,24 +1,259 @@
-This is free and unencumbered software released into the public domain.
+# UDAW – License and End-User License Agreement (EULA)
 
-Anyone is free to copy, modify, publish, use, compile, sell, or
-distribute this software, either in source code form or as a compiled
-binary, for any purpose, commercial or non-commercial, and by any
-means.
+**Ultimanium Digital Audio Workstation (UDAW)**
+Copyright © 2026 Ultimanium Designs and the UDAW developer(s). All rights reserved except as granted below.
 
-In jurisdictions that recognize copyright laws, the author or authors
-of this software dedicate any and all copyright interest in the
-software to the public domain. We make this dedication for the benefit
-of the public at large and to the detriment of our heirs and
-successors. We intend this dedication to be an overt act of
-relinquishment in perpetuity of all present and future rights to this
-software under copyright law.
+**PLEASE READ THIS DOCUMENT CAREFULLY BEFORE INSTALLING, COPYING OR USING UDAW.** By installing, copying, running or otherwise using UDAW you confirm that you have read, understood and agreed to be bound by this agreement. If you do not agree, do not install or use UDAW, and remove every copy of it from your devices.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-OTHER DEALINGS IN THE SOFTWARE.
+---
 
-For more information, please refer to <https://unlicense.org>
+## 1. Definitions
+
+In this agreement:
+
+- **"UDAW"** or **"the Software"** means the Ultimanium Digital Audio Workstation, in source code and compiled form, together with its updater, help files, documentation, sample content, presets, plug-in interfaces, scripts and every update or modification the developer(s) distribute.
+- **"Developer(s)"** means Ultimanium, the individual(s) who write, maintain or contribute to UDAW, and their affiliates, employees, contractors, volunteers, contributors, successors and assigns.
+- **"You"** or **"User"** means the person or organisation installing or using UDAW.
+- **"User Content"** means everything you create, import, record, load, generate, render, export, publish or otherwise handle with UDAW, including audio, video, images, MIDI, tracker modules, samples, loops, lyrics, text, prompts, projects, presets, scripts and plug-ins.
+- **"Third-Party Services"** means any service, engine, model, platform or website that is not part of UDAW and is not operated by the Developer(s), including (without limitation) Suno, Luma, OpenAI, Anthropic (Claude), DeepSeek, any other AI or music/video-generation provider, any Model Context Protocol (MCP) server or client you connect, any update or registration server, and any website you reach through UDAW.
+- **"UDAW Plug-ins"** means any Python script or plug-in, effect, instrument, preset pack or other add-on written for, loaded into or run from UDAW, including anything generated in whole or in part by an AI service, a code generator, a template or UDAW itself (including the Python SDK module and the example plug-ins supplied with UDAW), but excluding music, audio, video and other creative works that those plug-ins merely process or output.
+- **"Commercial Gain"** means any sale, licence for a fee, rental, lease, subscription, pay-what-you-want or "suggested price" arrangement, paywall, advertising or sponsorship revenue, bundling with a product or service that is paid for, or any other direct or indirect payment, consideration or financial benefit obtained for supplying, distributing or giving access to something.
+- **"Third-Party Plug-ins"** means any VST2, VST3, CLAP, Python or other plug-in, effect, instrument or script that was not written by the Developer(s) and that you load into or run from UDAW.
+
+---
+
+## 2. Free and Open Source Software (FOSS) and Non-Commercial Distribution
+
+2.1 UDAW is **Free and Open Source Software**. It is made available to the public at no charge, and its source code is published so that anyone may inspect it.
+
+2.2 Subject to the terms of this agreement, **and in particular to the prohibition on commercial sale in sections 2.7 to 2.11**, you are granted a worldwide, royalty-free, non-exclusive, perpetual (unless terminated under section 15) licence to:
+
+- (a) install and use UDAW on any number of devices you own or control, for any lawful purpose, including as a tool in your own professional or commercial music, audio and video production;
+- (b) study, inspect and modify the source code;
+- (c) copy and redistribute UDAW, with or without modification, **free of charge only and not for Commercial Gain**, provided that you keep this licence and every copyright and attribution notice intact, clearly mark any modified version as modified, and do not present your version as the official Ultimanium release;
+- (d) create, and sell or otherwise exploit, music, audio, video and other works that you make with UDAW, without paying the Developer(s) any royalty or fee (see section 6 for your responsibilities for those works). This permission covers your creative output only; it does not permit the sale of UDAW or of UDAW Plug-ins (see sections 2.7 to 2.10).
+
+2.3 You may not remove or alter the name "Ultimanium" or "UDAW", the copyright notices, or this licence from the Software, and you may not use the names, logos or trademarks of Ultimanium or UDAW to endorse or promote a derived product without written permission.
+
+2.4 Contributions. Unless you state otherwise in writing, any contribution you deliberately submit for inclusion in UDAW is submitted under the terms of this agreement, and you confirm that you have the right to submit it and that it does not infringe anyone else's rights. The Developer(s) are under no obligation to accept any contribution.
+
+2.5 Third-party components. Parts of UDAW or its distribution may include or interoperate with components written by others, which remain under their own licences (for example, secure-connection libraries and their runtime files). Those licences apply to those components. Nothing in this agreement overrides them, and the Developer(s) give no warranty for them.
+
+2.6 Nothing in this agreement transfers ownership of UDAW to you. All rights not expressly granted are reserved by the Developer(s).
+
+2.7 **No sale of the Software for Commercial Gain.** You must not sell, resell, license for a fee, rent, lease, lend for payment, sublicense for consideration, or otherwise distribute or make available UDAW (in source or compiled form, whole or in part, modified or unmodified) for Commercial Gain. This includes, without limitation: charging for downloads, copies, installers, activation, access, support or "premium" versions of UDAW or of a derivative; including UDAW in a paid product, subscription, course, bundle, hardware device, cloud service or marketplace listing; and hosting it behind a paywall or on a site that charges for or monetises the download. Reasonable charges that merely recover the actual physical cost of supplying a copy on a storage medium, with no profit, are not Commercial Gain.
+
+2.8 **No sale of UDAW Plug-ins.** UDAW Plug-ins, including **any Python plug-in or script that is generated, written, adapted, extended or assisted by UDAW, by its Python SDK or its bundled examples, or by any AI service used through UDAW**, are made available for free community use. You must not sell, license for a fee, rent, or otherwise distribute or make available any such UDAW Plug-in for Commercial Gain, whether on its own, as part of a pack or bundle, or inside another product or service. You may keep UDAW Plug-ins for your own use, and share them free of charge with others, provided that the plug-in remains free of charge and carries a notice that it is subject to this agreement. Music, audio, video and other output produced by using a UDAW Plug-in is not itself restricted by this section.
+
+2.9 **Derivative works.** Sections 2.7 and 2.8 apply to every modified version, fork, port, translation, repackaging and derivative work of UDAW or of a UDAW Plug-in, and to anyone you pass them on to. Each recipient receives their licence directly from the Developer(s) on these same terms, and you must not offer or impose any term that conflicts with them.
+
+2.10 **Exceptions and remedies.** The Developer(s) may grant written permission for a specific commercial use. Permission is effective only if it is in writing, names you and the use concerned, and is signed by or sent from an authorised representative of Ultimanium; it is never implied by silence, delay, tolerance of past conduct, or the absence of a reply. If you breach sections 2.7 to 2.9 or 2.11: (a) your licence under this agreement ends immediately under section 15; (b) you must stop the sale or distribution at once and remove every offer of the item; (c) you agree that damages alone would not be an adequate remedy, and that the Developer(s) may seek an injunction and other equitable relief without proof of actual loss; and (d) to the extent the law allows, you must account for and pay over to the Developer(s) all revenue and profit you obtained from the prohibited sale or distribution. Nothing in this section limits any other right or remedy the Developer(s) have.
+
+2.11 **No reverse engineering, extraction or derivation, by people or by AI.** You must not reverse engineer UDAW so that you can use what you learn for profit or any other Commercial Gain. Doing so violates this agreement. In full:
+
+- (a) **Prohibited acts.** You must not reverse engineer, decompile, disassemble, deobfuscate, unpack, de-virtualise, debug, trace, instrument, hook, patch, emulate, memory-dump, or otherwise analyse the compiled or binary form of UDAW, its updater, its libraries and plug-in modules, its installers, and any embedded, packed or encrypted resource, help or data file, nor monitor or capture its communications with any server, in order to discover, reconstruct or copy its source code, algorithms, signal-processing methods, models and prompts, file and project formats, protocols, user-interface designs, data structures, licensing or security measures, or any other non-public aspect of how it works.
+- (b) **Automated tools and artificial intelligence.** This section applies equally when the work is done, in whole or in part, by software, including any AI system, large language model, agent, automated or semi-automated reverse-engineering, decompilation, binary-analysis, runtime-tracing or behaviour-capture tool or platform, and any tool-calling or MCP-style service that gives such a system access to binaries, memory, processes, screens or network traffic. Uploading, submitting, pasting or otherwise supplying UDAW binaries, extracts, memory contents, disassembly, decompiled output or captured behaviour to such a system for that purpose is itself a breach. Anything a tool or agent does on your instructions, or that you allow it to do, is treated as done by you.
+- (c) **Prohibited purposes.** You must not carry out, commission or enable any act in (a) or (b) in order to build, improve, train, market or operate any product, service, plug-in, model, dataset or competing work for Commercial Gain, including a clone, re-implementation, port, emulation, "clean-room" or "inspired" version, compatibility layer, or a component, format reader or algorithm extracted from UDAW, and you must not give the results to anyone who will do so.
+- (d) **Results are covered.** Source code, specifications, notes, diagrams, descriptions, data, models and other material produced from or with the help of such analysis are derivative of UDAW. Sections 2.7 to 2.9 apply to them, and you must not sell, license or otherwise exploit them for Commercial Gain, or publish them for that purpose.
+- (e) **No workarounds.** You must not remove, bypass or defeat any protection, obfuscation, integrity check or notice in UDAW to make such analysis easier, and you must not have a third party perform the analysis for you. Examining the published source code as permitted by section 2.2 is not affected by this section, but it remains subject to sections 2.7 to 2.9.
+- (f) **Rights that cannot be waived.** Nothing in this section removes a right you have under mandatory law that cannot be excluded by agreement, such as limited decompilation to achieve interoperability where the law allows it. Where such a right applies, you may use it only to the minimum extent the law allows, only after you have asked the Developer(s) for the information you need and they have not supplied it within a reasonable time, only for that lawful purpose, and not for Commercial Gain or to build a competing product. What you learn must be kept confidential and not passed to anyone else.
+- (g) **Consequences.** A breach of this section is a violation of this agreement. Your licence ends under section 15, and the remedies in section 2.10 apply, including an injunction and the recovery of the Developer(s)' losses and costs to the fullest extent the law allows.
+
+---
+
+## 3. NO WARRANTY – "AS IS" AND "AS AVAILABLE"
+
+3.1 **UDAW IS PROVIDED "AS IS" AND "AS AVAILABLE", WITH ALL FAULTS, WITHOUT WARRANTY OF ANY KIND**, whether express, implied, statutory or otherwise. To the fullest extent permitted by law, the Developer(s) disclaim every warranty and condition, including (without limitation) warranties of merchantability, satisfactory quality, fitness for a particular purpose, accuracy, completeness, reliability, availability, compatibility, security, title, quiet enjoyment and non-infringement.
+
+3.2 The Developer(s) do not warrant that UDAW will meet your requirements; that it will run uninterrupted, error-free, bug-free or virus-free; that defects will be corrected; that it will be compatible with your operating system, hardware, drivers, audio interfaces, plug-ins or other software; or that anything produced with it will be of any particular quality or suitable for any particular use.
+
+3.3 UDAW is an actively developed work in progress. Features may be incomplete, experimental, changed or removed at any time without notice. Some features described in the documentation may be planned rather than finished (see the README for the current status).
+
+---
+
+## 4. NO LIABILITY – USE AT YOUR OWN RISK
+
+4.1 **You use UDAW entirely at your own risk.** To the maximum extent permitted by applicable law, **in no event shall the Developer(s) be liable for any claim, damage, loss or liability of any kind**, whether in contract, tort (including negligence), strict liability, statute, equity or otherwise, arising out of or in connection with UDAW, its source code, its use, or the inability to use it. This includes, without limitation, any direct, indirect, incidental, special, consequential, exemplary or punitive damages, and any of the following:
+
+- (a) damage to, or failure of, your computer, operating system, drivers, hardware, storage devices, audio interfaces, speakers, headphones, microphones, monitors or any other equipment, **at any time and for any reason, including as a result of using UDAW**;
+- (b) loss, corruption, overwriting or deletion of data, projects, recordings, files, settings, backups or other content, including through crashes, bugs, auto-save, crash recovery, undo/redo, import, export, rendering, recording, file-format conversion or the updater;
+- (c) hearing damage, tinnitus, speaker or equipment damage, or any other injury caused by loud, sudden, distorted, feedback-prone or otherwise harmful sound. **You are responsible for setting a safe listening volume before playing or recording anything**, and for using limiters and monitoring at safe levels;
+- (d) loss of profits, revenue, business, opportunity, goodwill, reputation, savings or anticipated benefits;
+- (e) costs of replacement goods, services, repair, data recovery or downtime;
+- (f) problems caused by Third-Party Plug-ins, scripts, Third-Party Services, drivers, or your use of the Software together with other software or hardware;
+- (g) security incidents, unauthorised access, malware, data leaks or loss of credentials, including loss or misuse of API keys or passwords you store in or enter into UDAW or in any connected service;
+- (h) charges, fees, quotas or subscription costs incurred with Third-Party Services (for example AI or music-generation credits consumed through your own accounts or API keys);
+- (i) any act or omission of any other user, contributor or third party.
+
+4.2 If the law of your jurisdiction does not allow the exclusion or limitation of certain warranties or liabilities, the exclusions and limitations in this agreement apply only to the extent permitted by that law, and, in that case, the total aggregate liability of the Developer(s) for all claims shall not exceed **zero (0) currency units**, being the amount you paid for the Software.
+
+4.3 The exclusions in this section are an essential basis of the bargain under which UDAW is made available free of charge. The Developer(s) would not make UDAW available without them.
+
+4.4 **Back up your work.** You are solely responsible for keeping your own backups of your projects and files. Do not rely on auto-save, crash recovery or any other feature as your only copy.
+
+---
+
+## 5. Not for critical, safety or regulated use
+
+UDAW is not designed or licensed for use where its failure could lead to death, personal injury or severe physical or environmental damage, including (without limitation) medical, life-support, aviation, vehicle-control, industrial-control, emergency-alert or nuclear applications. You must not use it for such purposes, and you assume every risk and liability if you do.
+
+---
+
+## 6. User Content, Copyright and Your Responsibility
+
+6.1 **You are solely and entirely responsible for all User Content** and for everything you do with UDAW. The Developer(s) do not supply, host, review, monitor, approve, license or control your User Content, and are not a party to any relationship between you and anyone else about it.
+
+6.2 **You are responsible for obtaining all rights, licences, permissions, clearances and consents** needed for any material you import, record, sample, load, process, generate, render, export, upload, distribute, perform, sell or publish with UDAW. This applies to audio, music, recordings, samples, loops, instrument and sound libraries, video, images, lyrics, text, voices, likenesses, names, artwork and any other material, whether you create it yourself, obtain it from a third party, or generate it with an AI engine.
+
+6.3 **Copyright and intellectual property.** The Developer(s) give no assurance that User Content, or anything UDAW produces from it, is free of third-party rights. You agree that:
+
+- (a) you will not use UDAW to copy, reproduce, distribute, perform, adapt or otherwise use any work in breach of copyright, neighbouring rights, performers' rights, moral rights, trademark, publicity or privacy rights, or any licence or contract;
+- (b) any claim, complaint, takedown notice, demand or legal action by a rights holder, collecting society, platform, distributor or other party about your User Content is **solely between you and that party**, and the Developer(s) have no involvement in it and no liability for it;
+- (c) the fact that UDAW can open, import, play, process, convert, stem-split, transcribe, re-pitch, time-stretch, sample, re-render or export a file does not mean you are entitled to do so.
+
+6.4 **Sampling, stem-splitting, transcription and conversion tools.** Features that analyse, transform or derive material from existing audio, video or music (for example stem separation, audio-to-MIDI, music transcription, chop-and-sample tools, tempo and pitch changes, format conversion and recording of system audio) are neutral tools. Using them on material you do not own or have no licence to use may infringe the rights of others. That is your responsibility alone.
+
+6.5 **Indemnity.** You agree to defend, indemnify and hold harmless the Developer(s) from and against any claim, demand, loss, liability, damage, cost and expense (including reasonable legal fees) arising out of or related to your User Content, your use or misuse of UDAW, your breach of this agreement, or your breach of any law or of any right of any third party.
+
+---
+
+## 7. AI Features and Third-Party Services
+
+7.1 **UDAW is an independent tool. The Developer(s) are not affiliated with, endorsed by, or responsible for any Third-Party Service.** Services such as **Suno**, **Luma**, **OpenAI**, **Anthropic**, **DeepSeek** and any other AI, music-generation, voice or video engine are **independent engines operated by other companies**. They have their own models, training data, terms of service, privacy policies, pricing, content rules and legal obligations. The Developer(s) do not operate, control, train, host or supervise them, and have no knowledge of, or control over, what they output.
+
+7.2 **UDAW only connects to those services on your behalf**, using the accounts, subscriptions or API keys that you provide. By connecting to them you accept their terms, and you are responsible for complying with those terms, for any fees charged by them, and for keeping your credentials secure.
+
+7.3 **AI output.** Any audio, music, lyrics, voice, vocals, image, video, text, code, advice, analysis, mix or mastering suggestion, project change, command or other output produced by or through an AI feature ("AI Output") may be inaccurate, inappropriate, unlawful, offensive, unsafe, biased, or similar to or derived from existing works. The Developer(s) do not review AI Output and give no warranty about it. In particular:
+
+- (a) **the Developer(s) make no statement about the ownership, copyrightability, commercial usability, originality or lawfulness of AI Output**, which depends on the law of your jurisdiction and on the terms of the service that produced it;
+- (b) **you are solely responsible for checking** that AI Output may lawfully be used, released, monetised and distributed, including any rights your chosen service grants or withholds, any attribution it requires, and any rules of the platforms and distributors you publish on;
+- (c) AI features that imitate, clone or resemble a person's voice, style or likeness may breach that person's rights or the law. **You must not use them to impersonate anyone, to deceive, defame or harass, or without all required consent**;
+- (d) the Developer(s) have no liability for any claim that AI Output, or the material used to produce it, infringes any copyright or other right.
+
+7.4 **Data you send.** When you use an AI or other online feature, the content you choose to send (such as prompts, lyrics, audio, project descriptions, reference files or voice input) is transmitted to the service you selected under that service's terms. **Do not send material you are not allowed to share or that is confidential.** The Developer(s) do not receive, store or control that data and are not responsible for how those services use, keep or disclose it.
+
+7.5 **Model Context Protocol (MCP) and automation.** Connecting UDAW to MCP servers or clients, scripts, remote tools or other automation lets those programs act on your projects and files. You are responsible for deciding what you connect, what you permit it to do, and for the consequences. Only connect software you trust.
+
+7.6 Third-Party Services may change, restrict, charge for or discontinue their service, or change their terms, at any time. The Developer(s) do not guarantee that any integration will keep working.
+
+---
+
+## 8. Plug-ins, Scripts and Third-Party Code
+
+8.1 UDAW can load and run code that the Developer(s) did not write, such as **VST2, VST3 and CLAP plug-ins and Python scripts or plug-ins**. Such code runs with your user permissions, can read and change files, use the network and may crash or destabilise UDAW or your system.
+
+8.2 **Not for sale.** UDAW Plug-ins (including Python plug-ins generated with or for UDAW) may not be sold or distributed for Commercial Gain, as set out in sections 2.7 to 2.10.
+
+8.3 **Only install and run code from sources you trust.** The Developer(s) do not review, certify or support Third-Party Plug-ins, are not responsible for any harm or loss they cause, and are not responsible for their licensing. Any plug-in or script you write or share is your own work and your own responsibility.
+
+---
+
+## 9. Online Features, Updates and Registration
+
+9.1 UDAW may check for, download and install updates, verify registration, or contact websites and services you choose to use. Updates replace files on your device. You accept the risk that any update could contain defects or be incompatible with your setup. Save your work before updating.
+
+9.2 Update, registration and website services are provided on a reasonable-effort basis and may be changed, suspended or ended at any time without notice or liability.
+
+9.3 Links to external sites are provided for convenience only. The Developer(s) do not control and are not responsible for the content or practices of external sites.
+
+---
+
+## 10. Privacy and Your Data
+
+10.1 UDAW is designed to work with your files on your own device. Projects, recordings, settings and caches are stored where you choose to keep them. The Developer(s) do not have access to them.
+
+10.2 Network features operate only when you use them or enable them, and send data to the service concerned as described in section 7.4. You are responsible for reading the privacy policy of every Third-Party Service you use.
+
+10.3 Credentials (such as API keys) that you save in UDAW are kept on your device. You are responsible for protecting your device and your accounts, for revoking any key you believe has been exposed, and for any use of your keys.
+
+10.4 You are responsible for complying with all privacy, data-protection, consent and recording laws that apply to what you record, import, process or share (for example recording another person's voice or a conversation).
+
+---
+
+## 11. Acceptable Use
+
+You agree not to use UDAW, or let anyone else use it, to:
+
+- (a) break any law or regulation, or infringe or violate the rights of any person;
+- (b) create, distribute or promote malware, or to attack, disrupt or gain unauthorised access to any system, account or service;
+- (c) produce content that is unlawful, defamatory, harassing, hateful, fraudulent, deceptive or that exploits or endangers children;
+- (d) impersonate any person or organisation, or falsely claim that the Developer(s) endorse your work or products;
+- (e) circumvent technical limits, security or licensing measures of UDAW or of any Third-Party Service;
+- (f) misrepresent the origin of your modified versions of UDAW;
+- (g) sell, or distribute for Commercial Gain, UDAW, any modified version of it, or any UDAW Plug-in, contrary to sections 2.7 to 2.10.
+
+---
+
+## 12. Support, Reporting Problems and Community
+
+12.1 UDAW is free software. **There is no obligation on the Developer(s) to provide support, maintenance, updates, bug fixes, new features, compatibility, data recovery or any particular response time**, and any help they do give is voluntary and given without warranty or liability.
+
+12.2 **Problems should be reported on our Discord channel.** The Discord invite link is published in the **README.md** document that accompanies UDAW (and on the official UDAW repository page). When you report a problem, please give your UDAW version, your version of Windows, what you did step by step, what you expected, what happened instead, and any crash report that UDAW displayed.
+
+12.3 Reporting a problem does not create any obligation to fix it, any warranty, or any contract between you and the Developer(s). Please be respectful in the community; the Developer(s) may remove content or users at their discretion.
+
+---
+
+## 13. Export Controls and Compliance
+
+You are responsible for complying with all export, import, sanctions and trade laws that apply to you and to your use of UDAW and its encryption and network components. You must not use UDAW if you are prohibited from doing so by law.
+
+---
+
+## 14. Trademarks
+
+"UDAW", "Ultimanium" and associated logos and icons are marks of Ultimanium. All other product, company, service and format names mentioned in or used with UDAW (including Suno, Luma, OpenAI, Anthropic, Claude, DeepSeek, VST, CLAP, Steinberg, Python, Windows, MP3, MP4, FLAC, MIDI and others) are the property of their respective owners, are used for identification only, and do not imply any affiliation, sponsorship or endorsement.
+
+---
+
+## 15. Term and Termination
+
+15.1 This agreement applies from the moment you first install or use UDAW and continues until terminated.
+
+15.2 It ends automatically if you breach any of its terms. You may end it at any time by uninstalling UDAW and destroying all copies in your possession.
+
+15.3 On termination you must stop using UDAW and stop distributing it and any UDAW Plug-ins. Sections 2.7 to 2.10, 3, 4, 5, 6, 7, 8, 10, 11, 13, 14, 15, 16, 17 and 18 survive termination, along with any other provision which by its nature is intended to survive.
+
+---
+
+## 16. Limitation Period and Waiver of Class Actions
+
+To the extent the law allows, any claim relating to UDAW must be started within one (1) year after the cause of the claim arose, or it is permanently barred. To the extent the law allows, you agree to bring claims only in your individual capacity and not as a plaintiff or class member in any class, collective or representative action.
+
+---
+
+## 17. Governing Law and Disputes
+
+17.1 This agreement is governed by the laws of the State of Victoria, Australia, and the federal laws of Australia that apply there, without regard to conflict-of-laws rules.
+
+17.2 Subject to any rights you have under mandatory law in your country of residence, the courts of Victoria, Australia, have exclusive jurisdiction over any dispute arising out of or relating to UDAW or this agreement.
+
+17.3 Before starting any legal action you agree to first raise the issue with the Developer(s) through the community channel in section 12 and to make a good-faith attempt to resolve it informally for at least thirty (30) days.
+
+---
+
+## 18. General
+
+18.1 **Entire agreement.** This agreement is the whole agreement between you and the Developer(s) about UDAW and replaces any earlier statement or understanding. It replaces any earlier licence file supplied with UDAW.
+
+18.2 **Severability.** If any part of this agreement is found to be invalid or unenforceable, that part will be enforced to the maximum extent permitted and the remainder stays in full force.
+
+18.3 **No waiver.** A failure or delay in enforcing any right is not a waiver of it.
+
+18.4 **Assignment.** You may not assign this agreement without written consent, except by passing on a copy of UDAW together with this agreement as permitted in section 2. The Developer(s) may assign their rights freely.
+
+18.5 **Changes.** The Developer(s) may update this agreement from time to time. The version shipped with the release you use applies to that release, and continued use of a later release is acceptance of the terms shipped with it. The current version is always available from UDAW's Help menu and from the official repository.
+
+18.6 **Headings and interpretation.** Headings are for convenience only. "Including" means "including without limitation".
+
+18.7 **Consumer rights.** Nothing in this agreement excludes or limits any right or remedy that cannot lawfully be excluded or limited, including statutory consumer guarantees where they apply. Where such rights apply, the Developer(s)' liability is limited, to the extent the law permits, to re-supplying the Software or the cost of re-supplying it, which for free software is nil.
+
+18.8 **Not legal advice.** This document is a general licence text and is not legal advice. If you have concerns about how it applies to you, consult a qualified lawyer in your jurisdiction.
+
+---
+
+## 19. Acceptance
+
+**BY INSTALLING, COPYING OR USING UDAW YOU ACKNOWLEDGE THAT YOU HAVE READ THIS AGREEMENT, THAT YOU UNDERSTAND IT, THAT YOU ACCEPT THAT UDAW IS FREE SOFTWARE PROVIDED WITHOUT WARRANTY AND AT YOUR OWN RISK, THAT THE DEVELOPER(S) CANNOT BE HELD LIABLE FOR WHAT UDAW DOES TO YOUR SYSTEM OR DATA AT ANY TIME, AND THAT YOU ALONE ARE RESPONSIBLE FOR THE MATERIAL YOU USE AND CREATE, AND FOR COMPLIANCE WITH COPYRIGHT AND ALL OTHER LAWS.**
+
+*End of agreement.*

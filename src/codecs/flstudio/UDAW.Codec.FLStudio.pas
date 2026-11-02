@@ -227,7 +227,7 @@ var
   c: Word;
 begin
   Result := '';
-  n := Length(ARaw) div 2;
+  n := Length(ARaw) shr 1;
   for i := 0 to n - 1 do
   begin
     c := Word(ARaw[i * 2]) or (Word(ARaw[i * 2 + 1]) shl 8);

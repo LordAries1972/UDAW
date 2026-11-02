@@ -27,7 +27,8 @@ const
   PROJECT_START_RECENT_COUNT = 5;
 
 type
-  TProjectStartChoice = (pscNone, pscNew, pscOpen, pscRecent, pscHelp, pscAbout);
+  TProjectStartChoice = (pscNone, pscNew, pscOpen, pscRecent, pscHelp, pscAbout, pscSettings,
+    pscTracker, pscFoley, pscDrumPad, pscPianoRoll, pscInstrument, pscAiSi);
 
   TfrmProjectStart = class(TForm, IGLBackdrop)
     pnlBody: TGLPanel;
@@ -45,6 +46,16 @@ type
     btnRecent2: TGLButton;
     btnRecent3: TGLButton;
     btnRecent4: TGLButton;
+    lblFunctions: TGLLabel;
+    lblSettings: TGLLabel;
+    btnTracker: TGLButton;
+    btnFoley: TGLButton;
+    btnDrumPad: TGLButton;
+    btnPianoRoll: TGLButton;
+    btnInstrument: TGLButton;
+    btnAiSi: TGLButton;
+    btnSettings: TGLButton;
+    bvlFuncSep: TGLShineBar;
     chkShowOnStartup: TGLCheck;
     bvlOpenSep: TGLShineBar;
     tmrShine: TTimer;
@@ -55,6 +66,8 @@ type
     procedure btnHelpClick(Sender: TObject);
     procedure btnAboutClick(Sender: TObject);
     procedure btnRecentClick(Sender: TObject);
+    procedure btnFunctionClick(Sender: TObject);
+    procedure btnSettingsClick(Sender: TObject);
     procedure tmrShineTimer(Sender: TObject);
   private
     FChoice: TProjectStartChoice;
@@ -437,6 +450,25 @@ end;
 procedure TfrmProjectStart.btnAboutClick(Sender: TObject);
 begin
   Choose(pscAbout);
+end;
+
+{ the FUNCTIONS buttons carry their editor in Tag: 0 Tracker, 1 Foley, 2 Drum Pad (Pattern),
+  3 Piano Roll, 4 Instrument, 5 AI/SI }
+procedure TfrmProjectStart.btnFunctionClick(Sender: TObject);
+begin
+  case (Sender as TComponent).Tag of
+    0: Choose(pscTracker);
+    1: Choose(pscFoley);
+    2: Choose(pscDrumPad);
+    3: Choose(pscPianoRoll);
+    4: Choose(pscInstrument);
+    5: Choose(pscAiSi);
+  end;
+end;
+
+procedure TfrmProjectStart.btnSettingsClick(Sender: TObject);
+begin
+  Choose(pscSettings);
 end;
 
 procedure TfrmProjectStart.btnRecentClick(Sender: TObject);

@@ -197,7 +197,7 @@ begin
       Logger.Info(SUBSYS, 'Secure storage: ' + FSecure.ProviderName + ' (available)')
     else
       Logger.Warn(SUBSYS, 'Secure storage: ' + FSecure.ProviderName +
-        ' (NOT available - AI credential storage will be disabled)');
+        ' (NOT available - AI/SI credential storage will be disabled)');
   except
     on E: Exception do
     begin

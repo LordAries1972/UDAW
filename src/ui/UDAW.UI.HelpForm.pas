@@ -21,7 +21,7 @@ interface
 
 uses
   Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
-  Dialogs, OleCtrls, SHDocVw, IOUtils, ExtCtrls, StdCtrls, UITypes,
+  Dialogs, OleCtrls, SHDocVw, IOUtils, ExtCtrls, StdCtrls, UITypes, ShellAPI,
   UDAW.Paths, UDAW.Web.HelpClient;
 
 type
@@ -29,13 +29,17 @@ type
     wb: TWebBrowser;
     pnlToolbar: TPanel;
     btnRefresh: TButton;
+    btnTranslate: TButton;
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure FormDestroy(Sender: TObject);
     procedure btnRefreshClick(Sender: TObject);
+    procedure btnTranslateClick(Sender: TObject);
   private
-    FTempFile: string;
+    FTempFile, FBrowserFile: string;
+    FTempName: string;
   public
     procedure ShowHtml(const AHtml: string);
+    procedure ShowLicense(const AHtml: string);
   end;
 
 implementation
@@ -55,6 +59,12 @@ end;
 
 procedure TfrmHelp.FormDestroy(Sender: TObject);
 begin
+  if (FBrowserFile <> '') and TFile.Exists(FBrowserFile) then
+    try
+      TFile.Delete(FBrowserFile);
+    except
+      // the browser may still have it open
+    end;
   if (FTempFile <> '') and TFile.Exists(FTempFile) then
     try
       TFile.Delete(FTempFile);
@@ -84,14 +94,52 @@ begin
   ShowHtml(html);
 end;
 
+{ The help page carries a Google Translate box in its header bar. The embedded viewer is too old to run
+  that widget, so this opens the same page in the default browser, where the language box works. }
+procedure TfrmHelp.btnTranslateClick(Sender: TObject);
+begin
+  if (FTempFile = '') or not TFile.Exists(FTempFile) then Exit;
+  FBrowserFile := TPath.Combine(ExtractFilePath(FTempFile), 'udaw-help-translate.html');
+  try
+    TFile.Copy(FTempFile, FBrowserFile, True);
+  except
+    on E: Exception do
+    begin
+      MessageDlg('Could not prepare the help page for your browser:' + sLineBreak + E.Message, mtError, [mbOK], 0);
+      Exit;
+    end;
+  end;
+  ShellExecute(0, 'open', PChar(FBrowserFile), nil, nil, SW_SHOWNORMAL);
+end;
+
+{ The License / EULA page: its own temp file and caption, and no Refresh/Translate buttons
+  (those reload or translate the Help Centre). }
+procedure TfrmHelp.ShowLicense(const AHtml: string);
+begin
+  Caption := 'UDAW License and EULA';
+  FTempName := 'udaw-license.html';
+  btnRefresh.Visible := False;
+  btnTranslate.Visible := False;
+  ShowHtml(AHtml);
+end;
+
 procedure TfrmHelp.ShowHtml(const AHtml: string);
 var
   url: string;
 begin
+  { wide enough for the page's two columns, but never larger than the screen }
+  if not Visible then
+  begin
+    if Width > Screen.WorkAreaWidth - 20 then Width := Screen.WorkAreaWidth - 20;
+    if Height > Screen.WorkAreaHeight - 20 then Height := Screen.WorkAreaHeight - 20;
+    Left := Screen.WorkAreaLeft + (Screen.WorkAreaWidth - Width) div 2;
+    Top := Screen.WorkAreaTop + (Screen.WorkAreaHeight - Height) div 2;
+  end;
   if FTempFile = '' then
     begin
       ForceDirectories(Paths.Temp);
-      FTempFile := TPath.Combine(Paths.Temp, 'udaw-help.html');
+      if FTempName = '' then FTempName := 'udaw-help.html';
+      FTempFile := TPath.Combine(Paths.Temp, FTempName);
     end;
 
   TFile.WriteAllText(FTempFile, CMotw + AHtml, TEncoding.UTF8);

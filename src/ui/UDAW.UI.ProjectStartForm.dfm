@@ -6,7 +6,7 @@ object frmProjectStart: TfrmProjectStart
   BorderIcons = []
   BorderStyle = bsNone
   Caption = 'Welcome to UDAW'
-  ClientHeight = 560
+  ClientHeight = 724
   ClientWidth = 560
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
@@ -29,7 +29,7 @@ object frmProjectStart: TfrmProjectStart
     Left = 0
     Top = 124
     Width = 560
-    Height = 436
+    Height = 600
     Align = alBottom
     BevelOuter = bvNone
     TabOrder = 0
@@ -177,9 +177,112 @@ object frmProjectStart: TfrmProjectStart
         Tag = 4
         OnClick = btnRecentClick
       end
+      object bvlFuncSep: TGLShineBar
+        Left = 40
+        Top = 340
+        Width = 480
+        Height = 8
+      end
+      object lblFunctions: TGLLabel
+        Left = 40
+        Top = 356
+        Width = 480
+        Height = 16
+        AutoSize = False
+        Caption = 'FUNCTIONS'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clGrayText
+        Font.Height = -11
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+      end
+      object btnTracker: TGLButton
+        Left = 40
+        Top = 380
+        Width = 150
+        Height = 40
+        Tag = 0
+        Hint = 'Open the Tracker (MOD / XM / IT patterns and instruments)'
+        Caption = 'Tracker'
+        OnClick = btnFunctionClick
+      end
+      object btnFoley: TGLButton
+        Left = 205
+        Top = 380
+        Width = 150
+        Height = 40
+        Tag = 1
+        Hint = 'Open the Foley Sampler: sound-effect pads to play and record against the picture'
+        Caption = 'Foley'
+        OnClick = btnFunctionClick
+      end
+      object btnDrumPad: TGLButton
+        Left = 370
+        Top = 380
+        Width = 150
+        Height = 40
+        Tag = 2
+        Hint = 'Open the Pattern editor: the step sequencer for drum and rhythm patterns'
+        Caption = 'Drum Pad (Pattern)'
+        OnClick = btnFunctionClick
+      end
+      object btnPianoRoll: TGLButton
+        Left = 40
+        Top = 426
+        Width = 150
+        Height = 40
+        Tag = 3
+        Hint = 'Open the Piano Roll for MIDI clips'
+        Caption = 'Piano Roll'
+        OnClick = btnFunctionClick
+      end
+      object btnInstrument: TGLButton
+        Left = 205
+        Top = 426
+        Width = 150
+        Height = 40
+        Tag = 4
+        Hint = 'Open the drum machine / instrument pads'
+        Caption = 'Instrument'
+        OnClick = btnFunctionClick
+      end
+      object btnAiSi: TGLButton
+        Left = 370
+        Top = 426
+        Width = 150
+        Height = 40
+        Tag = 5
+        Hint = 'Open the AI/SI tab: chat, composition, mixing and mastering help, and music generation'
+        Caption = 'Open AI/SI'
+        OnClick = btnFunctionClick
+      end
+      object lblSettings: TGLLabel
+        Left = 40
+        Top = 482
+        Width = 480
+        Height = 16
+        AutoSize = False
+        Caption = 'SETTINGS'
+        Font.Charset = DEFAULT_CHARSET
+        Font.Color = clGrayText
+        Font.Height = -11
+        Font.Name = 'Segoe UI'
+        Font.Style = [fsBold]
+        ParentFont = False
+      end
+      object btnSettings: TGLButton
+        Left = 40
+        Top = 504
+        Width = 480
+        Height = 44
+        Hint = 'Audio devices, folders, colours and the rest of the settings'
+        Caption = 'Open Settings'
+        OnClick = btnSettingsClick
+      end
       object lblTagline: TGLLabel
         Left = 40
-        Top = 396
+        Top = 566
         Width = 280
         Height = 16
         AutoSize = False
@@ -193,7 +296,7 @@ object frmProjectStart: TfrmProjectStart
       end
       object chkShowOnStartup: TGLCheck
         Left = 340
-        Top = 394
+        Top = 564
         Width = 180
         Height = 20
         Hint = 'Show this screen every time UDAW starts. Also available in Settings.'

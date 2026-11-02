@@ -228,7 +228,7 @@ end;
 { ---------------- worker ---------------- }
 
 type
-  TJobWorker = class(TThread)
+  TJobWorker = class(TUDAWThread)
   private
     FMgr: TJobManager;
     FIndex: Integer;

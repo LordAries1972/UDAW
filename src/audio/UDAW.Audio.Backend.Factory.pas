@@ -19,10 +19,10 @@ uses
   SysUtils,
   UDAW.Errors, UDAW.Logging,
   UDAW.Audio.Types, UDAW.Audio.Device, UDAW.Audio.Backend.Software
-  {$IFDEF UDAW_WINDOWS}, UDAW.Audio.Backend.WASAPI{$ENDIF};
+  {$IFDEF UDAW_WINDOWS}, UDAW.Audio.Backend.WASAPI, UDAW.Audio.Backend.DirectSound{$ENDIF};
 
 { Create the best available backend. APreferredId '' / 'auto' = platform default;
-  'software' | 'wasapi' force that one (falling back to software if missing). }
+  'software' | 'wasapi' | 'directsound' force that one (falling back to software if missing). }
 function CreateAudioBackend(const APreferredId: string = ''): IAudioBackend;
 
 { The names accepted by CreateAudioBackend / shown in settings. }
@@ -76,6 +76,16 @@ begin
     Exit(MakeSoftware);   // 'null' historically = non-hardware; software fills that role
 
   {$IFDEF UDAW_WINDOWS}
+  if want = 'directsound' then
+  begin
+    if DirectSoundAvailable then
+    begin
+      Logger.Info(SUBSYS, 'audio backend: DirectSound');
+      Exit(TDirectSoundBackend.Create);
+    end;
+    Logger.Warn(SUBSYS, 'DirectSound unavailable; using WASAPI/software');
+    Exit(MakeWASAPIOrSoftware);
+  end;
   if (want = '') or (want = 'auto') or (want = 'wasapi') then
     Exit(MakeWASAPIOrSoftware);
   Logger.Warn(SUBSYS, Format('unknown backend "%s"; using WASAPI/software', [want]));
@@ -90,10 +100,12 @@ end;
 function AvailableBackendIds: TArray<string>;
 begin
   {$IFDEF UDAW_WINDOWS}
+  Result := TArray<string>.Create('auto');
   if WASAPIAvailable then
-    Result := TArray<string>.Create('auto', 'wasapi', 'software')
-  else
-    Result := TArray<string>.Create('auto', 'software');
+    Result := Result + TArray<string>.Create('wasapi');
+  if DirectSoundAvailable then
+    Result := Result + TArray<string>.Create('directsound');
+  Result := Result + TArray<string>.Create('software');
   {$ELSE}
   Result := TArray<string>.Create('auto', 'software');
   {$ENDIF}

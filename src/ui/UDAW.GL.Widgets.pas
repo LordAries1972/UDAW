@@ -57,6 +57,11 @@ type
     { only controls that show the highlight run its repaint timer; a panel hosting video must not
       be repainted over and over while the pointer rests on it }
     function WantsGlow: Boolean; virtual;
+    { the theme's control colours (Settings > Colors > Control: ...) }
+    function SelectionColor: TColor;
+    function SelectionTextColor: TColor;
+    function HoverTint: TColor;
+    function FocusColor: TColor;
     procedure PrepareCanvas(ACanvas: TGLCanvas); override;
     function FieldColor: TColor;
     { Caption as displayed: '&&' -> '&', a single '&' (accelerator mark) removed }
@@ -213,6 +218,8 @@ type
     FLayout: TTextLayout;
     FWordWrap: Boolean;
     FTransparent: Boolean;
+    FSunken: Boolean;
+    procedure SetSunken(AValue: Boolean);
     procedure SetAlignment(AValue: TAlignment);
     procedure SetLayout(AValue: TTextLayout);
     procedure SetWordWrap(AValue: Boolean);
@@ -226,6 +233,8 @@ type
   published
     property Alignment: TAlignment read FAlignment write SetAlignment default taLeftJustify;
     property Layout: TTextLayout read FLayout write SetLayout default tlTop;
+    { drawn in a lowered bevel box (a read-out window); the text is kept clear of its edge }
+    property Sunken: Boolean read FSunken write SetSunken default False;
     property WordWrap: Boolean read FWordWrap write SetWordWrap default False;
     property AutoSize default True;
     { accepted for form-file compatibility with TLabel; the label always shows the form through }
@@ -280,6 +289,16 @@ type
     property OnResize: TNotifyEvent read FOnResize write FOnResize;
   end;
 
+  { A TGLPanel drawn as a recessed, rounded container - a lowered bevel box in one flat body colour
+    with an inset shadow, like the frame-rate read-out. The controls on it paint over that same
+    colour (transparent icon bars and labels included). }
+  TGLRecessPanel = class(TGLPanel, IGLBackdrop)
+  protected
+    procedure PaintGL; override;
+  public
+    function GLBackdropColor(const ARect: TRect): TColor;
+  end;
+
   TGLCollapseMode = (cmStrip, cmBar);
 
   { A TGLPanel drawn as a rounded container with a title-bar segment holding the Title and a
@@ -287,7 +306,7 @@ type
     pointing right, Title upright beneath it) that moves to 5 pixels right of the control on
     its left (the drum pads); expanding restores the size and position. The children are hidden
     while collapsed. Children are laid out below the title bar (Top >= 34). }
-  TGLCollapsePanel = class(TGLPanel)
+  TGLCollapsePanel = class(TGLPanel, IGLBackdrop)
   private
     FTitle: string;
     FCollapsed: Boolean;
@@ -296,8 +315,12 @@ type
     FHoverHead: Boolean;
     FHeadColor: TColor;
     FMode: TGLCollapseMode;
+    FHeadH: Integer;
+    FCornerColor: TColor;
     FAutoPlace: Boolean;
     FOnToggle: TNotifyEvent;
+    procedure SetCornerColor(AValue: TColor);
+    procedure SetHeadHeight(AValue: Integer);
     procedure SetHeadColor(AValue: TColor);
     procedure SetTitle(const AValue: string);
     procedure SetCollapsed(AValue: Boolean);
@@ -311,8 +334,17 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    { IGLBackdrop: a transparent icon bar in the title bar shows the title-bar colour }
+    function GLBackdropColor(const ARect: TRect): TColor;
+    { the title-bar colour: the theme's own, or HeadColor }
+    function HeadFillColor: TColor;
   published
     property Title: string read FTitle write SetTitle;
+    { height of the title-bar segment; raise it for a title bar that holds taller controls }
+    property HeadHeight: Integer read FHeadH write SetHeadHeight default 32;
+    { the colour behind the rounded corners when the panel sits on something that paints its own
+      background (a custom-drawn surface); clNone takes the colour of the parent control }
+    property CornerColor: TColor read FCornerColor write SetCornerColor default clNone;
     property Collapsed: Boolean read FCollapsed write SetCollapsed default False;
     { colour of the title-bar segment; clNone takes the theme's own }
     property HeadColor: TColor read FHeadColor write SetHeadColor default clNone;
@@ -338,6 +370,14 @@ type
     FContentW: Integer;          // widest item, pixels; -1 = measure on the next paint
     FHDragging: Boolean;
     FHGrab: Integer;
+    FAnim: TTimer;               // glides the selection pill and the hover glow, like the menus
+    FPillRow, FPillAlpha: Double;
+    FHovRow, FHovAlpha: Double;
+    FHoverIdx: Integer;
+    FPhase: Double;
+    procedure AnimTick(Sender: TObject);
+    procedure Kick;
+    procedure CMMouseLeave(var Msg: TMessage); message CM_MOUSELEAVE;
     procedure SetItems(AValue: TStrings);
     procedure SetIndex(AValue: Integer);
     procedure SetTop(AValue: Integer);
@@ -349,6 +389,7 @@ type
     function GetCount: Integer;
     function GetSelected(AIndex: Integer): Boolean;
     procedure SetSelected(AIndex: Integer; AValue: Boolean);
+    function BodyH: Integer;
     function RowH: Integer;
     function VisibleRows: Integer;
     function MaxTop: Integer;
@@ -573,6 +614,7 @@ type
     FHovRow, FHovAlpha: Double;
     FHoverIdx: Integer;
     FPhase: Double;
+    function BodyH: Integer;
     procedure AnimTick(Sender: TObject);
     procedure Kick;
     procedure CMMouseLeave(var Msg: TMessage); message CM_MOUSELEAVE;
@@ -605,6 +647,8 @@ type
     { MultiSelect: Ctrl+click toggles a row, Shift+click selects a range }
     function IsSelected(AIndex: Integer): Boolean;
     function SelCount: Integer;
+    { the row under a point in the control's own coordinates, -1 on the header, a scroll bar or empty space }
+    function ItemAt(X, Y: Integer): Integer;
     property ItemIndex: Integer read FIndex write SetIndex;
   published
     property Columns: TCollection read FColumns write SetColumns;
@@ -722,6 +766,8 @@ type
     procedure RemovePage(APage: TGLPage);
     procedure PageChanged;
     procedure SelectNextPage(AGoForward: Boolean);
+    { where the last visible tab is, in this control's coordinates (a 0-width rect at the left when there is none): lets a control sit in the header row just after the tabs }
+    function LastTabRect: TRect;
     property PageCount: Integer read GetPageCount;
     property Pages[AIndex: Integer]: TGLPage read GetPage;
     property ActivePageIndex: Integer read GetActivePageIndex write SetActivePageIndex;
@@ -793,6 +839,7 @@ type
   TGLScrollBox = class(TGLWidget)
   private
     FPosY, FPosX: Integer;
+    FPad, FBottomPad: Integer;
     FVert, FHorz: TGLScrollAxis;
     FDragging, FDraggingX: Boolean;
     FGrab: Integer;
@@ -818,6 +865,12 @@ type
     procedure SetScrollX(AValue: Integer);
     property VertScrollBar: TGLScrollAxis read FVert;
     property HorzScrollBar: TGLScrollAxis read FHorz;
+  published
+    property OnResize;
+    { space kept past the last child before a scroll bar is needed }
+    property ContentPadding: Integer read FPad write FPad default 8;
+    { extra scroll room below the last child (vertical only), so a drop-down at the bottom can open in full }
+    property BottomPadding: Integer read FBottomPad write FBottomPad default 0;
   end;
 
   TGLStatusPanel = class(TCollectionItem)
@@ -928,7 +981,17 @@ type
     FHDragging: Boolean;
     FHGrab: Integer;
     FOnExpanding: TGLTreeExpandingEvent;
+    FAnim: TTimer;               // glides the selection pill and the hover glow, like the menus
+    FPillRow, FPillAlpha: Double;
+    FHovRow, FHovAlpha: Double;
+    FHoverIdx: Integer;
+    FPhase: Double;
+    procedure AnimTick(Sender: TObject);
+    procedure Kick;
+    function SelRow: Integer;
+    procedure CMMouseLeave(var Msg: TMessage); message CM_MOUSELEAVE;
     procedure BuildRows;
+    function BodyH: Integer;
     function RowH: Integer;
     function VisibleRows: Integer;
     function MaxTop: Integer;
@@ -1003,15 +1066,20 @@ type
   private
     FMin, FMax, FPos: Double;
     FVertical: Boolean;
+    FSegmented: Boolean;
     procedure SetMin(AValue: Double);
     procedure SetMax(AValue: Double);
     procedure SetPos(AValue: Double);
     procedure SetVertical(AValue: Boolean);
+    procedure SetSegmented(AValue: Boolean);
+    procedure PaintSegments(cv: TGLCanvas; AFraction: Double);
   protected
     procedure PaintGL; override;
   public
     constructor Create(AOwner: TComponent); override;
   published
+    { a level meter: evenly sized segments, green then amber from 70 % and red from 90 % of the range }
+    property Segmented: Boolean read FSegmented write SetSegmented default False;
     property Min: Double read FMin write SetMin;
     property Max: Double read FMax write SetMax;
     property Position: Double read FPos write SetPos;
@@ -1220,6 +1288,7 @@ type
     FEdit: TGLEdit;
     FSync: Boolean;
     FOnChange: TNotifyEvent;
+    FOnSelect: TNotifyEvent;
     procedure SetStyle(AValue: TComboBoxStyle);
     procedure SetText(const AValue: string);
     procedure EditChanged(Sender: TObject);
@@ -1252,6 +1321,8 @@ type
     property DropDownRows: Integer read FDropRows write FDropRows default 8;
     property TabStop default True;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
+    { an entry was chosen from the drop-down list (not raised while typing in the box) }
+    property OnSelect: TNotifyEvent read FOnSelect write FOnSelect;
   end;
 
 { Draws a scroll-bar thumb as a raised, bevelled 3D piece. The thumb glides to wherever it belongs
@@ -1266,11 +1337,27 @@ procedure GLDrawScrollThumb(cv: TGLCanvas; AView: TGLView; ASlot: Integer; const
   AHorizontalGrip draws the grip line across a vertical slider's cap (False: along it). }
 procedure GLDrawSliderKnob(cv: TGLCanvas; const R: TRect; ABase: TColor; AHot, AGripAcross: Boolean);
 
+{ Shadow depth, as on the buttons. DrawDropShadow: a soft shadow beneath R (it falls ADepth px below
+  R, so leave that room under the body). DrawInsetShadow: shades a recessed area from the top and
+  left inside R's edge. }
+procedure DrawDropShadow(cv: TGLCanvas; const R: TRect; ARadius, ADepth: Integer;
+  AStrength: Double = 1.0);
+procedure DrawInsetShadow(cv: TGLCanvas; const R: TRect; ADepth: Integer);
+{ a rounded three-dimensional box, raised or set into the surface; only the box itself is drawn, so
+  the corners outside its curve keep whatever is behind it }
+procedure DrawBox3D(cv: TGLCanvas; const R: TRect; AFace: TColor; ARaised: Boolean; ARadius: Integer);
+
+{ Lines every single-line label up with the field it captions: a label that sits to the left of a
+  combo box or edit box (within a short gap, and overlapping it vertically) is given that field's
+  top and body height with its text centred, so the label and the field's own text share one
+  baseline. Works through the whole control tree under AParent. }
+procedure GLAlignLabelsToFields(AParent: TWinControl);
+
 implementation
 
 
 uses
-  UDAW.DSP.MathTables;
+  UDAW.DSP.MathTables, UDAW.UI.ThemeColors;
 
 type
   TWinAccess = class(TWinControl);   // SelectNext is protected
@@ -1291,6 +1378,170 @@ begin
     (Byte(Round(((ca shr 8) and $FF) + (((cb shr 8) and $FF) - ((ca shr 8) and $FF)) * T)) shl 8) or
     (Byte(Round(((ca shr 16) and $FF) + (((cb shr 16) and $FF) - ((ca shr 16) and $FF)) * T)) shl 16));
 end;
+
+{ the single flat colour inside a group box; the controls in it paint over the same colour }
+function GroupBodyColor(AFace: TColor): TColor;
+begin
+  Result := Blend(AFace, clBlack, 0.14);
+end;
+
+{ Shadow depth for the controls, the same layered look as the buttons' drop shadow.
+  DrawInsetShadow: a recessed control (field, list, tree, groove) is shaded from the top and the
+  left inside its edge and catches a little light along the bottom and right.
+  DrawDropShadow: a raised small control (check box, caption tab) casts a soft shadow below. }
+procedure DrawInsetShadow(cv: TGLCanvas; const R: TRect; ADepth: Integer);
+var
+  i, x0, x1, y0, y1: Integer;
+begin
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  for i := 0 to ADepth - 1 do
+  begin
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.34 * (1 - i / ADepth);
+    x0 := R.Left + 4 + i;
+    x1 := R.Right - 4 - i;
+    y0 := R.Top + 4 + i;
+    y1 := R.Bottom - 4 - i;
+    if x1 > x0 then cv.FillRect(Rect(x0, R.Top + i, x1, R.Top + i + 1));
+    if y1 > y0 then cv.FillRect(Rect(R.Left + i, y0, R.Left + i + 1, y1));
+  end;
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.09;
+  x0 := R.Left + 5;
+  x1 := R.Right - 5;
+  y0 := R.Top + 5;
+  y1 := R.Bottom - 5;
+  if x1 > x0 then cv.FillRect(Rect(x0, R.Bottom - 1, x1, R.Bottom));
+  if y1 > y0 then cv.FillRect(Rect(R.Right - 1, y0, R.Right, y1));
+  cv.Alpha := 1;
+end;
+
+procedure DrawDropShadow(cv: TGLCanvas; const R: TRect; ARadius, ADepth: Integer;
+  AStrength: Double = 1.0);
+begin
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := clBlack;
+  cv.Alpha := System.Math.Min(1.0, 0.24 * AStrength);
+  cv.RoundRect(R.Left, R.Top + 1, R.Right, R.Bottom + ADepth, ARadius + 2, ARadius + 2);
+  cv.Alpha := System.Math.Min(1.0, 0.32 * AStrength);
+  cv.RoundRect(R.Left + 1, R.Top + 2, R.Right - 1, R.Bottom + ADepth - 1, ARadius + 1, ARadius + 1);
+  cv.Alpha := System.Math.Min(1.0, 0.5 * AStrength);
+  cv.RoundRect(R.Left + 1, R.Top + ADepth, R.Right - 1, R.Bottom + ADepth - 1, ARadius, ARadius);
+  cv.Alpha := 1;
+end;
+
+{ The relief of a page tab (R is the tab body; its foot is square and open to the page below).
+  DrawTabRaised: the selected tab - a gloss over its upper part, a shaded underside, a bright top
+  lip, a lit left edge and a dark right edge; AShaded False leaves the body's own gloss alone.
+  DrawTabShadow: the shadow the raised tab casts below its foot (needs 4 free rows under R).
+  DrawTabSunken: an unselected tab, set into the surface - shaded from the top and the sides inside
+  its edge, with a faint lit rim along its foot. }
+procedure DrawTabRaised(cv: TGLCanvas; const R: TRect; AStrength: Double; AShaded: Boolean);
+var
+  h: Integer;
+begin
+  h := R.Bottom - R.Top;
+  if h < 8 then Exit;
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  if AShaded then
+  begin
+    cv.PushClip(Rect(R.Left, R.Top, R.Right, R.Bottom - 1));
+    cv.Brush.Color := clWhite;
+    cv.Alpha := 0.10 * AStrength;
+    cv.RoundRect(R.Left + 2, R.Top + 1, R.Right - 2, R.Top + (h * 5) div 12, 9, 9);
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.20 * AStrength;
+    cv.RoundRect(R.Left + 1, R.Top + (h * 62) div 100, R.Right - 1, R.Bottom + 12, 11, 11);
+    cv.PopClip;
+  end;
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.50 * AStrength;
+  cv.FillRect(Rect(R.Left + 7, R.Top + 1, R.Right - 7, R.Top + 2));
+  cv.Alpha := 0.22 * AStrength;
+  cv.FillRect(Rect(R.Left + 1, R.Top + 8, R.Left + 2, R.Bottom - 1));
+  cv.Brush.Color := clBlack;
+  cv.Alpha := 0.38 * AStrength;
+  cv.FillRect(Rect(R.Right - 2, R.Top + 8, R.Right - 1, R.Bottom - 1));
+  cv.FillRect(Rect(R.Left + 1, R.Bottom - 2, R.Right - 1, R.Bottom - 1));
+  cv.Alpha := 1;
+end;
+
+procedure DrawTabShadow(cv: TGLCanvas; const R: TRect; AStrength: Double);
+var
+  k: Integer;
+begin
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := clBlack;
+  for k := 0 to 3 do
+  begin
+    cv.Alpha := System.Math.Min(1.0, (0.40 - 0.09 * k) * AStrength);
+    cv.FillRect(Rect(R.Left + 2 + k, R.Bottom + k, R.Right - 2 - k, R.Bottom + k + 1));
+  end;
+  cv.Alpha := 1;
+end;
+
+procedure DrawTabSunken(cv: TGLCanvas; const R: TRect; AStrength: Double; ABody: TColor = clNone);
+var
+  k, sl, el, rad: Integer;
+  body0: TColor;
+begin
+  if R.Bottom - R.Top < 8 then Exit;
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.PushClip(Rect(R.Left, R.Top, R.Right, R.Bottom - 1));
+  if ABody = clNone then
+  begin
+    { square (flat) tabs: straight strips along the top and the sides }
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.14 * AStrength;
+    cv.RoundRect(R.Left, R.Top, R.Right, R.Bottom + 12, 11, 11);
+    for k := 0 to 4 do
+    begin
+      cv.Alpha := 0.36 * (1 - k / 5) * AStrength;
+      cv.FillRect(Rect(R.Left + 4 + k, R.Top + k, R.Right - 4 - k, R.Top + k + 1));
+    end;
+    for k := 0 to 2 do
+    begin
+      cv.Alpha := 0.28 * (1 - k / 3) * AStrength;
+      cv.FillRect(Rect(R.Left + k, R.Top + 6, R.Left + k + 1, R.Bottom - 1));
+      cv.FillRect(Rect(R.Right - k - 1, R.Top + 6, R.Right - k, R.Bottom - 1));
+    end;
+  end
+  else
+  begin
+    { curved tabs: the shade is built from nested rounded outlines, so it follows the corner curves
+      exactly - ring k is a dark rounded rectangle drawn k px inside the edge, then everything inside
+      the next ring is put back to the body colour, leaving a 1 px band per ring. The top is shaded
+      deeper (5 rings) than the sides (3 rings), as before. }
+    body0 := Blend(ABody, clBlack, 0.14 * AStrength);
+    cv.Alpha := 1;
+    cv.Brush.Color := body0;
+    cv.RoundRect(R.Left, R.Top, R.Right, R.Bottom + 12, 11, 11);
+    for k := 0 to 4 do
+    begin
+      sl := System.Math.Min(k, 3);
+      rad := System.Math.Max(3, 11 - 2 * k);
+      cv.Brush.Color := clBlack;
+      cv.Alpha := 0.36 * (1 - k / 5) * AStrength;
+      cv.RoundRect(R.Left + sl, R.Top + k, R.Right - sl, R.Bottom + 12, rad, rad);
+      sl := System.Math.Min(k + 1, 3);
+      el := System.Math.Max(3, 11 - 2 * (k + 1));
+      cv.Alpha := 1;
+      cv.Brush.Color := body0;
+      cv.RoundRect(R.Left + sl, R.Top + k + 1, R.Right - sl, R.Bottom + 12, el, el);
+    end;
+  end;
+  cv.PopClip;
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.10 * AStrength;
+  cv.FillRect(Rect(R.Left + 2, R.Bottom - 2, R.Right - 2, R.Bottom - 1));
+  cv.Alpha := 1;
+end;
+
 
 { A rounded, three-dimensional box: a dark rim, a body a shade lighter (raised) or darker
   (lowered, set into the surface), a glossy band across the top and a soft shade along the
@@ -1345,6 +1596,15 @@ begin
     cv.RoundRect(R.Left + 2, R.Top + 2, R.Right - 2, R.Top + 2 + (h * 40) div 100, Max(2, rad * 2 - 4), Max(2, rad * 2 - 4));
   end;
   cv.Alpha := 1;
+  if ARaised then
+  begin
+    { raised: the underside falls into shadow }
+    cv.Brush.Color := clBlack;
+    cv.Alpha := 0.16;
+    cv.RoundRect(R.Left + 2, R.Bottom - 1 - Max(3, h div 6), R.Right - 2, R.Bottom - 1, Max(2, rad * 2 - 4), Max(2, rad * 2 - 4));
+    cv.Alpha := 1;
+  end
+  else DrawInsetShadow(cv, Rect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1), 4);
   { the specular line just inside the rim }
   cv.Pen.Style := psSolid;
   cv.Pen.Color := spec;
@@ -1572,6 +1832,10 @@ begin
   p := Parent;
   while p <> nil do
   begin
+    if p is TGLPage then Exit(FaceColor);   // a tab page paints the face colour: sit on it, not on what is behind the page
+    if (p is TGLCollapsePanel) and (p = Parent) and (Top < TGLCollapsePanel(p).HeadHeight) then
+      Exit(TGLCollapsePanel(p).HeadFillColor);   // a control sitting in the title bar
+    if (p is TGLGroup) or (p is TGLRecessPanel) or (p is TGLCollapsePanel) then Exit(GroupBodyColor(FaceColor));
     if (p is TGLPanel) and (TGLPanel(p).Color <> clBtnFace) then Exit(Sys(TGLPanel(p).Color));
     if not (p is TGLPanel) and GLParentBackdrop(Self, c) then Exit(c);   // a form painting its own background
     p := p.Parent;
@@ -1588,6 +1852,27 @@ function TGLWidget.InkColor: TColor;
 begin
   if Enabled then Result := Sys(clBtnText)
   else Result := Blend(Sys(clBtnFace), Sys(clBtnText), 0.4);
+end;
+
+function TGLWidget.SelectionColor: TColor;
+begin
+  Result := ColorToRGB(CurrentTheme.ControlSelection);
+  if not Enabled then Result := Blend(Sys(clBtnFace), Result, 0.3);
+end;
+
+function TGLWidget.SelectionTextColor: TColor;
+begin
+  Result := ColorToRGB(CurrentTheme.ControlSelectionText);
+end;
+
+function TGLWidget.HoverTint: TColor;
+begin
+  Result := ColorToRGB(CurrentTheme.ControlHover);
+end;
+
+function TGLWidget.FocusColor: TColor;
+begin
+  Result := ColorToRGB(CurrentTheme.ControlFocus);
 end;
 
 function TGLWidget.AccentColor: TColor;
@@ -1657,36 +1942,81 @@ begin
 end;
 
 procedure TGLButton.PaintGL;
+const
+  DEPTH = 5;   // how far the raised face stands off the surface
 var
   cv: TGLCanvas;
   face, c: TColor;
-  tw, th: Integer;
+  tw, th, lift, w, h: Integer;
+  faceRect: TRect;
+  sunk: Boolean;
 begin
   cv := GL;
   face := FaceColor;
+  sunk := FDown or (Pressed and Hover);
+  { a raised button stands DEPTH px proud of its shadow; pressed or latched it sinks into it }
+  if sunk then lift := 1 else lift := DEPTH;
+  w := Width; h := Height;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
   { outside the rounded face the button shows what it sits on }
   cv.Brush.Color := BackdropColor;
-  cv.FillRect(Rect(0, 0, Width, Height));
+  cv.FillRect(Rect(0, 0, w, h));
   if not Enabled then c := Blend(face, InkColor, 0.1)
   else if FDown then c := Blend(face, AccentColor, 0.55)
   else if Pressed and Hover then c := Blend(face, AccentColor, 0.45)
   else if Hover then c := Blend(face, InkColor, 0.16)
   else c := Blend(face, InkColor, 0.08);
+  faceRect := Rect(1, 1 + (DEPTH - lift), w - 1, h - lift);
+  { the cast shadow: a soft wide layer and a tighter dark one under the face edge }
+  cv.Brush.Color := clBlack;
+  cv.Alpha := 0.26;
+  cv.RoundRect(0, faceRect.Top + 1, w, h, 10, 10);
+  cv.Alpha := 0.34;
+  cv.RoundRect(1, faceRect.Top + 2, w - 1, h, 9, 9);
+  cv.Alpha := 0.55;
+  cv.RoundRect(faceRect.Left, faceRect.Top + lift, faceRect.Right, h - 1, 7, 7);
+  cv.Alpha := 1.0;
+  { the button body, edge-lit from above }
+  cv.Brush.Color := Blend(c, clBlack, 0.22);   // the visible side wall below the face
+  cv.RoundRect(faceRect.Left, faceRect.Top + 1, faceRect.Right, faceRect.Bottom + 1, 7, 7);
   cv.Brush.Color := c;
-  cv.RoundRect(1, 1, Width - 1, Height - 1, 7, 7);
-  if not FDown then DrawHoverGlow(cv, Rect(1, 1, Width - 1, Height - 1), 7);
+  cv.RoundRect(faceRect.Left, faceRect.Top, faceRect.Right, faceRect.Bottom, 7, 7);
+  if not sunk then
+  begin
+    { gloss: the upper half catches the light }
+    cv.Alpha := 0.35;
+    cv.GradientRect(Rect(faceRect.Left + 3, faceRect.Top + 1, faceRect.Right - 3,
+      faceRect.Top + (faceRect.Bottom - faceRect.Top) div 2), Blend(c, clWhite, 0.55), c);
+    cv.Alpha := 1.0;
+  end
+  else
+  begin
+    { pressed: the face is in shade, the top edge in the shadow of the rim }
+    cv.Alpha := 0.25;
+    cv.GradientRect(Rect(faceRect.Left + 3, faceRect.Top + 1, faceRect.Right - 3,
+      faceRect.Top + 5), clBlack, c);
+    cv.Alpha := 1.0;
+  end;
+  if not FDown then DrawHoverGlow(cv, faceRect, 7);
   cv.Pen.Style := psSolid;
   if FDown then cv.Pen.Color := Blend(face, AccentColor, 0.35)
   else cv.Pen.Color := Blend(face, InkColor, 0.35);
   cv.Brush.Style := bsClear;
-  cv.RoundRect(1, 1, Width - 1, Height - 1, 7, 7);
+  cv.RoundRect(faceRect.Left, faceRect.Top, faceRect.Right, faceRect.Bottom, 7, 7);
+  if not sunk then
+  begin
+    { bright top edge }
+    cv.Pen.Color := Blend(c, clWhite, 0.5);
+    cv.MoveTo(faceRect.Left + 5, faceRect.Top + 1);
+    cv.LineTo(faceRect.Right - 5, faceRect.Top + 1);
+  end;
   cv.Brush.Style := bsSolid;
   cv.Font.Color := InkColor;
   tw := cv.TextWidth(ShownCaption);
   th := cv.TextHeight(ShownCaption);
-  cv.TextOut((Width - tw) div 2, (Height - th) div 2 + Ord(Pressed and Hover), ShownCaption);
+  cv.TextOut((w - tw) div 2,
+    faceRect.Top + (faceRect.Bottom - faceRect.Top - th) div 2, ShownCaption);
   DrawFocus(cv);
 end;
 
@@ -1737,8 +2067,9 @@ begin
   cv.Brush.Color := face;
   cv.FillRect(Rect(0, 0, Width, Height));
   bx := 2;
-  by := (Height - 16) div 2;
-  if FChecked then cv.Brush.Color := AccentColor
+  by := (Height - 16) div 2 - 1;
+  DrawDropShadow(cv, Rect(bx, by, bx + 16, by + 16), 5, 3);
+  if FChecked then cv.Brush.Color := SelectionColor
   else if Hover then cv.Brush.Color := Blend(face, InkColor, 0.22)
   else cv.Brush.Color := TrackColor;
   cv.RoundRect(bx, by, bx + 16, by + 16, 5, 5);
@@ -1948,7 +2279,7 @@ begin
   cv.FillRect(Rect(0, 0, Width, Height));
   n := System.Math.Min(Width, Height - 28);
   r := n div 2 - 4;
-  cx := Width div 2;
+  cx := Width shr 1;
   cy := r + 4;
   Arc(A0, A0 + Sweep, 4, TrackColor);
   aEnd := A0 + Sweep * Fraction;
@@ -2236,8 +2567,8 @@ end;
 
 function TGLSlider.TrackRect: TRect;
 begin
-  if FVertical then Result := Rect(Width div 2 - 2, 8, Width div 2 + 2, Height - 8)
-  else Result := Rect(8, Height div 2 - 2, Width - 8, Height div 2 + 2);
+  if FVertical then Result := Rect(Width shr 1 - 2, 8, Width shr 1 + 2, Height - 8)
+  else Result := Rect(8, Height shr 1 - 2, Width - 8, Height shr 1 + 2);
 end;
 
 procedure TGLSlider.DragTo(X, Y: Integer; Fine: Boolean);
@@ -2266,6 +2597,7 @@ begin
   cv.Brush.Color := face;
   cv.FillRect(Rect(0, 0, Width, Height));
   tr := TrackRect;
+  DrawDropShadow(cv, tr, 4, 2);
   cv.Brush.Color := TrackColor;
   cv.RoundRect(tr.Left, tr.Top, tr.Right, tr.Bottom, 4, 4);
   cv.Brush.Color := AccentColor;
@@ -2273,14 +2605,16 @@ begin
   begin
     ty := tr.Bottom - Round((tr.Bottom - tr.Top) * Fraction);
     if ty < tr.Bottom then cv.RoundRect(tr.Left, ty, tr.Right, tr.Bottom, 4, 4);
-    GLDrawSliderKnob(cv, Rect(Width div 2 - 10, ty - 8, Width div 2 + 10, ty + 8), InkColor,
+    DrawInsetShadow(cv, tr, 2);
+    GLDrawSliderKnob(cv, Rect(Width shr 1 - 10, ty - 8, Width shr 1 + 10, ty + 8), InkColor,
       Hover or Pressed, True);
   end
   else
   begin
     tx := tr.Left + Round((tr.Right - tr.Left) * Fraction);
     if tx > tr.Left then cv.RoundRect(tr.Left, tr.Top, tx, tr.Bottom, 4, 4);
-    GLDrawSliderKnob(cv, Rect(tx - 8, Height div 2 - 10, tx + 8, Height div 2 + 10), InkColor,
+    DrawInsetShadow(cv, tr, 2);
+    GLDrawSliderKnob(cv, Rect(tx - 8, Height shr 1 - 10, tx + 8, Height shr 1 + 10), InkColor,
       Hover or Pressed, False);
   end;
 end;
@@ -2314,7 +2648,7 @@ begin
   cv := GL;
   top := 8;
   bot := Height - 8;   { the travel TGLSlider.DragTo maps the pointer onto }
-  cx := Width div 2;
+  cx := Width shr 1;
   span := System.Math.Max(1e-9, Max - Min);
   cv.Pen.Style := psClear;
   cv.Brush.Style := bsSolid;
@@ -2410,6 +2744,13 @@ begin
   end;
 end;
 
+procedure TGLLabel.SetSunken(AValue: Boolean);
+begin
+  if FSunken = AValue then Exit;
+  FSunken := AValue;
+  Invalidate;
+end;
+
 procedure TGLLabel.PaintGL;
 var
   cv: TGLCanvas;
@@ -2422,6 +2763,7 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, Width, Height));
+  if FSunken then DrawBox3D(cv, Rect(0, 0, Width, Height), BackdropColor, False, 8);
   if Enabled then cv.Font.Color := Sys(Font.Color)
   else cv.Font.Color := Blend(FaceColor, Sys(Font.Color), 0.4);
   line := ShownCaption;
@@ -2429,10 +2771,10 @@ begin
   if not FWordWrap then
   begin
     case FAlignment of
-      taRightJustify: x := Width - cv.TextWidth(line);
+      taRightJustify: x := Width - cv.TextWidth(line) - IfThen(FSunken, 9, 0);
       taCenter: x := (Width - cv.TextWidth(line)) div 2;
     else
-      x := 0;
+      x := IfThen(FSunken, 9, 0);
     end;
     case FLayout of
       tlCenter: y := (Height - lineH) div 2;
@@ -2486,11 +2828,16 @@ begin
   cv.Brush.Color := face;
   cv.FillRect(Rect(0, 0, Width, Height));
   th := cv.TextHeight('Ag');
-  { a rounded, lowered box with its caption on a small raised tab }
-  DrawBox3D(cv, Rect(0, th div 2, Width, Height), face, False, 9);
+  { a rounded box in one flat body colour, with its caption on a small raised tab }
+  cv.Brush.Color := Blend(face, clBlack, 0.26);
+  cv.RoundRect(0, th div 2, Width, Height, 18, 18);
+  cv.Brush.Color := GroupBodyColor(face);
+  cv.RoundRect(1, th div 2 + 1, Width - 1, Height - 1, 16, 16);
+  DrawInsetShadow(cv, Rect(2, th div 2 + 2, Width - 2, Height - 2), 4);
   if cap <> '' then
   begin
     tw := cv.TextWidth(cap);
+    DrawDropShadow(cv, Rect(8, 0, 8 + tw + 16, th + 2), 6, 3);
     DrawBox3D(cv, Rect(8, 0, 8 + tw + 16, th + 2), face, True, 6);
     cv.Brush.Style := bsClear;
     cv.Font.Color := InkColor;
@@ -2590,10 +2937,47 @@ begin
   end;
 end;
 
+{ TGLRecessPanel }
+
+function TGLRecessPanel.GLBackdropColor(const ARect: TRect): TColor;
+begin
+  Result := GroupBodyColor(FaceColor);
+end;
+
+procedure TGLRecessPanel.PaintGL;
+var
+  cv: TGLCanvas;
+  face: TColor;
+begin
+  cv := GL;
+  face := FaceColor;
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := face;
+  cv.FillRect(Rect(0, 0, Width, Height));
+  { rim, then the flat body inside it, shaded from the top and left }
+  cv.Brush.Color := Blend(face, clBlack, 0.26);
+  cv.RoundRect(0, 0, Width, Height, 16, 16);
+  cv.Brush.Color := GroupBodyColor(face);
+  cv.RoundRect(1, 1, Width - 1, Height - 1, 14, 14);
+  { the recess is shown by hairlines on the very edge: the controls on the panel (labels, icon
+    bars, fields) fill their own rectangle with the body colour, so a wide shaded band inside the
+    edge would be cut into by them and look like lighter blocks behind them }
+  cv.Brush.Color := clBlack;
+  cv.Alpha := 0.45;
+  cv.FillRect(Rect(8, 1, Width - 8, 2));
+  cv.Alpha := 0.35;
+  cv.FillRect(Rect(1, 8, 2, Height - 8));
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.12;
+  cv.FillRect(Rect(8, Height - 2, Width - 8, Height - 1));
+  cv.Alpha := 1;
+end;
+
 { TGLCollapsePanel }
 
 const
-  COLLAPSE_HEAD_H = 28;      { height of the title-bar segment }
+  COLLAPSE_HEAD_H = 32;   { the default }      { height of the title-bar segment: tall enough for a 22 px field and its shadow }
   COLLAPSE_STRIP_W = 26;     { width of the collapsed strip }
   COLLAPSE_INSET = 5;        { a collapsed strip sits this far right of its left-hand neighbour }
 
@@ -2601,6 +2985,8 @@ constructor TGLCollapsePanel.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
   FHidden := TList.Create;
+  FHeadH := COLLAPSE_HEAD_H;
+  FCornerColor := clNone;
   FHeadColor := clNone;
   FAutoPlace := True;
   BevelOuter := bvNone;
@@ -2612,6 +2998,34 @@ destructor TGLCollapsePanel.Destroy;
 begin
   FHidden.Free;
   inherited Destroy;
+end;
+
+{ the title-bar colour: the theme's own, or HeadColor }
+function TGLCollapsePanel.HeadFillColor: TColor;
+begin
+  if FHeadColor <> clNone then Result := ColorToRGB(FHeadColor)
+  else Result := Blend(FaceColor, InkColor, 0.13);
+end;
+
+function TGLCollapsePanel.GLBackdropColor(const ARect: TRect): TColor;
+begin
+  if (ARect.Top < FHeadH) or (FCollapsed and (FMode = cmStrip)) then Result := HeadFillColor
+  else Result := GroupBodyColor(FaceColor);
+end;
+
+procedure TGLCollapsePanel.SetCornerColor(AValue: TColor);
+begin
+  if FCornerColor = AValue then Exit;
+  FCornerColor := AValue;
+  Invalidate;
+end;
+
+procedure TGLCollapsePanel.SetHeadHeight(AValue: Integer);
+begin
+  AValue := EnsureRange(AValue, 20, 80);
+  if FHeadH = AValue then Exit;
+  FHeadH := AValue;
+  Invalidate;
 end;
 
 procedure TGLCollapsePanel.SetTitle(const AValue: string);
@@ -2662,7 +3076,7 @@ begin
       end;
     if FMode = cmBar then
     begin
-      Height := COLLAPSE_HEAD_H + 3;
+      Height := FHeadH + 3;
       Invalidate;
       Exit;
     end;
@@ -2721,7 +3135,7 @@ var
   h: Boolean;
 begin
   inherited MouseMove(Shift, X, Y);
-  h := FCollapsed or (Y < COLLAPSE_HEAD_H);
+  h := FCollapsed or (Y < FHeadH);
   if h <> FHoverHead then
   begin
     FHoverHead := h;
@@ -2732,7 +3146,7 @@ end;
 procedure TGLCollapsePanel.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
   inherited MouseUp(Button, Shift, X, Y);
-  if (Button = mbLeft) and (FCollapsed or (Y < COLLAPSE_HEAD_H)) and
+  if (Button = mbLeft) and (FCollapsed or (Y < FHeadH)) and
      PtInRect(Rect(0, 0, Width, Height), Point(X, Y)) then
     SetCollapsed(not FCollapsed);
 end;
@@ -2740,13 +3154,12 @@ end;
 procedure TGLCollapsePanel.PaintGL;
 var
   cv: TGLCanvas;
-  face, body, head, line, ink, arrow, headInk: TColor;
+  face, head, ink, arrow, headInk: TColor;
   cx, cy: Integer;
 begin
   cv := GL;
   face := FaceColor;
   ink := InkColor;
-  body := face;   { children paint the face colour, so the body must match it }
   head := Blend(face, ink, 0.13);
   headInk := ink;
   if FHeadColor <> clNone then
@@ -2758,48 +3171,64 @@ begin
     else
       headInk := clWhite;
   end;
-  line := Blend(face, ink, 0.3);
   if FHoverHead and (FHeadColor = clNone) then arrow := AccentColor else arrow := headInk;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.Brush.Color := face;
+  { the corners outside the rounded frame show what the panel sits on }
+  if FCornerColor <> clNone then cv.Brush.Color := ColorToRGB(FCornerColor)
+  else cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, Width, Height));
-  { rounded container: an outline colour, then the body one pixel inside it }
-  cv.Brush.Color := line;
-  cv.RoundRect(0, 0, Width, Height, 12, 12);
+  { a raised frame (lit from above, shaded underneath) ... }
+  DrawBox3D(cv, Rect(0, 0, Width, Height), head, True, 12);
   if FCollapsed and (FMode = cmStrip) then
   begin
-    cv.Brush.Color := head;
-    cv.RoundRect(1, 1, Width - 1, Height - 1, 11, 11);
-    cx := Width div 2;
+    { ... around an inset strip: its rim, a dark flat body and a shade from the top and left }
+    cv.Brush.Color := Blend(head, clBlack, 0.55);
+    cv.RoundRect(3, 3, Width - 3, Height - 3, 9, 9);
+    cv.Brush.Color := Blend(head, clBlack, 0.62);
+    cv.RoundRect(4, 4, Width - 4, Height - 4, 8, 8);
+    DrawInsetShadow(cv, Rect(4, 4, Width - 4, Height - 4), 3);
+    cx := Width shr 1;
+    if FHoverHead then arrow := AccentColor else arrow := Blend(head, clWhite, 0.8);
     cv.Brush.Color := arrow;
-    cv.Polygon([Point(cx - 3, 9), Point(cx - 3, 21), Point(cx + 4, 15)]);
+    cv.Polygon([Point(cx - 3, 11), Point(cx - 3, 23), Point(cx + 4, 17)]);
     if FTitle <> '' then
     begin
-      cv.Font.Color := headInk;
-      cv.PushClip(Rect(1, 28, Width - 1, Height - 4));
-      cv.TextOutVertical(cx - cv.TextHeight(FTitle) div 2 - 1, 32, FTitle);
+      cv.Font.Color := Blend(head, clWhite, 0.85);
+      cv.PushClip(Rect(5, 30, Width - 5, Height - 8));
+      cv.TextOutVertical(cx - cv.TextHeight(FTitle) div 2 - 1, 34, FTitle);
       cv.PopClip;
     end;
     Exit;
   end;
-  cv.Brush.Color := body;
-  cv.RoundRect(1, 1, Width - 1, Height - 1, 11, 11);
-  { the title-bar segment: rounded on top, square where it meets the body }
+  { ... around an inset body: its rim, then one flat colour that the controls on the panel paint over }
+  cv.Brush.Color := Blend(head, clBlack, 0.45);
+  cv.RoundRect(3, 3, Width - 3, Height - 3, 9, 9);
+  cv.Brush.Color := GroupBodyColor(face);
+  cv.RoundRect(4, 4, Width - 4, Height - 4, 8, 8);
+  DrawInsetShadow(cv, Rect(4, 4, Width - 4, Height - 4), 3);
+  { the title-bar segment, raised: rounded on top, square where it meets the body, with a lit top
+    lip and a dark lower edge }
   cv.Brush.Color := head;
-  cv.RoundRect(1, 1, Width - 1, COLLAPSE_HEAD_H, 11, 11);
-  cv.FillRect(Rect(1, COLLAPSE_HEAD_H - 8, Width - 1, COLLAPSE_HEAD_H));
-  cv.Brush.Color := line;
-  cv.FillRect(Rect(1, COLLAPSE_HEAD_H, Width - 1, COLLAPSE_HEAD_H + 1));
+  cv.RoundRect(4, 4, Width - 4, FHeadH, 8, 8);
+  cv.FillRect(Rect(4, FHeadH - 8, Width - 4, FHeadH));
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.30;
+  cv.FillRect(Rect(10, 5, Width - 10, 6));
+  cv.Brush.Color := clBlack;
+  cv.Alpha := 0.40;
+  cv.FillRect(Rect(4, FHeadH - 1, Width - 4, FHeadH));
+  cv.Alpha := 1;
   if FTitle <> '' then
   begin
     cv.Font.Color := headInk;
-    cv.PushClip(Rect(8, 1, Width - 30, COLLAPSE_HEAD_H));
-    cv.TextOut(12, (COLLAPSE_HEAD_H - cv.TextHeight(FTitle)) div 2, FTitle);
+    cv.PushClip(Rect(8, 1, Width - 30, FHeadH));
+    { centred in the title band, which runs from y = 4 (inside the frame) down to FHeadH }
+    cv.TextOut(12, 4 + (FHeadH - 4 - cv.TextHeight(FTitle)) div 2, FTitle);
     cv.PopClip;
   end;
   cx := Width - 17;
-  cy := COLLAPSE_HEAD_H div 2;
+  cy := (FHeadH + 4) div 2;
   cv.Brush.Color := arrow;
   if FCollapsed then
     cv.Polygon([Point(cx - 3, cy - 6), Point(cx - 3, cy + 6), Point(cx + 4, cy)])
@@ -2809,6 +3238,12 @@ end;
 
 { TGLList }
 
+{ the visible body ends 3 px above the control's bottom: that strip holds the drop shadow }
+function TGLList.BodyH: Integer;
+begin
+  Result := Height - 3;
+end;
+
 constructor TGLList.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -2816,9 +3251,66 @@ begin
   FItems := TStringList.Create;
   TStringList(FItems).OnChange := ItemsChanged;
   FIndex := -1;
+  FHoverIdx := -1;
   FItemHeight := 20;
   Width := 120;
   Height := 100;
+  FAnim := TTimer.Create(Self);
+  FAnim.Enabled := False;
+  FAnim.Interval := 15;
+  FAnim.OnTimer := AnimTick;
+end;
+
+procedure TGLList.Kick;
+begin
+  if (FAnim <> nil) and not (csDesigning in ComponentState) then FAnim.Enabled := True;
+end;
+
+{ the selection pill glides to the chosen row and the hover glow follows the mouse - the same
+  easing as the menus and the list view; the timer only runs while something is moving (or the
+  list has focus and its pill is breathing) }
+procedure TGLList.AnimTick(Sender: TObject);
+var
+  moving: Boolean;
+begin
+  moving := False;
+  if FIndex >= 0 then
+  begin
+    if FPillAlpha < 0.05 then FPillRow := FIndex;
+    FPillRow := FPillRow + (FIndex - FPillRow) * 0.45;
+    if Abs(FIndex - FPillRow) < 0.01 then FPillRow := FIndex else moving := True;
+    if FPillAlpha < 1 then begin FPillAlpha := System.Math.Min(1, FPillAlpha + 0.25); moving := True; end;
+  end
+  else if FPillAlpha > 0 then
+  begin
+    FPillAlpha := System.Math.Max(0, FPillAlpha - 0.2);
+    moving := True;
+  end;
+  if FHoverIdx >= 0 then
+  begin
+    if FHovAlpha < 0.05 then FHovRow := FHoverIdx;
+    FHovRow := FHovRow + (FHoverIdx - FHovRow) * 0.5;
+    if Abs(FHoverIdx - FHovRow) < 0.01 then FHovRow := FHoverIdx else moving := True;
+    if FHovAlpha < 1 then begin FHovAlpha := System.Math.Min(1, FHovAlpha + 0.3); moving := True; end;
+  end
+  else if FHovAlpha > 0 then
+  begin
+    FHovAlpha := System.Math.Max(0, FHovAlpha - 0.25);
+    moving := True;
+  end;
+  FPhase := FPhase + 0.11;
+  if (not moving) and not (Focused and (FIndex >= 0)) then FAnim.Enabled := False;
+  Invalidate;
+end;
+
+procedure TGLList.CMMouseLeave(var Msg: TMessage);
+begin
+  inherited;
+  if FHoverIdx <> -1 then
+  begin
+    FHoverIdx := -1;
+    Kick;
+  end;
 end;
 
 destructor TGLList.Destroy;
@@ -2886,14 +3378,14 @@ end;
 
 function TGLList.VisibleRows: Integer;
 begin
-  Result := System.Math.Max(1, (Height - HBarH) div RowH);
+  Result := System.Math.Max(1, (BodyH - HBarH) div RowH);
 end;
 
 function TGLList.NeedHBar: Boolean;
 var
   vbar: Integer;
 begin
-  if FItems.Count > System.Math.Max(1, Height div RowH) then vbar := 12 else vbar := 0;
+  if FItems.Count > System.Math.Max(1, BodyH div RowH) then vbar := 12 else vbar := 0;
   Result := (FContentW > 0) and (FContentW > Width - vbar);
 end;
 
@@ -2918,7 +3410,7 @@ begin
   track := Width - vbar;
   tw := System.Math.Max(20, Round(track * track / System.Math.Max(1, FContentW)));
   if MaxLeft > 0 then tx := Round((track - tw) * FLeft / MaxLeft) else tx := 0;
-  Result := Rect(tx, Height - 10, tx + tw, Height - 2);
+  Result := Rect(tx, BodyH - 10, tx + tw, BodyH - 2);
 end;
 
 procedure TGLList.SetLeft(AValue: Integer);
@@ -2943,7 +3435,7 @@ function TGLList.ThumbRect: TRect;
 var
   th, ty, track: Integer;
 begin
-  track := Height - HBarH;
+  track := BodyH - HBarH;
   th := System.Math.Max(20, Round(track * VisibleRows / System.Math.Max(1, FItems.Count)));
   if MaxTop > 0 then ty := Round((track - th) * FTop / MaxTop) else ty := 0;
   Result := Rect(Width - 10, ty, Width - 2, ty + th);
@@ -2989,7 +3481,7 @@ var
 begin
   inherited MouseDown(Button, Shift, X, Y);
   if (Button <> mbLeft) or not Enabled then Exit;
-  if NeedHBar and (Y >= Height - 12) and not (NeedBar and (X >= Width - 12)) then
+  if NeedHBar and (Y >= BodyH - 12) and not (NeedBar and (X >= Width - 12)) then
   begin
     tr := HThumbRect;
     if (X >= tr.Left) and (X < tr.Right) then
@@ -2997,11 +3489,11 @@ begin
       FHDragging := True;
       FHGrab := X - tr.Left;
     end
-    else if X < tr.Left then SetLeft(FLeft - Width div 2)
-    else SetLeft(FLeft + Width div 2);
+    else if X < tr.Left then SetLeft(FLeft - Width shr 1)
+    else SetLeft(FLeft + Width shr 1);
     Exit;
   end;
-  if NeedBar and (X >= Width - 12) and (Y < Height - HBarH) then
+  if NeedBar and (X >= Width - 12) and (Y < BodyH - HBarH) then
   begin
     tr := ThumbRect;
     if (Y >= tr.Top) and (Y < tr.Bottom) then
@@ -3034,8 +3526,22 @@ begin
     if room > 0 then SetLeft(Round(MaxLeft * EnsureRange((X - FHGrab) / room, 0, 1)));
     Exit;
   end;
-  if not FDragging then Exit;
-  room := Height - HBarH - (ThumbRect.Bottom - ThumbRect.Top);
+  if not FDragging then
+  begin
+    room := -1;
+    if (Y < BodyH - HBarH) and not (NeedBar and (X >= Width - 12)) then
+    begin
+      room := FTop + Y div RowH;
+      if room >= FItems.Count then room := -1;
+    end;
+    if room <> FHoverIdx then
+    begin
+      FHoverIdx := room;
+      Kick;
+    end;
+    Exit;
+  end;
+  room := BodyH - HBarH - (ThumbRect.Bottom - ThumbRect.Top);
   if room > 0 then SetTop(Round(MaxTop * EnsureRange((Y - FGrab) / room, 0, 1)));
 end;
 
@@ -3077,6 +3583,54 @@ begin
   end;
 end;
 
+{ the floating selection pill of the lists: a soft shadow, a glow, a lit body with a bevel and a
+  band of light that sweeps across it (as in the menus) }
+procedure DrawSelectionPill(cv: TGLCanvas; const APill: TRect; AAccent: TColor; AAlpha, APhase: Double);
+var
+  deep: TColor;
+  pulse: Double;
+  k, sx: Integer;
+begin
+  deep := Blend(AAccent, clBlack, 0.62);   // a dark shade of the accent, so the white text reads clearly
+  pulse := 0.5 + 0.5 * FastSin(APhase);
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := clBlack;
+  cv.Alpha := 0.22 * AAlpha;
+  cv.RoundRect(APill.Left - 1, APill.Top + 2, APill.Right + 3, APill.Bottom + 5, 12, 12);
+  cv.Alpha := 0.34 * AAlpha;
+  cv.RoundRect(APill.Left + 1, APill.Top + 2, APill.Right + 1, APill.Bottom + 3, 9, 9);
+  cv.Brush.Color := AAccent;
+  cv.Alpha := (0.10 + 0.16 * pulse) * AAlpha;
+  cv.RoundRect(APill.Left - 2, APill.Top - 2, APill.Right + 2, APill.Bottom + 2, 11, 11);
+  cv.Alpha := AAlpha;
+  cv.Brush.Color := deep;
+  cv.RoundRect(APill.Left, APill.Top, APill.Right, APill.Bottom, 8, 8);
+  cv.Brush.Color := Blend(AAccent, clBlack, 0.46 - 0.10 * pulse);
+  cv.RoundRect(APill.Left, APill.Top, APill.Right, APill.Bottom - 2, 8, 8);
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.14 * AAlpha;
+  cv.RoundRect(APill.Left + 2, APill.Top + 1, APill.Right - 2, APill.Top + (APill.Bottom - APill.Top) div 2, 6, 6);
+  cv.PushClip(Rect(APill.Left + 1, APill.Top + 1, APill.Right - 1, APill.Bottom - 1));
+  sx := APill.Left - 40 + Round(Frac(APhase / 8.0) * (APill.Right - APill.Left + 80));
+  for k := 0 to 3 do
+  begin
+    cv.Alpha := (0.05 + 0.05 * k) * AAlpha;
+    cv.Polygon([Point(sx + k * 5 + 8, APill.Top), Point(sx + 30 - k * 5 + 8, APill.Top),
+      Point(sx + 30 - k * 5 - 4, APill.Bottom), Point(sx + k * 5 - 4, APill.Bottom)]);
+  end;
+  cv.PopClip;
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.55 * AAlpha;
+  cv.FillRect(Rect(APill.Left + 6, APill.Top + 1, APill.Right - 6, APill.Top + 2));
+  cv.FillRect(Rect(APill.Left + 1, APill.Top + 6, APill.Left + 2, APill.Bottom - 6));
+  cv.Brush.Color := clBlack;
+  cv.Alpha := 0.5 * AAlpha;
+  cv.FillRect(Rect(APill.Left + 6, APill.Bottom - 2, APill.Right - 6, APill.Bottom - 1));
+  cv.FillRect(Rect(APill.Right - 2, APill.Top + 6, APill.Right - 1, APill.Bottom - 6));
+  cv.Alpha := 1;
+end;
+
 procedure TGLList.PaintGL;
 var
   cv: TGLCanvas;
@@ -3101,43 +3655,74 @@ begin
   hb := HBarH;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.Brush.Color := field;
+  cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, Width, Height));
+  DrawDropShadow(cv, Rect(0, 0, Width, BodyH), 6, 3, 1.4);
+  cv.Brush.Color := field;
+  cv.FillRect(Rect(0, 0, Width, BodyH));
   th := cv.TextHeight('Ag');
+  { keep the animation running until the pill has reached the selected row }
+  if (FIndex >= 0) and ((FPillAlpha < 1) or (Abs(FIndex - FPillRow) > 0.01)) then Kick;
+  cv.PushClip(Rect(0, 0, Width - barW, BodyH - hb));
+  if FHovAlpha > 0.02 then
+  begin
+    cv.Brush.Color := HoverTint;
+    cv.Alpha := 0.10 * FHovAlpha;
+    cv.RoundRect(3, Round((FHovRow - FTop) * h) + 1, Width - barW - 3, Round((FHovRow - FTop) * h) + h - 1, 7, 7);
+    cv.Alpha := 0.14 * FHovAlpha;
+    cv.FillRect(Rect(8, Round((FHovRow - FTop) * h) + 1, Width - barW - 8, Round((FHovRow - FTop) * h) + 2));
+    cv.Alpha := 1;
+  end;
+  if FMultiSelect then
+  begin
+    y := 0;
+    for i := FTop to FItems.Count - 1 do
+    begin
+      if y >= BodyH - hb then Break;
+      if GetSelected(i) and (i <> FIndex) then
+      begin
+        cv.Brush.Color := Blend(SelectionColor, clBlack, 0.50);   // dark shade: clear reading
+        cv.FillRect(Rect(0, y, Width, y + h));
+      end;
+      Inc(y, h);
+    end;
+  end;
+  if FPillAlpha > 0.02 then
+  begin
+    y := Round((FPillRow - FTop) * h);
+    DrawSelectionPill(cv, Rect(3, y + 1, Width - barW - 3, y + h - 1), SelectionColor, FPillAlpha, FPhase);
+  end;
+  cv.PopClip;
   y := 0;
   for i := FTop to FItems.Count - 1 do
   begin
-    if y >= Height - hb then Break;
-    if GetSelected(i) then
-    begin
-      cv.Brush.Color := AccentColor;
-      cv.FillRect(Rect(0, y, Width, y + h));
-      cv.Font.Color := Sys(clHighlightText);
-    end
+    if y >= BodyH - hb then Break;
+    if GetSelected(i) or ((i = FIndex) and (FPillAlpha > 0.5)) then cv.Font.Color := SelectionTextColor
     else cv.Font.Color := Sys(clWindowText);
-    cv.PushClip(Rect(0, y, Width - barW, System.Math.Min(y + h, Height - hb)));
+    cv.PushClip(Rect(0, y, Width - barW, System.Math.Min(y + h, BodyH - hb)));
     cv.TextOut(6 - FLeft, y + (h - th) div 2, FItems[i]);
     cv.PopClip;
     Inc(y, h);
   end;
+  DrawInsetShadow(cv, Rect(0, 0, Width - barW, BodyH - hb), 4);
   if NeedBar then
   begin
     tr := ThumbRect;
     cv.Brush.Color := Blend(field, InkColor, 0.12);
-    cv.FillRect(Rect(Width - 12, 0, Width, Height - hb));
+    cv.FillRect(Rect(Width - 12, 0, Width, BodyH - hb));
     GLDrawScrollThumb(cv, Self, 0, tr, True, FDragging, Hover, field, InkColor, AccentColor);
   end;
   if hb > 0 then
   begin
     tr := HThumbRect;
     cv.Brush.Color := Blend(field, InkColor, 0.12);
-    cv.FillRect(Rect(0, Height - 12, Width, Height));
+    cv.FillRect(Rect(0, BodyH - 12, Width, BodyH));
     GLDrawScrollThumb(cv, Self, 1, tr, False, FHDragging, Hover, field, InkColor, AccentColor);
   end;
   cv.Pen.Style := psSolid;
-  if Focused then cv.Pen.Color := AccentColor else cv.Pen.Color := Blend(face, InkColor, 0.25);
+  if Focused then cv.Pen.Color := FocusColor else cv.Pen.Color := Blend(face, InkColor, 0.25);
   cv.Brush.Style := bsClear;
-  cv.Rectangle(0, 0, Width, Height);
+  cv.Rectangle(0, 0, Width, BodyH);
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
 end;
@@ -3725,7 +4310,7 @@ begin
     GLDrawScrollThumb(cv, Self, 1, tr, False, FDragH, Hover, field, InkColor, AccentColor);
   end;
   cv.Pen.Style := psSolid;
-  if Focused then cv.Pen.Color := AccentColor else cv.Pen.Color := Blend(face, InkColor, 0.25);
+  if Focused then cv.Pen.Color := FocusColor else cv.Pen.Color := Blend(face, InkColor, 0.25);
   cv.Brush.Style := bsClear;
   cv.Rectangle(0, 0, Width, Height);
   cv.Brush.Style := bsSolid;
@@ -4358,6 +4943,12 @@ end;
 
 { TGLListView }
 
+{ the visible body ends 3 px above the control's bottom: that strip holds the drop shadow }
+function TGLListView.BodyH: Integer;
+begin
+  Result := Height - 3;
+end;
+
 constructor TGLListView.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -4495,7 +5086,7 @@ end;
 
 function TGLListView.VisibleRows: Integer;
 begin
-  Result := System.Math.Max(1, (Height - HeaderH) div RowH);
+  Result := System.Math.Max(1, (BodyH - HeaderH) div RowH);
 end;
 
 function TGLListView.MaxTop: Integer;
@@ -4512,7 +5103,7 @@ function TGLListView.ThumbRect: TRect;
 var
   trackH, th, ty: Integer;
 begin
-  trackH := Height - HeaderH;
+  trackH := BodyH - HeaderH;
   th := System.Math.Max(20, Round(trackH * VisibleRows / System.Math.Max(1, FItems.Count)));
   if MaxTop > 0 then ty := Round((trackH - th) * FTop / MaxTop) else ty := 0;
   Result := Rect(Width - 10, HeaderH + ty, Width - 2, HeaderH + ty + th);
@@ -4544,6 +5135,14 @@ begin
   end;
   Kick;
   Invalidate;
+end;
+
+function TGLListView.ItemAt(X, Y: Integer): Integer;
+begin
+  Result := -1;
+  if (Y < HeaderH) or (Y >= BodyH) or (NeedBar and (X >= Width - 12)) then Exit;
+  Result := FTop + (Y - HeaderH) div RowH;
+  if (Result < 0) or (Result >= FItems.Count) then Result := -1;
 end;
 
 procedure TGLListView.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -4612,7 +5211,7 @@ begin
     end;
     Exit;
   end;
-  room := Height - HeaderH - (ThumbRect.Bottom - ThumbRect.Top);
+  room := BodyH - HeaderH - (ThumbRect.Bottom - ThumbRect.Top);
   if room > 0 then SetTop(Round(MaxTop * EnsureRange((Y - HeaderH - FGrab) / room, 0, 1)));
 end;
 
@@ -4688,8 +5287,8 @@ begin
   face := FaceColor;
   field := FieldColor;
   ink := InkColor;
-  accent := AccentColor;
-  deep := Blend(accent, clBlack, 0.38);
+  accent := SelectionColor;
+  deep := Blend(accent, clBlack, 0.62);
   gridC := Blend(field, ink, 0.12);
   rh := RowH;
   th := cv.TextHeight('Ag');
@@ -4698,14 +5297,17 @@ begin
   cv.Alpha := 1;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.GradientRect(Rect(0, 0, Width, Height), Blend(field, clBlack, 0.06), Blend(field, clBlack, 0.22));
+  cv.Brush.Color := BackdropColor;
+  cv.FillRect(Rect(0, 0, Width, Height));
+  DrawDropShadow(cv, Rect(0, 0, Width, BodyH), 6, 3, 1.4);
+  cv.GradientRect(Rect(0, 0, Width, BodyH), Blend(field, clBlack, 0.06), Blend(field, clBlack, 0.22));
 
   { rows: faint zebra stripes, the hover glow, then the selection }
-  cv.PushClip(Rect(0, HeaderH, Width - barW, Height));
+  cv.PushClip(Rect(0, HeaderH, Width - barW, BodyH));
   y := HeaderH;
   for i := FTop to FItems.Count - 1 do
   begin
-    if y >= Height then Break;
+    if y >= BodyH then Break;
     if Odd(i) then
     begin
       cv.Brush.Color := ink;
@@ -4724,8 +5326,8 @@ begin
   end;
   if FHovAlpha > 0.02 then
   begin
-    cv.Brush.Color := ink;
-    cv.Alpha := 0.07 * FHovAlpha;
+    cv.Brush.Color := HoverTint;
+    cv.Alpha := 0.10 * FHovAlpha;
     cv.RoundRect(3, RowTop(FHovRow) + 1, Width - barW - 3, RowTop(FHovRow) + rh - 1, 7, 7);
     cv.Alpha := 0.14 * FHovAlpha;
     cv.FillRect(Rect(8, RowTop(FHovRow) + 1, Width - barW - 8, RowTop(FHovRow) + 2));
@@ -4737,7 +5339,7 @@ begin
       begin
         cv.Alpha := 0.55;
         cv.GradientRect(Rect(2, RowTop(i) + 1, Width - barW - 2, RowTop(i) + rh - 1),
-          Blend(accent, clWhite, 0.15), deep);
+          Blend(accent, clBlack, 0.40), deep);
         cv.Brush.Color := clWhite;
         cv.Alpha := 0.35;
         cv.FillRect(Rect(2, RowTop(i) + 1, Width - barW - 2, RowTop(i) + 2));
@@ -4761,7 +5363,7 @@ begin
     cv.Alpha := FPillAlpha;
     cv.Brush.Color := deep;
     cv.RoundRect(pill.Left, pill.Top, pill.Right, pill.Bottom, 8, 8);
-    cv.Brush.Color := Blend(accent, clWhite, 0.06 + 0.12 * pulse);
+    cv.Brush.Color := Blend(accent, clBlack, 0.46 - 0.10 * pulse);
     cv.RoundRect(pill.Left, pill.Top, pill.Right, pill.Bottom - 2, 8, 8);
     cv.Brush.Color := clWhite;
     cv.Alpha := 0.14 * FPillAlpha;
@@ -4792,9 +5394,9 @@ begin
   y := HeaderH;
   for i := FTop to FItems.Count - 1 do
   begin
-    if y >= Height then Break;
+    if y >= BodyH then Break;
     item := FItems[i];
-    if IsSelected(i) then cv.Font.Color := Sys(clHighlightText)
+    if IsSelected(i) then cv.Font.Color := SelectionTextColor
     else cv.Font.Color := Sys(clWindowText);
     x := 0;
     for c := 0 to FColumns.Count - 1 do
@@ -4821,7 +5423,7 @@ begin
     for c := 0 to FColumns.Count - 1 do
     begin
       Inc(x, TGLColumn(FColumns.Items[c]).Width);
-      cv.FillRect(Rect(x - 1, HeaderH, x, Height));
+      cv.FillRect(Rect(x - 1, HeaderH, x, BodyH));
     end;
   end;
 
@@ -4856,10 +5458,11 @@ begin
     Inc(x, cw);
   end;
 
+  DrawInsetShadow(cv, Rect(0, HeaderH, Width - barW, BodyH), 4);
   if NeedBar then
   begin
     tr := ThumbRect;
-    cv.GradientRect(Rect(Width - 12, HeaderH, Width, Height), Blend(field, clBlack, 0.3), Blend(field, ink, 0.06), True);
+    cv.GradientRect(Rect(Width - 12, HeaderH, Width, BodyH), Blend(field, clBlack, 0.3), Blend(field, ink, 0.06), True);
     GLDrawScrollThumb(cv, Self, 0, tr, True, FDragging, Hover, field, ink, accent);
   end;
 
@@ -4867,20 +5470,20 @@ begin
   cv.Brush.Color := clBlack;
   cv.Alpha := 0.55;
   cv.FillRect(Rect(0, 0, Width, 1));
-  cv.FillRect(Rect(0, 0, 1, Height));
+  cv.FillRect(Rect(0, 0, 1, BodyH));
   cv.Brush.Color := clWhite;
   cv.Alpha := 0.22;
-  cv.FillRect(Rect(0, Height - 1, Width, Height));
-  cv.FillRect(Rect(Width - 1, 0, Width, Height));
+  cv.FillRect(Rect(0, BodyH - 1, Width, BodyH));
+  cv.FillRect(Rect(Width - 1, 0, Width, BodyH));
   cv.Alpha := 1;
   if Focused then
   begin
     cv.Brush.Color := accent;
     cv.Alpha := 0.8;
     cv.FillRect(Rect(1, 1, Width - 1, 2));
-    cv.FillRect(Rect(1, Height - 2, Width - 1, Height - 1));
-    cv.FillRect(Rect(1, 1, 2, Height - 1));
-    cv.FillRect(Rect(Width - 2, 1, Width - 1, Height - 1));
+    cv.FillRect(Rect(1, BodyH - 2, Width - 1, BodyH - 1));
+    cv.FillRect(Rect(1, 1, 2, BodyH - 1));
+    cv.FillRect(Rect(Width - 2, 1, Width - 1, BodyH - 1));
     cv.Alpha := 1;
     if not FAnim.Enabled then Kick;
   end;
@@ -5146,6 +5749,8 @@ begin
     end;
     if i = FHoverTab then TabBody(Rect(r.Left + 1, r.Top + 2, r.Right - 1, r.Bottom), Blend(face, InkColor, 0.16), 1)
     else TabBody(Rect(r.Left + 1, r.Top + 2, r.Right - 1, r.Bottom), Blend(face, InkColor, 0.05), 1);
+    DrawTabSunken(cv, Rect(r.Left + 1, r.Top + 2, r.Right - 1, r.Bottom), IfThen(i = FHoverTab, 0.7, 1.0),
+      Blend(face, InkColor, IfThen(i = FHoverTab, 0.16, 0.05)));
   end;
 
   { the active tab: a pill that glides from tab to tab, lit like a selected menu item }
@@ -5166,6 +5771,7 @@ begin
     if not FAnim.Enabled and not (csDesigning in ComponentState) then FAnim.Enabled := True;
     pr := Rect(Round(FPillL), r.Top + 2, Round(FPillR), r.Bottom);
     pulse := 0.5 + 0.5 * FastSin(FPhase);
+    DrawTabShadow(cv, pr, 1.6);
     { a soft halo, the deep body, the lighter face and a glossy band across the top }
     TabBody(Rect(pr.Left - 2, pr.Top - 2, pr.Right + 2, pr.Bottom), accent, 0.12 + 0.12 * pulse);
     TabBody(pr, deep, 1);
@@ -5187,8 +5793,7 @@ begin
     end;
     cv.PopClip;
     cv.Alpha := 1;
-    cv.Brush.Color := accent;
-    cv.FillRect(Rect(pr.Left + 3, pr.Bottom - 3, pr.Right - 3, pr.Bottom));
+    DrawTabRaised(cv, pr, 1.2, False);
     if FOwnerPC.Focused then
     begin
       cv.Pen.Style := psSolid;
@@ -5456,7 +6061,7 @@ begin
     if FMultiLine and (x + w > ClientWidth) and (x > 0) then
     begin
       x := 0;
-      Inc(y, rowH);
+      Inc(y, rowH + 4);
     end;
     SetLength(FTabRects, Length(FTabRects) + 1);
     SetLength(FTabPages, Length(FTabPages) + 1);
@@ -5482,6 +6087,13 @@ begin
   FLayoutValid := True;
 end;
 
+function TGLPageControl.LastTabRect: TRect;
+begin
+  EnsureLayout;
+  if Length(FTabRects) > 0 then Result := FTabRects[High(FTabRects)]
+  else Result := Rect(0, 0, 0, 28);
+end;
+
 procedure TGLPageControl.Relayout;
 var
   h: Integer;
@@ -5489,7 +6101,7 @@ begin
   FLayoutValid := False;
   if FHeader = nil then Exit;
   EnsureLayout;
-  if Length(FTabRects) > 0 then h := FTabRects[High(FTabRects)].Bottom
+  if Length(FTabRects) > 0 then h := FTabRects[High(FTabRects)].Bottom + 4   // 4 rows hold the shadow
   else h := 28;
   if FHeader.Height <> h then FHeader.Height := h;
   FHeader.Invalidate;
@@ -5604,8 +6216,8 @@ begin
   else cv.Brush.Color := Blend(face, InkColor, 0.08);
   cv.FillRect(Rect(0, 0, Width, Height));
   cv.Brush.Color := Blend(face, InkColor, 0.45);
-  cx := Width div 2;
-  cy := Height div 2;
+  cx := Width shr 1;
+  cy := Height shr 1;
   for i := -1 to 1 do
     if IsHorizontalBar then cv.FillRect(Rect(cx + i * 8 - 1, cy - 1, cx + i * 8 + 1, cy + 1))
     else cv.FillRect(Rect(cx - 1, cy + i * 8 - 1, cx + 1, cy + i * 8 + 1));
@@ -5642,6 +6254,7 @@ begin
   inherited Create(AOwner);
   ControlStyle := ControlStyle + [csAcceptsControls];
   TabStop := False;
+  FPad := 8;
   FVert := TGLScrollAxis.Create(Self, True);
   FHorz := TGLScrollAxis.Create(Self, False);
   Width := 185;
@@ -5667,7 +6280,7 @@ begin
     c := Controls[i];
     if c.Visible then Result := System.Math.Max(Result, c.Top + FPosY + c.Height);
   end;
-  Inc(Result, 8);
+  Inc(Result, FPad + FBottomPad);
 end;
 
 { right edge of the rightmost child, measured as if nothing were scrolled }
@@ -5682,7 +6295,7 @@ begin
     c := Controls[i];
     if c.Visible then Result := System.Math.Max(Result, c.Left + FPosX + c.Width);
   end;
-  Inc(Result, 8);
+  Inc(Result, FPad);
 end;
 
 function TGLScrollBox.MaxPos: Integer;
@@ -6126,6 +6739,12 @@ end;
 
 { TGLTree }
 
+{ the visible body ends 3 px above the control's bottom: that strip holds the drop shadow }
+function TGLTree.BodyH: Integer;
+begin
+  Result := Height - 3;
+end;
+
 constructor TGLTree.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
@@ -6133,8 +6752,79 @@ begin
   FNodes := TGLTreeNodes.Create(Self);
   FIndent := 19;
   FContentW := -1;
+  FHoverIdx := -1;
   Width := 200;
   Height := 150;
+  FAnim := TTimer.Create(Self);
+  FAnim.Enabled := False;
+  FAnim.Interval := 15;
+  FAnim.OnTimer := AnimTick;
+end;
+
+procedure TGLTree.Kick;
+begin
+  if (FAnim <> nil) and not (csDesigning in ComponentState) then FAnim.Enabled := True;
+end;
+
+{ the display row of the selected node, or -1 }
+function TGLTree.SelRow: Integer;
+var
+  i: Integer;
+begin
+  Result := -1;
+  if FSelected = nil then Exit;
+  if not FRowsValid then BuildRows;
+  for i := 0 to High(FRows) do
+    if FRows[i] = FSelected then Exit(i);
+end;
+
+{ the selection pill glides to the chosen row and the hover glow follows the mouse - the same
+  easing as the menus and the lists; the timer only runs while something is moving (or the tree
+  has focus and its pill is breathing) }
+procedure TGLTree.AnimTick(Sender: TObject);
+var
+  moving: Boolean;
+  sr: Integer;
+begin
+  moving := False;
+  sr := SelRow;
+  if sr >= 0 then
+  begin
+    if FPillAlpha < 0.05 then FPillRow := sr;
+    FPillRow := FPillRow + (sr - FPillRow) * 0.45;
+    if Abs(sr - FPillRow) < 0.01 then FPillRow := sr else moving := True;
+    if FPillAlpha < 1 then begin FPillAlpha := System.Math.Min(1, FPillAlpha + 0.25); moving := True; end;
+  end
+  else if FPillAlpha > 0 then
+  begin
+    FPillAlpha := System.Math.Max(0, FPillAlpha - 0.2);
+    moving := True;
+  end;
+  if FHoverIdx >= 0 then
+  begin
+    if FHovAlpha < 0.05 then FHovRow := FHoverIdx;
+    FHovRow := FHovRow + (FHoverIdx - FHovRow) * 0.5;
+    if Abs(FHoverIdx - FHovRow) < 0.01 then FHovRow := FHoverIdx else moving := True;
+    if FHovAlpha < 1 then begin FHovAlpha := System.Math.Min(1, FHovAlpha + 0.3); moving := True; end;
+  end
+  else if FHovAlpha > 0 then
+  begin
+    FHovAlpha := System.Math.Max(0, FHovAlpha - 0.25);
+    moving := True;
+  end;
+  FPhase := FPhase + 0.11;
+  if (not moving) and not (Focused and (sr >= 0)) then FAnim.Enabled := False;
+  Invalidate;
+end;
+
+procedure TGLTree.CMMouseLeave(var Msg: TMessage);
+begin
+  inherited;
+  if FHoverIdx <> -1 then
+  begin
+    FHoverIdx := -1;
+    Kick;
+  end;
 end;
 
 destructor TGLTree.Destroy;
@@ -6223,7 +6913,7 @@ end;
 
 function TGLTree.VisibleRows: Integer;
 begin
-  Result := System.Math.Max(1, (Height - HBarH) div RowH);
+  Result := System.Math.Max(1, (BodyH - HBarH) div RowH);
 end;
 
 { the horizontal bar shows when the widest row (measured on paint) is wider than the rows' area }
@@ -6232,7 +6922,7 @@ var
   vbar: Integer;
 begin
   if not FRowsValid then BuildRows;
-  if Length(FRows) > System.Math.Max(1, Height div RowH) then vbar := 12 else vbar := 0;
+  if Length(FRows) > System.Math.Max(1, BodyH div RowH) then vbar := 12 else vbar := 0;
   Result := (FContentW > 0) and (FContentW > Width - vbar);
 end;
 
@@ -6257,7 +6947,7 @@ begin
   track := Width - vbar;
   tw := System.Math.Max(20, Round(track * track / System.Math.Max(1, FContentW)));
   if MaxLeft > 0 then tx := Round((track - tw) * FLeft / MaxLeft) else tx := 0;
-  Result := Rect(tx, Height - 10, tx + tw, Height - 2);
+  Result := Rect(tx, BodyH - 10, tx + tw, BodyH - 2);
 end;
 
 procedure TGLTree.SetLeft(AValue: Integer);
@@ -6284,7 +6974,7 @@ function TGLTree.ThumbRect: TRect;
 var
   th, ty, track: Integer;
 begin
-  track := Height - HBarH;
+  track := BodyH - HBarH;
   th := System.Math.Max(20, Round(track * VisibleRows / System.Math.Max(1, Length(FRows))));
   if MaxTop > 0 then ty := Round((track - th) * FTop / MaxTop) else ty := 0;
   Result := Rect(Width - 10, ty, Width - 2, ty + th);
@@ -6340,7 +7030,7 @@ var
 begin
   if not FRowsValid then BuildRows;
   { the scroll bars are not rows: a click on one must never select or start a drag }
-  if (NeedBar and (X >= Width - 12)) or (NeedHBar and (Y >= Height - 12)) then Exit(nil);
+  if (NeedBar and (X >= Width - 12)) or (NeedHBar and (Y >= BodyH - 12)) then Exit(nil);
   r := FTop + Y div RowH;
   if (Y >= 0) and (r >= 0) and (r < Length(FRows)) then Result := FRows[r] else Result := nil;
 end;
@@ -6353,7 +7043,7 @@ var
 begin
   if (Button = mbLeft) and Enabled then
   begin
-    if NeedHBar and (Y >= Height - 12) and not (NeedBar and (X >= Width - 12)) then
+    if NeedHBar and (Y >= BodyH - 12) and not (NeedBar and (X >= Width - 12)) then
     begin
       tr := HThumbRect;
       if (X >= tr.Left) and (X < tr.Right) then
@@ -6362,12 +7052,12 @@ begin
         FHGrab := X - tr.Left;
         MouseCapture := True;
       end
-      else if X < tr.Left then SetLeft(FLeft - Width div 2)
-      else SetLeft(FLeft + Width div 2);
+      else if X < tr.Left then SetLeft(FLeft - Width shr 1)
+      else SetLeft(FLeft + Width shr 1);
       inherited MouseDown(Button, Shift, X, Y);
       Exit;
     end;
-    if NeedBar and (X >= Width - 12) and (Y < Height - HBarH) then
+    if NeedBar and (X >= Width - 12) and (Y < BodyH - HBarH) then
     begin
       tr := ThumbRect;
       if (Y >= tr.Top) and (Y < tr.Bottom) then
@@ -6407,8 +7097,23 @@ begin
     if room > 0 then SetLeft(Round(MaxLeft * EnsureRange((X - FHGrab) / room, 0, 1)));
     Exit;
   end;
-  if not FDragging then Exit;
-  room := Height - HBarH - (ThumbRect.Bottom - ThumbRect.Top);
+  if not FDragging then
+  begin
+    room := -1;
+    if (Y < BodyH - HBarH) and not (NeedBar and (X >= Width - 12)) then
+    begin
+      if not FRowsValid then BuildRows;
+      room := FTop + Y div RowH;
+      if room > High(FRows) then room := -1;
+    end;
+    if room <> FHoverIdx then
+    begin
+      FHoverIdx := room;
+      Kick;
+    end;
+    Exit;
+  end;
+  room := BodyH - HBarH - (ThumbRect.Bottom - ThumbRect.Top);
   if room > 0 then SetTop(Round(MaxTop * EnsureRange((Y - FGrab) / room, 0, 1)));
 end;
 
@@ -6502,53 +7207,72 @@ begin
   hb := HBarH;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.Brush.Color := field;
+  cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, Width, Height));
+  DrawDropShadow(cv, Rect(0, 0, Width, BodyH), 6, 3, 1.4);
+  cv.Brush.Color := field;
+  cv.FillRect(Rect(0, 0, Width, BodyH));
+  { keep the animation running until the pill has reached the selected row }
+  i := SelRow;
+  if (i >= 0) and ((FPillAlpha < 1) or (Abs(i - FPillRow) > 0.01)) then Kick;
+  cv.PushClip(Rect(0, 0, Width - barW, BodyH - hb));
+  if FHovAlpha > 0.02 then
+  begin
+    y := Round((FHovRow - FTop) * h);
+    cv.Brush.Color := HoverTint;
+    cv.Alpha := 0.10 * FHovAlpha;
+    cv.RoundRect(3, y + 1, Width - barW - 3, y + h - 1, 7, 7);
+    cv.Alpha := 0.14 * FHovAlpha;
+    cv.FillRect(Rect(8, y + 1, Width - barW - 8, y + 2));
+    cv.Alpha := 1;
+  end;
+  if FPillAlpha > 0.02 then
+  begin
+    y := Round((FPillRow - FTop) * h);
+    DrawSelectionPill(cv, Rect(3, y + 1, Width - barW - 3, y + h - 1), SelectionColor, FPillAlpha, FPhase);
+  end;
+  cv.PopClip;
   y := 0;
   for i := FTop to High(FRows) do
   begin
-    if y >= Height - hb then Break;
+    if y >= BodyH - hb then Break;
     node := FRows[i];
     sel := node = FSelected;
-    if sel then
-    begin
-      cv.Brush.Color := AccentColor;
-      cv.FillRect(Rect(0, y, Width - barW, y + h));
-    end;
     gx := 4 + node.Level * FIndent - FLeft;
     if node.Count > 0 then
     begin
       mid := y + h div 2;
-      if sel then cv.Brush.Color := Sys(clHighlightText) else cv.Brush.Color := Blend(field, InkColor, 0.65);
+      if sel then cv.Brush.Color := SelectionTextColor else cv.Brush.Color := Blend(field, InkColor, 0.65);
       if node.Expanded then
         cv.Polygon([Point(gx + 3, mid - 2), Point(gx + 11, mid - 2), Point(gx + 7, mid + 3)])
       else
         cv.Polygon([Point(gx + 5, mid - 4), Point(gx + 5, mid + 4), Point(gx + 9, mid)]);
     end;
-    if sel then cv.Font.Color := Sys(clHighlightText) else cv.Font.Color := Sys(clWindowText);
-    cv.PushClip(Rect(0, y, Width - barW, System.Math.Min(y + h, Height - hb)));
+    if sel then cv.Font.Color := SelectionTextColor else cv.Font.Color := Sys(clWindowText);
+    cv.PushClip(Rect(0, y, Width - barW, System.Math.Min(y + h, BodyH - hb)));
     cv.TextOut(gx + FIndent, y + (h - th) div 2, node.Text);
     cv.PopClip;
     Inc(y, h);
   end;
+  DrawInsetShadow(cv, Rect(0, 0, Width - barW, BodyH - hb), 4);
   if NeedBar then
   begin
     tr := ThumbRect;
     cv.Brush.Color := Blend(field, InkColor, 0.1);
-    cv.FillRect(Rect(Width - 12, 0, Width, Height - hb));
+    cv.FillRect(Rect(Width - 12, 0, Width, BodyH - hb));
     GLDrawScrollThumb(cv, Self, 0, tr, True, FDragging, Hover, field, InkColor, AccentColor);
   end;
   if hb > 0 then
   begin
     tr := HThumbRect;
     cv.Brush.Color := Blend(field, InkColor, 0.1);
-    cv.FillRect(Rect(0, Height - 12, Width, Height));
+    cv.FillRect(Rect(0, BodyH - 12, Width, BodyH));
     GLDrawScrollThumb(cv, Self, 1, tr, False, FHDragging, Hover, field, InkColor, AccentColor);
   end;
   cv.Pen.Style := psSolid;
-  if Focused then cv.Pen.Color := AccentColor else cv.Pen.Color := Blend(face, InkColor, 0.25);
+  if Focused then cv.Pen.Color := FocusColor else cv.Pen.Color := Blend(face, InkColor, 0.25);
   cv.Brush.Style := bsClear;
-  cv.Rectangle(0, 0, Width, Height);
+  cv.Rectangle(0, 0, Width, BodyH);
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
 end;
@@ -6672,7 +7396,7 @@ begin
   cv.Brush.Style := bsSolid;
   cv.Brush.Color := face;
   cv.FillRect(Rect(0, 0, Width, Height));
-  mid := Height div 2;
+  mid := Height shr 1;
   { shadow line, accent channel, light line underneath: a raised rail }
   cv.Brush.Color := Blend(face, clBlack, 0.35);
   cv.FillRect(Rect(0, mid - 2, Width, mid - 1));
@@ -6728,6 +7452,13 @@ begin
   Invalidate;
 end;
 
+procedure TGLProgress.SetSegmented(AValue: Boolean);
+begin
+  if FSegmented = AValue then Exit;
+  FSegmented := AValue;
+  Invalidate;
+end;
+
 procedure TGLProgress.SetVertical(AValue: Boolean);
 begin
   if FVertical = AValue then Exit;
@@ -6735,6 +7466,44 @@ begin
   if (csDesigning in ComponentState) and not (csLoading in ComponentState) then
     SetBounds(Left, Top, Height, Width);
   Invalidate;
+end;
+
+{ the level meter: the track is cut into equal segments with equal gaps, lit from the bottom (or left)
+  up to the level. A segment's colour comes from its place on the scale - green, amber from 70 %, red
+  from 90 % - and an unlit segment is the same colour, dimmed. }
+procedure TGLProgress.PaintSegments(cv: TGLCanvas; AFraction: Double);
+const
+  SEG_LEN = 5;    // the wanted segment length, px
+  SEG_GAP = 2;
+  PAD = 2;
+var
+  len, thick, n, i, lit, a, b: Integer;
+  pitch, segLen: Double;
+  pos: Double;
+  col: TColor;
+begin
+  if FVertical then begin len := Height - 2 * PAD; thick := Width - 2 * PAD; end
+  else begin len := Width - 2 * PAD; thick := Height - 2 * PAD; end;
+  if (len < SEG_LEN) or (thick < 2) then Exit;
+  n := System.Math.Max(1, (len + SEG_GAP) div (SEG_LEN + SEG_GAP));
+  pitch := (len + SEG_GAP) / n;      // every segment advances by the same amount
+  segLen := pitch - SEG_GAP;
+  lit := Round(AFraction * n);
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  for i := 0 to n - 1 do
+  begin
+    pos := (i + 1) / n;
+    if pos > 0.9 then col := TColor($2828E0)         // red
+    else if pos > 0.7 then col := TColor($00A5FF)    // amber
+    else col := TColor($40C050);                      // green
+    if i >= lit then col := Blend(TrackColor, col, 0.22);
+    cv.Brush.Color := col;
+    a := PAD + Round(i * pitch);
+    b := PAD + Round(i * pitch + segLen);
+    if FVertical then cv.FillRect(Rect(PAD, Height - b, PAD + thick, Height - a))
+    else cv.FillRect(Rect(a, PAD, b, PAD + thick));
+  end;
 end;
 
 procedure TGLProgress.PaintGL;
@@ -6746,11 +7515,23 @@ begin
   cv := GL;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.Brush.Color := FaceColor;
+  { the four corners outside the rounded track show the colour behind the bar }
+  cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, Width, Height));
   cv.Brush.Color := TrackColor;
   cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.Pen.Style := psSolid;
+  cv.Pen.Color := Blend(BackdropColor, InkColor, 0.22);   // faint outline
+  cv.Brush.Style := bsClear;
+  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
   if FMax > FMin then f := EnsureRange((FPos - FMin) / (FMax - FMin), 0, 1) else f := 0;
+  if FSegmented then
+  begin
+    PaintSegments(cv, f);
+    Exit;
+  end;
   cv.Brush.Color := AccentColor;
   if FVertical then
   begin
@@ -6918,6 +7699,7 @@ begin
   for i := 0 to AIndex - 1 do Inc(x, FWidths[i]);
   if FOver then x := x + TAB_ARROW_W - FScroll;
   Result := Rect(x, 0, x + FWidths[AIndex], Height);
+  if FCurved then Dec(Result.Bottom, 4);   // the strip below the tabs holds their shadow
 end;
 
 function TGLTabStrip.TabAt(X, Y: Integer): Integer;
@@ -7012,11 +7794,8 @@ begin
       else if i = FHoverTab then cv.Brush.Color := Blend(face, InkColor, 0.12)
       else cv.Brush.Color := face;
       cv.FillRect(Rect(r.Left, r.Top, r.Right, r.Bottom - 2));
-      if i = FIndex then
-      begin
-        cv.Brush.Color := AccentColor;
-        cv.FillRect(Rect(r.Left, r.Bottom - 3, r.Right, r.Bottom));
-      end;
+      if i = FIndex then DrawTabRaised(cv, Rect(r.Left, r.Top, r.Right, r.Bottom - 2), 1.0, True)
+      else DrawTabSunken(cv, Rect(r.Left, r.Top, r.Right, r.Bottom - 2), IfThen(i = FHoverTab, 0.7, 1.0));
       cv.Font.Color := InkColor;
       cv.TextOut(r.Left + (r.Right - r.Left - cv.TextWidth(FTabs[i])) div 2,
         (Height - cv.TextHeight(FTabs[i])) div 2 - 1, FTabs[i]);
@@ -7045,6 +7824,8 @@ begin
     r := TabRect(i);
     if i = FHoverTab then TabBody(Rect(r.Left + 1, r.Top + 2, r.Right - 1, r.Bottom), Blend(face, InkColor, 0.16), 1)
     else TabBody(Rect(r.Left + 1, r.Top + 2, r.Right - 1, r.Bottom), Blend(face, InkColor, 0.05), 1);
+    DrawTabSunken(cv, Rect(r.Left + 1, r.Top + 2, r.Right - 1, r.Bottom), IfThen(i = FHoverTab, 0.7, 1.0),
+      Blend(face, InkColor, IfThen(i = FHoverTab, 0.16, 0.05)));
   end;
 
   { the active tab: a pill that glides from tab to tab, with a halo and a sweep of light }
@@ -7065,6 +7846,7 @@ begin
     if not FAnim.Enabled and not (csDesigning in ComponentState) then FAnim.Enabled := True;
     pr := Rect(Round(FPillL), r.Top + 2, Round(FPillR), r.Bottom);
     pulse := 0.5 + 0.5 * FastSin(FPhase);
+    DrawTabShadow(cv, pr, 1.6);
     TabBody(Rect(pr.Left - 2, pr.Top - 2, pr.Right + 2, pr.Bottom), accent, 0.12 + 0.12 * pulse);
     TabBody(pr, deep, 1);
     TabBody(Rect(pr.Left, pr.Top, pr.Right, pr.Bottom - 2), Blend(accent, clWhite, 0.06 + 0.12 * pulse), 1);
@@ -7084,8 +7866,7 @@ begin
     end;
     cv.PopClip;
     cv.Alpha := 1;
-    cv.Brush.Color := accent;
-    cv.FillRect(Rect(pr.Left + 3, pr.Bottom - 3, pr.Right - 3, pr.Bottom));
+    DrawTabRaised(cv, pr, 1.2, False);
   end;
 
   { captions over everything }
@@ -7095,7 +7876,7 @@ begin
     cv.PushClip(Rect(r.Left + 2, r.Top, r.Right - 2, r.Bottom));
     cv.Font.Color := InkColor;
     cv.TextOut(r.Left + (r.Right - r.Left - cv.TextWidth(FTabs[i])) div 2,
-      (Height - cv.TextHeight(FTabs[i])) div 2 - 1, FTabs[i]);
+      (r.Bottom - cv.TextHeight(FTabs[i])) div 2 - 1, FTabs[i]);
     cv.PopClip;
   end;
   if FOver then
@@ -7559,27 +8340,32 @@ var
   cv: TGLCanvas;
   face, field: TColor;
   s: string;
-  i, ty, caretX, a, b, inner: Integer;
+  i, ty, caretX, a, b, inner, bh: Integer;
 begin
+  if FFlat then bh := Height else bh := Height - 4;   // the field stands off its shadow
   cv := GL;
   face := FaceColor;
   field := FieldColor;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.Brush.Color := face;
+  { corners and the shadow strip show what the field sits on (a title bar, a recessed panel ...) }
+  cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, Width, Height));
   cv.Brush.Color := field;
   if FFlat then cv.FillRect(Rect(0, 0, Width, Height))
   else
   begin
-    cv.RoundRect(0, 0, Width, Height, 6, 6);
+    DrawDropShadow(cv, Rect(0, 0, Width, bh), 6, 4, 1.6);
+    cv.Brush.Color := field;
+    cv.RoundRect(0, 0, Width, bh, 6, 6);
     cv.Pen.Style := psSolid;
-    if Focused then cv.Pen.Color := AccentColor
+    if Focused then cv.Pen.Color := FocusColor
     else cv.Pen.Color := Blend(face, InkColor, IfThen(Hover, 0.4, 0.22));
     cv.Brush.Style := bsClear;
-    cv.RoundRect(0, 0, Width, Height, 6, 6);
+    cv.RoundRect(0, 0, Width, bh, 6, 6);
     cv.Brush.Style := bsSolid;
     cv.Pen.Style := psClear;
+    DrawInsetShadow(cv, Rect(1, 1, Width - 1, bh - 1), 3);
   end;
 
   s := Shown;
@@ -7591,14 +8377,14 @@ begin
   if caretX - FScroll < 0 then FScroll := caretX;
   if FCharX[Length(s)] - FScroll < inner then FScroll := System.Math.Max(0, FCharX[Length(s)] - inner);
 
-  cv.PushClip(Rect(5, 2, Width - 5, Height - 2));
-  ty := (Height - cv.TextHeight('Ag')) div 2;
+  cv.PushClip(Rect(5, 2, Width - 5, bh - 2));
+  ty := (bh - cv.TextHeight('Ag')) div 2;
   if HasSelection then
   begin
     a := System.Math.Min(FCaret, FAnchor);
     b := System.Math.Max(FCaret, FAnchor);
     cv.Brush.Color := Blend(field, AccentColor, 0.55);
-    cv.FillRect(Rect(6 + FCharX[a] - FScroll, 3, 6 + FCharX[b] - FScroll, Height - 3));
+    cv.FillRect(Rect(6 + FCharX[a] - FScroll, 3, 6 + FCharX[b] - FScroll, bh - 3));
   end;
   if Enabled then cv.Font.Color := Sys(clWindowText) else cv.Font.Color := InkColor;
   if (s = '') and (FTextHint <> '') and not Focused then
@@ -7610,7 +8396,7 @@ begin
   if Focused and FCaretOn then
   begin
     cv.Brush.Color := Sys(clWindowText);
-    cv.FillRect(Rect(6 + caretX - FScroll, 4, 7 + caretX - FScroll, Height - 4));
+    cv.FillRect(Rect(6 + caretX - FScroll, 4, 7 + caretX - FScroll, bh - 4));
   end;
   cv.PopClip;
 end;
@@ -7837,7 +8623,7 @@ end;
 procedure TGLCombo.Resize;
 begin
   inherited Resize;
-  if FEdit <> nil then FEdit.SetBounds(2, 2, Width - 22, Height - 4);
+  if FEdit <> nil then FEdit.SetBounds(2, 2, Width - 22, Height - 4 - 4);
 end;
 
 { typing in the box: the matching list entry (if any) becomes the item index }
@@ -7892,6 +8678,7 @@ procedure TGLCombo.Pick(AIndex: Integer);
 begin
   CloseUp;
   UserSetIndex(AIndex);
+  if Assigned(FOnSelect) then FOnSelect(Self);
 end;
 
 procedure TGLCombo.MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -7917,38 +8704,75 @@ procedure TGLCombo.PaintGL;
 var
   cv: TGLCanvas;
   face: TColor;
-  ax, ay: Integer;
+  ax, ay, bh: Integer;
 begin
+  bh := Height - 4;   // the field stands off its shadow
   cv := GL;
   face := FaceColor;
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.Brush.Color := face;
+  cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, Width, Height));
+  DrawDropShadow(cv, Rect(0, 0, Width, bh), 6, 4, 1.6);
   cv.Brush.Color := Blend(FieldColor, InkColor, IfThen(Hover or DroppedDown, 0.1, 0));
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Pen.Style := psSolid;
-  if Focused or DroppedDown then cv.Pen.Color := AccentColor
+  if Focused or DroppedDown then cv.Pen.Color := FocusColor
   else cv.Pen.Color := Blend(face, InkColor, 0.25);
   cv.Brush.Style := bsClear;
-  cv.RoundRect(0, 0, Width, Height, 6, 6);
+  cv.RoundRect(0, 0, Width, bh, 6, 6);
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
+  DrawInsetShadow(cv, Rect(1, 1, Width - 1, bh - 1), 3);
   if FEdit = nil then
   begin
-    cv.PushClip(Rect(4, 1, Width - 20, Height - 1));
+    cv.PushClip(Rect(4, 1, Width - 20, bh - 1));
     cv.Font.Color := InkColor;
-    cv.TextOut(8, (Height - cv.TextHeight('Ag')) div 2, Text);
+    cv.TextOut(8, (bh - cv.TextHeight('Ag')) div 2, Text);
     cv.PopClip;
   end;
   cv.Brush.Color := InkColor;
   ax := Width - 12;
-  ay := Height div 2;
+  ay := bh div 2;
   cv.Polygon([Point(ax - 4, ay - 2), Point(ax + 4, ay - 2), Point(ax, ay + 3)]);
 end;
 
+procedure GLAlignLabelsToFields(AParent: TWinControl);
+const
+  MAX_GAP = 40;   // a label further than this from a field is not its caption
+var
+  i, j: Integer;
+  c, f: TControl;
+  lbl: TGLLabel;
+  body: Integer;
+begin
+  if AParent = nil then Exit;
+  for i := 0 to AParent.ControlCount - 1 do
+  begin
+    c := AParent.Controls[i];
+    if (c is TGLLabel) and not TGLLabel(c).WordWrap then
+    begin
+      lbl := TGLLabel(c);
+      for j := 0 to AParent.ControlCount - 1 do
+      begin
+        f := AParent.Controls[j];
+        if not ((f is TGLCombo) or (f is TGLEdit)) then Continue;
+        if (f is TGLEdit) and TGLEdit(f).Flat then Continue;
+        if (f.Left < lbl.Left + lbl.Width - 4) or (f.Left - (lbl.Left + lbl.Width) > MAX_GAP) then Continue;
+        if (f.Top >= lbl.Top + lbl.Height) or (lbl.Top >= f.Top + f.Height) then Continue;
+        body := f.Height - 4;   // the field's body stands off a 4 px shadow
+        lbl.AutoSize := False;
+        lbl.Layout := tlCenter;
+        lbl.SetBounds(lbl.Left, f.Top, lbl.Width, body);
+        Break;
+      end;
+    end;
+    if c is TWinControl then GLAlignLabelsToFields(TWinControl(c));
+  end;
+end;
+
 initialization
-  RegisterClasses([TGLButton, TGLCheck, TGLKnob, TGLSlider, TGLEqSlider, TGLProgress, TGLLabel, TGLGroup, TGLPanel, TGLList, TGLMemo, TGLColumn, TGLListView, TGLPage, TGLPageControl, TGLTrackBar, TGLBevel, TGLShineBar, TGLSplitter, TGLScrollBox, TGLStatusPanel, TGLStatusBar, TGLTree,
+  RegisterClasses([TGLButton, TGLCheck, TGLKnob, TGLSlider, TGLEqSlider, TGLProgress, TGLLabel, TGLGroup, TGLPanel, TGLRecessPanel, TGLList, TGLMemo, TGLColumn, TGLListView, TGLPage, TGLPageControl, TGLTrackBar, TGLBevel, TGLShineBar, TGLSplitter, TGLScrollBox, TGLStatusPanel, TGLStatusBar, TGLTree,
     TGLTabStrip, TGLScrollBar, TGLEdit, TGLCombo]);
 
 end.

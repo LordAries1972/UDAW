@@ -84,6 +84,33 @@ type
     property Capacity: Cardinal read FCapacity;
   end;
 
+{ ---- threads that report their crash ------------------------------------------------ }
+
+type
+  { the application's exception hook (UDAW.CrashTrace sets it): E is the exception object and
+    AThreadLabel names the thread it was raised on }
+  TThreadCrashHook = procedure(E: TObject; const AThreadLabel: string);
+
+var
+  UDAWThreadCrashHook: TThreadCrashHook = nil;
+
+type
+  { Base of every UDAW worker thread. An exception that escapes Execute ends an ordinary TThread
+    silently (the RTL parks it in FatalException and nobody looks); here it is handed to the exception
+    hook, with the name of the thread that raised it. }
+  TUDAWThread = class(TThread)
+  protected
+    procedure DoTerminate; override;
+    { how the crash report names this thread; the class name unless a thread says better }
+    function CrashLabel: string; virtual;
+  end;
+
+{$IFNDEF FPC}
+{ A drop-in for TThread.CreateAnonymousThread: an exception escaping AProc goes to the exception hook,
+  named ALabel, instead of vanishing. The thread is returned suspended, like the RTL's. }
+function UDAWAnonymousThread(const ALabel: string; AProc: TProc): TThread;
+{$ENDIF}
+
 implementation
 
 uses
@@ -308,5 +335,44 @@ begin
   AtomicSet32(FTail, Integer(tail + ACount));
   Result := ACount;
 end;
+
+{ ---- threads that report their crash ------------------------------------------------ }
+
+function TUDAWThread.CrashLabel: string;
+begin
+  Result := ClassName;
+end;
+
+procedure TUDAWThread.DoTerminate;
+begin
+  if (FatalException <> nil) and Assigned(UDAWThreadCrashHook) then
+    try
+      UDAWThreadCrashHook(FatalException, CrashLabel);
+    except
+      // reporting must never make a dying thread worse
+    end;
+  inherited DoTerminate;
+end;
+
+{$IFNDEF FPC}
+function UDAWAnonymousThread(const ALabel: string; AProc: TProc): TThread;
+begin
+  Result := TThread.CreateAnonymousThread(
+    procedure
+    begin
+      try
+        AProc();
+      except
+        on E: TObject do
+          if Assigned(UDAWThreadCrashHook) then
+            try
+              UDAWThreadCrashHook(E, ALabel);
+            except
+            end;
+      end;
+    end);
+end;
+{$ENDIF}
+
 
 end.

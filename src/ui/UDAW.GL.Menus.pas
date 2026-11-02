@@ -87,6 +87,16 @@ type
     FRects: TArray<TRect>;
     FItems: TArray<TMenuItem>;
     FMeasure: TBitmap;
+    FStatusText: string;
+    FOutText: string;
+    FOutRect: TRect;
+    FOutHover: Boolean;
+    FOnOutClick: TNotifyEvent;
+    FCloseRect: TRect;
+    FCloseHover: Boolean;
+    FOnCloseClick: TNotifyEvent;
+    procedure SetOutText(const AValue: string);
+    procedure SetStatusText(const AValue: string);
     procedure SetMenu(AValue: TMainMenu);
     procedure MenuChanged(Sender: TObject; Source: TMenuItem; Rebuild: Boolean);
     procedure Layout;
@@ -108,6 +118,14 @@ type
     function VisibleCount: Integer;
     function ItemAt(AIndex: Integer): TMenuItem;
     procedure Closed;
+    { a read-out window at the bar's far right (the frame-rate display); empty hides it }
+    property StatusText: string read FStatusText write SetStatusText;
+    { the audio-output field right of the read-out: drawn flat with a drop arrow; a click raises OnOutClick }
+    property OutText: string read FOutText write SetOutText;
+    property OnOutClick: TNotifyEvent read FOnOutClick write FOnOutClick;
+    { the close button in the bar's top right corner; drawn while OnCloseClick is assigned }
+    property OnCloseClick: TNotifyEvent read FOnCloseClick write FOnCloseClick;
+    function OutRectOnScreen: TRect;
   published
     property Menu: TMainMenu read FMenu write SetMenu;
   end;
@@ -140,10 +158,12 @@ type
     FBarIndex: Integer;
     FDown: Boolean;
     FHook: HHOOK;
+    FMouseHook: HHOOK;
     FLastPt: TPoint;
   public
     constructor Create;
     destructor Destroy; override;
+    function OwnsWindow(AWnd: HWND): Boolean;
     procedure OpenRoot(AItem: TMenuItem; X, Y: Integer; ABar: TGLMenuBar; ABarIndex: Integer);
     procedure OpenSub(ALevel: Integer; AIndex: Integer; AFocusFirst: Boolean);
     procedure TrimTo(ALevel: Integer);
@@ -228,6 +248,69 @@ begin
   begin
     if GSession.Key(Word(AWParam)) then Exit(1);
   end;
+  Result := CallNextHookEx(0, ACode, AWParam, ALParam);
+end;
+
+{ A button press anywhere but on the open menu (or its bar) closes it. Normally the first menu
+  window holds the mouse capture and sees the click itself; this covers the cases where the
+  capture was taken away (a timer, a drag, another control) and the click would otherwise
+  fall through to the control underneath with the menu left hanging open. The click is not
+  swallowed, so it still reaches whatever was clicked. }
+var
+  GSwallowHook: HHOOK;
+
+{ A click that only closes a menu must do nothing else: the press is swallowed by the hook
+  below and the button release that follows is swallowed here, so neither reaches the control
+  that happened to be under the pointer. Removes itself after that one release. }
+function SwallowHookProc(ACode: Integer; AWParam: WPARAM; ALParam: LPARAM): LRESULT; stdcall;
+var
+  h: HHOOK;
+begin
+  h := GSwallowHook;
+  if ACode >= 0 then
+    case AWParam of
+      WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP,
+      WM_NCLBUTTONUP, WM_NCRBUTTONUP, WM_NCMBUTTONUP:
+        begin
+          GSwallowHook := 0;
+          UnhookWindowsHookEx(h);
+          Exit(1);
+        end;
+      WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN,
+      WM_NCLBUTTONDOWN, WM_NCRBUTTONDOWN, WM_NCMBUTTONDOWN:
+        begin
+          { a fresh press without the release having been seen: stop swallowing }
+          GSwallowHook := 0;
+          UnhookWindowsHookEx(h);
+        end;
+    end;
+  Result := CallNextHookEx(0, ACode, AWParam, ALParam);
+end;
+
+procedure SwallowNextRelease;
+begin
+  if GSwallowHook = 0 then
+    GSwallowHook := SetWindowsHookEx(WH_MOUSE, @SwallowHookProc, 0, GetCurrentThreadId);
+end;
+
+function MouseHookProc(ACode: Integer; AWParam: WPARAM; ALParam: LPARAM): LRESULT; stdcall;
+var
+  wnd: HWND;
+begin
+  if (ACode >= 0) and (GSession <> nil) then
+    case AWParam of
+      WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN,
+      WM_NCLBUTTONDOWN, WM_NCRBUTTONDOWN, WM_NCMBUTTONDOWN:
+        begin
+          wnd := PMouseHookStruct(ALParam)^.hwnd;
+          if not GSession.OwnsWindow(wnd) then
+          begin
+            GSession.CloseAll;       // frees the session and this hook
+            SwallowNextRelease;
+            Exit(1);                 // the press only closes the menu
+          end;
+        end;
+    end;
   Result := CallNextHookEx(0, ACode, AWParam, ALParam);
 end;
 
@@ -750,8 +833,20 @@ end;
 
 destructor TGLMenuSession.Destroy;
 begin
+  if FHook <> 0 then UnhookWindowsHookEx(FHook);
+  if FMouseHook <> 0 then UnhookWindowsHookEx(FMouseHook);
   FWins.Free;
   inherited Destroy;
+end;
+
+function TGLMenuSession.OwnsWindow(AWnd: HWND): Boolean;
+var
+  w: TGLMenuWindow;
+begin
+  Result := (FBar <> nil) and FBar.HandleAllocated and (FBar.Handle = AWnd);
+  if Result then Exit;
+  for w in FWins do
+    if w.HandleAllocated and (w.Handle = AWnd) then Exit(True);
 end;
 
 function TGLMenuSession.Deepest: TGLMenuWindow;
@@ -783,6 +878,7 @@ begin
   FWins.Add(w);
   SetCapture(w.Handle);
   if FHook = 0 then FHook := SetWindowsHookEx(WH_KEYBOARD, @KeyHookProc, 0, GetCurrentThreadId);
+  if FMouseHook = 0 then FMouseHook := SetWindowsHookEx(WH_MOUSE, @MouseHookProc, 0, GetCurrentThreadId);
 end;
 
 procedure TGLMenuSession.OpenSub(ALevel, AIndex: Integer; AFocusFirst: Boolean);
@@ -841,6 +937,11 @@ begin
   begin
     UnhookWindowsHookEx(FHook);
     FHook := 0;
+  end;
+  if FMouseHook <> 0 then
+  begin
+    UnhookWindowsHookEx(FMouseHook);
+    FMouseHook := 0;
   end;
   bar := FBar;
   FBar := nil;
@@ -942,7 +1043,11 @@ begin
         mkDown:
           if idx = FBarIndex then CloseAll
           else if idx >= 0 then SwitchBar(idx)
-          else CloseAll;
+          else
+          begin
+            CloseAll;
+            SwallowNextRelease;
+          end;
         mkMove:
           if (idx >= 0) and (idx <> FBarIndex) then SwitchBar(idx);
       end;
@@ -969,7 +1074,11 @@ begin
       Exit;
     end;
   end;
-  if AKind = mkDown then CloseAll;
+  if AKind = mkDown then
+  begin
+    CloseAll;
+    SwallowNextRelease;   // the release must not click whatever is under the pointer
+  end;
 end;
 
 function TGLMenuSession.Key(AVk: Word): Boolean;
@@ -1227,6 +1336,16 @@ end;
 procedure TGLMenuBar.CMMouseLeave(var Msg: TMessage);
 begin
   inherited;
+  if FCloseHover then
+  begin
+    FCloseHover := False;
+    Invalidate;
+  end;
+  if FOutHover then
+  begin
+    FOutHover := False;
+    Invalidate;
+  end;
   if FHover <> -1 then
   begin
     FHover := -1;
@@ -1239,6 +1358,17 @@ var
   i: Integer;
 begin
   inherited MouseMove(Shift, X, Y);
+  if Assigned(FOnCloseClick) and (PtInRect(FCloseRect, Point(X, Y)) <> FCloseHover) then
+  begin
+    FCloseHover := not FCloseHover;
+    Invalidate;
+  end;
+  if (FOutText <> '') <> False then
+    if PtInRect(FOutRect, Point(X, Y)) <> FOutHover then
+    begin
+      FOutHover := not FOutHover;
+      Invalidate;
+    end;
   i := IndexAt(X, Y);
   if i <> FHover then
   begin
@@ -1253,6 +1383,18 @@ var
 begin
   inherited MouseDown(Button, Shift, X, Y);
   if (Button <> mbLeft) or not Enabled then Exit;
+  if Assigned(FOnCloseClick) and PtInRect(FCloseRect, Point(X, Y)) then
+  begin
+    if MouseCapture then MouseCapture := False;
+    FOnCloseClick(Self);
+    Exit;
+  end;
+  if (FOutText <> '') and PtInRect(FOutRect, Point(X, Y)) then
+  begin
+    if MouseCapture then MouseCapture := False;
+    if Assigned(FOnOutClick) then FOnOutClick(Self);
+    Exit;
+  end;
   i := IndexAt(X, Y);
   if i >= 0 then PostMessage(Handle, WM_APP + 22, i, 0);
 end;
@@ -1280,12 +1422,33 @@ begin
   inherited;
 end;
 
+procedure TGLMenuBar.SetOutText(const AValue: string);
+begin
+  if FOutText = AValue then Exit;
+  FOutText := AValue;
+  Invalidate;
+end;
+
+function TGLMenuBar.OutRectOnScreen: TRect;
+begin
+  Result.TopLeft := ClientToScreen(FOutRect.TopLeft);
+  Result.BottomRight := ClientToScreen(FOutRect.BottomRight);
+end;
+
+procedure TGLMenuBar.SetStatusText(const AValue: string);
+begin
+  if FStatusText = AValue then Exit;
+  FStatusText := AValue;
+  Invalidate;
+end;
+
 procedure TGLMenuBar.PaintGL;
 var
   cv: TGLCanvas;
   face, ink, accent: TColor;
-  i, y: Integer;
-  cap, icon: string;
+  i, y, bw, bx, by, bh, fSize, closeW, cx, cy: Integer;
+  cap, icon, fName: string;
+  fStyle: TFontStyles;
 begin
   Layout;
   cv := GL;
@@ -1316,13 +1479,90 @@ begin
       cv.Brush.Style := bsSolid;
       cv.Pen.Style := psClear;
       cv.Brush.Color := cv.Font.Color;
-      TGLIconBar.DrawIcon(cv, icon, Rect(FRects[i].Left + 6, FRects[i].Top, FRects[i].Left + 6 + BAR_ICON_W - 2,
-        FRects[i].Bottom), cv.Font.Color);
+      { centred in the bar above its 2 px accent line }
+      TGLIconBar.DrawIcon(cv, icon, Rect(FRects[i].Left + 6, 0, FRects[i].Left + 6 + BAR_ICON_W - 2,
+        Height - 2), cv.Font.Color);
       cv.Brush.Style := bsClear;
     end;
     cv.TextOut(FRects[i].Left + 10 + System.Math.IfThen(icon <> '', BAR_ICON_W, 0),
-      FRects[i].Top + (FRects[i].Bottom - FRects[i].Top - cv.TextHeight(cap)) div 2, cap);
+      (Height - 2 - cv.TextHeight(cap)) div 2, cap);
     cv.Brush.Style := bsSolid;
+  end;
+  { the close button: an X in the top right corner, red when hovered }
+  FCloseRect := Rect(0, 0, 0, 0);
+  closeW := 0;
+  if Assigned(FOnCloseClick) then
+  begin
+    closeW := 34;
+    FCloseRect := Rect(Width - closeW, 0, Width, Height - 2);
+    if FCloseHover then
+    begin
+      cv.Brush.Style := bsSolid;
+      cv.Pen.Style := psClear;
+      cv.Brush.Color := TColor($002B2BC8);
+      cv.FillRect(FCloseRect);
+    end;
+    cv.Pen.Style := psSolid;
+    cv.Pen.Width := 2;
+    if FCloseHover then cv.Pen.Color := clWhite else cv.Pen.Color := ink;
+    cx := FCloseRect.Left + closeW div 2;
+    cy := (Height - 2) div 2;
+    cv.MoveTo(cx - 5, cy - 5);
+    cv.LineTo(cx + 5, cy + 5);
+    cv.MoveTo(cx + 5, cy - 5);
+    cv.LineTo(cx - 5, cy + 5);
+    cv.Pen.Width := 1;
+    cv.Pen.Style := psClear;
+  end;
+  { the read-out window: a lowered bevel box drawn straight onto the bar, so its rounded corners
+    show the bar's gradient and not a filled rectangle }
+  FOutRect := Rect(0, 0, 0, 0);
+  if (FStatusText <> '') or (FOutText <> '') then
+  begin
+    fName := cv.Font.Name;
+    fSize := cv.Font.Size;
+    fStyle := cv.Font.Style;
+    cv.Font.Name := 'Consolas';
+    cv.Font.Size := 10;
+    cv.Font.Style := [fsBold];
+    bx := Width - 8 - closeW;
+    by := 2;
+    bh := Height - 2 - 2 * by;
+    { the audio output: a flat (no shadow) drop-down field at the far right }
+    if FOutText <> '' then
+    begin
+      bw := cv.TextWidth(FOutText) + 20 + 16;
+      bx := bx - bw;
+      FOutRect := Rect(bx, by, bx + bw, by + bh);
+      cv.Brush.Style := bsSolid;
+      cv.Pen.Style := psSolid;
+      cv.Pen.Color := MixColor(face, ink, IfThen(FOutHover, 0.5, 0.25));
+      cv.Brush.Color := MixColor(MixColor(face, ink, 0.09), face, IfThen(FOutHover, 0.2, 0.5));
+      cv.RoundRect(bx, by, bx + bw, by + bh, 8, 8);
+      cv.Pen.Style := psClear;
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := ink;
+      cv.TextOut(bx + 10, by + (bh - cv.TextHeight(FOutText)) div 2, FOutText);
+      cv.Brush.Style := bsSolid;
+      cv.Brush.Color := ink;
+      cv.Polygon([Point(bx + bw - 15, by + bh div 2 - 2), Point(bx + bw - 7, by + bh div 2 - 2),
+        Point(bx + bw - 11, by + bh div 2 + 3)]);
+      bx := bx - 6;
+    end;
+    if FStatusText <> '' then
+    begin
+      bw := cv.TextWidth(FStatusText) + 20;
+      bx := bx - bw;
+      DrawBox3D(cv, Rect(bx, by, bx + bw, by + bh),
+        MixColor(MixColor(face, ink, 0.09), face, 0.5), False, 8);
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := ink;
+      cv.TextOut(bx + 10, by + (bh - cv.TextHeight(FStatusText)) div 2, FStatusText);
+      cv.Brush.Style := bsSolid;
+    end;
+    cv.Font.Name := fName;
+    cv.Font.Size := fSize;
+    cv.Font.Style := fStyle;
   end;
   { a thin accent line along the bottom edge: bright in the middle, fading to the sides }
   for i := 0 to Width - 1 do

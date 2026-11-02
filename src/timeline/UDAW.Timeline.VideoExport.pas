@@ -203,6 +203,8 @@ const
   MF_SOURCE_READERF_ENDOFSTREAM = $2;
   MF_SOURCE_READERF_ERROR = $1;
   VT_I8_TYPE = 20;
+  VT_UI8_TYPE = 21;
+  MF_SOURCE_READER_MEDIASOURCE = DWORD($FFFFFFFF);
   HNS_PER_SECOND = 10000000;
 
   MF_MT_MAJOR_TYPE: TGUID = '{48EBA18E-F8C9-4687-BF11-0A74C9F96A8F}';
@@ -211,7 +213,8 @@ const
   MF_MT_FRAME_RATE: TGUID = '{C459A2E8-3D2C-4E44-B132-FEE5156C7BB0}';
   MF_MT_PIXEL_ASPECT_RATIO: TGUID = '{C6376A1E-8D0A-4027-BE45-6D9A0AD39BB6}';
   MF_MT_INTERLACE_MODE: TGUID = '{E2724BB8-E676-4806-B4B2-A8D6EFB44CCD}';
-  MF_MT_AVG_BITRATE: TGUID = '{20332624-FB0D-4D9E-BD0D-CBF6786C102E}';
+  MF_PD_DURATION: TGUID = '{6C990D33-BB8E-477A-8598-0D5D96FCD88A}';
+  MF_MT_AVG_BITRATE: TGUID ='{20332624-FB0D-4D9E-BD0D-CBF6786C102E}';
   MF_MT_DEFAULT_STRIDE: TGUID = '{644B4E48-1E02-4516-B0EB-C01CA9D49AC6}';
   MF_MT_MPEG2_PROFILE: TGUID = '{AD76A80B-2D5C-4E0B-B375-64E520137036}';
   MF_MT_MAX_KEYFRAME_SPACING: TGUID = '{C16EB52B-73A1-476F-8D62-839D6A020652}';
@@ -286,6 +289,7 @@ type
     FWidth, FHeight: Integer;
     FStride: Integer;                 // signed, as Media Foundation reports it
     FFpsNum, FFpsDen: Cardinal;
+    FSourceKbps: Integer;             // the file's own video rate; 0 = unknown
     FCur, FNext: TBytes;
     FCurT, FNextT: Int64;
     FHaveCur, FHaveNext, FEos, FStarted, FNeedSeek: Boolean;
@@ -310,6 +314,7 @@ type
     property Height: Integer read FHeight;
     property FpsNum: Cardinal read FFpsNum;
     property FpsDen: Cardinal read FFpsDen;
+    property SourceKbps: Integer read FSourceKbps;
   end;
 
 { The picture is decoded the way MPC-HC does it for formats Windows' own
@@ -373,7 +378,10 @@ var
   native, want, cur: IMFMediaType;
   v: UInt64;
   u: UINT;
+  dur: TMfPropVarI8;
+  fs: TFileStream;
 begin
+  native := nil;
   Check(MFCreateAttributes(attrs, 1), 'Create reader attributes');
   attrs.SetUINT32(MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1);   // YUV -> RGB inside the reader
   Check(MFCreateSourceReaderFromURL(PWideChar(APath), attrs, FReader),
@@ -388,6 +396,27 @@ begin
   begin
     FFpsNum := Cardinal(v shr 32);
     FFpsDen := Cardinal(v and $FFFFFFFF);
+  end;
+  { the file's own video rate: the stream's average bitrate, else the file size over its duration
+    (audio included, so a slight over-estimate) }
+  FSourceKbps := 0;
+  if Assigned(native) and Succeeded(native.GetUINT32(MF_MT_AVG_BITRATE, u)) then
+    FSourceKbps := Integer(u div 1000);
+  if FSourceKbps <= 0 then
+  begin
+    dur.vt := 0;
+    if Succeeded(FReader.GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE, MF_PD_DURATION, @dur)) and
+       (dur.vt = VT_UI8_TYPE) and (dur.hVal > 0) then
+      try
+        fs := TFileStream.Create(APath, fmOpenRead or fmShareDenyNone);
+        try
+          FSourceKbps := Integer(Min(Int64(MaxInt), fs.Size * 8 * HNS_PER_SECOND div dur.hVal div 1000));
+        finally
+          fs.Free;
+        end;
+      except
+        FSourceKbps := 0;
+      end;
   end;
   Check(MFCreateMediaType(want), 'Create media type');
   want.SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
@@ -852,7 +881,7 @@ type
     KeyframeSeconds: Double;     // longest gap between key pictures (short = fast seeking)
     BitsPerPixel: Double;        // encoder budget
     AudioKbps: Integer;          // > 0 picks the AAC rate (snapped to what the encoder offers)
-    BitrateKbps: Integer;        // > 0 overrides the BitsPerPixel budget with a fixed bitrate
+    BitrateKbps: Integer;        // > 0 overrides the BitsPerPixel budget with a fixed bitrate; < 0 = preserve original quality
   end;
 
 procedure RenderVideoCore(ATl: TTimeline; const ARawPcm16, AOutMp4: string;
@@ -879,6 +908,7 @@ var
   trk: TTimelineTrack;
   t: Double;
   bitrate: Int64;
+  srcKbps: Integer;
   haveRate: Boolean;
   lib: HMODULE;
   srcT: Double;
@@ -1074,7 +1104,7 @@ begin
     mfUp := True;
 
     { ---- inspect the video clips that take part: picture size and rate ---- }
-    outW := 0; outH := 0; fpsNum := 0; fpsDen := 1; haveRate := False;
+    outW := 0; outH := 0; fpsNum := 0; fpsDen := 1; haveRate := False; srcKbps := 0;
     for i := 0 to ATl.TrackCount - 1 do
     begin
       trk := ATl.GetTrack(i);
@@ -1087,6 +1117,7 @@ begin
         src := ATl.SourceById(clip.SourceId);
         if (src = nil) or (src.Kind <> mkVideoFile) then Continue;
         vs := SourceFor(src);
+        srcKbps := Max(srcKbps, vs.SourceKbps);   // the highest rate any clip arrives in
         if vs.Width * vs.Height > outW * outH then
         begin
           outW := vs.Width;
@@ -1129,12 +1160,28 @@ begin
     if g > 1 then begin fpsNum := fpsNum div g; fpsDen := fpsDen div g; end;
 
     if AOpts.BitrateKbps > 0 then
-      bitrate := AOpts.BitrateKbps * 1000
+      bitrate := Int64(AOpts.BitrateKbps) * 1000
+    else if AOpts.BitrateKbps < 0 then
+    begin
+      { preserve original: the source's own rate; when that is unknown, a
+        near-transparent budget for the source size and frame rate }
+      if srcKbps > 0 then
+        bitrate := Int64(srcKbps) * 1000
+      else
+      begin
+        bitrate := Round(outW * outH * (fpsNum / fpsDen) * 0.35);
+        bitrate := Max(15000000, Min(80000000, bitrate));
+      end;
+    end
     else
     begin
       bitrate := Round(outW * outH * (fpsNum / fpsDen) * AOpts.BitsPerPixel);
       bitrate := Max(1000000, Min(50000000, bitrate));
     end;
+    { a rate above what the supplied video has adds no quality, only size:
+      export at the rate the video is in }
+    if (AOpts.BitrateKbps <> 0) and (srcKbps > 0) and (bitrate > Int64(srcKbps) * 1000) then
+      bitrate := Max(Int64(500) * 1000, Int64(srcKbps) * 1000);
     totalFrames := Ceil(ADuration * fpsNum / fpsDen);
     SetLength(canvas, outW * outH * 4);
     SetLength(fxA, outW * outH * 4);

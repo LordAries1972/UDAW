@@ -19,30 +19,34 @@ uses
 
 const
   UDAW_HELP_FILE = 'about-udaw.dat';
+  UDAW_LICENSE_FILE = 'udaw-license.dat';
 
 { Returns True and the page body in AHtml on success; returns False and a
   human-readable failure reason in AErrorMsg otherwise. The name is kept from
   the days the page came over HTTPS. }
 function FetchUDAWHelpPage(out AHtml: string; out AErrorMsg: string): Boolean;
 
+{ Same lookup for the License / EULA page (udaw-license.dat, resource UDAW_LICENSE). }
+function FetchUDAWLicensePage(out AHtml: string; out AErrorMsg: string): Boolean;
+
 implementation
 
 uses
   Winapi.Windows, System.IOUtils;
 
-function FindHelpFile: string;
+function FindPageFile(const AFileName: string): string;
 var
   exeDir: string;
 begin
   exeDir := ExtractFilePath(ParamStr(0));
-  Result := exeDir + UDAW_HELP_FILE;
+  Result := exeDir + AFileName;
   if FileExists(Result) then Exit;
-  Result := ExpandFileName(exeDir + '..\..\' + UDAW_HELP_FILE);
+  Result := ExpandFileName(exeDir + '..\..\' + AFileName);
   if FileExists(Result) then Exit;
   Result := '';
 end;
 
-function FetchUDAWHelpPage(out AHtml: string; out AErrorMsg: string): Boolean;
+function FetchPage(const AFileName, AResName: string; out AHtml: string; out AErrorMsg: string): Boolean;
 var
   path: string;
   res: TResourceStream;
@@ -51,7 +55,7 @@ begin
   Result := False;
   AHtml := '';
   AErrorMsg := '';
-  path := FindHelpFile;
+  path := FindPageFile(AFileName);
   if path <> '' then
   begin
     try
@@ -64,7 +68,7 @@ begin
   end;
   { fall back to the page embedded in the executable }
   try
-    res := TResourceStream.Create(HInstance, 'UDAW_HELP', RT_RCDATA);
+    res := TResourceStream.Create(HInstance, AResName, RT_RCDATA);
     try
       SetLength(bytes, res.Size);
       if res.Size > 0 then res.ReadBuffer(bytes[0], res.Size);
@@ -77,8 +81,18 @@ begin
   except
     on E: Exception do
       if AErrorMsg = '' then
-        AErrorMsg := UDAW_HELP_FILE + ' was not found next to UDAW.exe and no help page is embedded.';
+        AErrorMsg := AFileName + ' was not found next to UDAW.exe and no help page is embedded.';
   end;
+end;
+
+function FetchUDAWHelpPage(out AHtml: string; out AErrorMsg: string): Boolean;
+begin
+  Result := FetchPage(UDAW_HELP_FILE, 'UDAW_HELP', AHtml, AErrorMsg);
+end;
+
+function FetchUDAWLicensePage(out AHtml: string; out AErrorMsg: string): Boolean;
+begin
+  Result := FetchPage(UDAW_LICENSE_FILE, 'UDAW_LICENSE', AHtml, AErrorMsg);
 end;
 
 end.

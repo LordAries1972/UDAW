@@ -860,7 +860,7 @@ begin
     Result := 0;
     if (Length(planar) > 0) and (Length(planar[0]) > 0) then
     begin
-      Result := RmsOf(planar, 0, Length(planar[0]) div 2, Length(planar[0]));
+      Result := RmsOf(planar, 0, Length(planar[0]) shr 1, Length(planar[0]));
     end;
   finally
     proc.Free;

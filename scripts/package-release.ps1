@@ -57,7 +57,7 @@ $version = '{0}.{1}.{2}.{3}' -f $m.Groups[1].Value, $m.Groups[2].Value, $m.Group
 $stage = Join-Path ([IO.Path]::GetTempPath()) ('udaw-package-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 try {
-    foreach ($f in 'UDAW.exe', 'UDAWUpdater.exe', 'udaw-icon-image.png', 'about-udaw.dat') {
+    foreach ($f in 'UDAW.exe', 'UDAWUpdater.exe', 'udaw-icon-image.png', 'about-udaw.dat', 'udaw-license.dat', 'LICENSE.md') {
         $src = Join-Path $BinDir $f
         if (Test-Path $src) { Copy-Item $src $stage }
     }

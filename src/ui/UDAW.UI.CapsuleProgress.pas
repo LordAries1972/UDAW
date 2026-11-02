@@ -26,6 +26,7 @@ type
     FStyle: TProgressBarStyle;
     FMarqueeInterval: Integer;
     FText: string;
+    FTextSize: Integer;
     FPhase: Double;            // 0..1 animation phase (stripes / marquee)
     FTimer: TTimer;
     procedure SetMin(AValue: Integer);
@@ -33,6 +34,7 @@ type
     procedure SetPosition(AValue: Integer);
     procedure SetStyle(AValue: TProgressBarStyle);
     procedure SetText(const AValue: string);
+    procedure SetTextSize(AValue: Integer);
     procedure TimerTick(Sender: TObject);
     procedure UpdateTimer;
     function Fraction: Double;
@@ -51,6 +53,8 @@ type
     property MarqueeInterval: Integer read FMarqueeInterval write FMarqueeInterval default 30;
     { the progress status text, centred in the capsule }
     property Text: string read FText write SetText;
+    { the text size in points; 0 sizes it to the bar's height }
+    property TextSize: Integer read FTextSize write SetTextSize default 0;
   end;
 
 implementation
@@ -126,6 +130,13 @@ begin
   Invalidate;
 end;
 
+procedure TGLCapsuleProgress.SetTextSize(AValue: Integer);
+begin
+  if FTextSize = AValue then Exit;
+  FTextSize := AValue;
+  Invalidate;
+end;
+
 procedure TGLCapsuleProgress.SetText(const AValue: string);
 begin
   if FText = AValue then Exit;
@@ -190,7 +201,8 @@ begin
   r := h;                       // a radius of the full height makes the ends semicircles
   cv.Brush.Style := bsSolid;
   cv.Pen.Style := psClear;
-  cv.Brush.Color := th.Background;
+  { the corners outside the capsule show the colour behind the bar, not a box of their own }
+  cv.Brush.Color := BackdropColor;
   cv.FillRect(Rect(0, 0, w, h));
 
   trackCol := Mix(th.Background, th.Text, 0.14);
@@ -312,15 +324,22 @@ begin
   if (s = '') and (FStyle = pbstNormal) then s := Format('%d%%', [Round(Fraction * 100)]);
   if s <> '' then
   begin
-    cv.Font.Size := 8;
+    { a clear UI face sized to the bar (about 9 pt on the usual 16 px bar), with a thin dark
+      outline all round so the text reads over both the filled and the empty part }
+    cv.Font.Name := 'Segoe UI';
+    if FTextSize > 0 then cv.Font.Size := FTextSize
+    else cv.Font.Size := System.Math.Max(8, Round((h - 4) * 0.72));
     cv.Font.Style := [fsBold];
     s := Fit(s, w - h);
     tx := (w - cv.TextWidth(s)) div 2;
     ty := (h - cv.TextHeight(s)) div 2;
     cv.Brush.Style := bsClear;
     cv.Font.Color := clBlack;
-    cv.Alpha := 0.55;
-    cv.TextOut(tx + 1, ty + 1, s);                      // shadow
+    cv.Alpha := 0.7;
+    cv.TextOut(tx - 1, ty, s);
+    cv.TextOut(tx + 1, ty, s);
+    cv.TextOut(tx, ty - 1, s);
+    cv.TextOut(tx, ty + 1, s);
     cv.Alpha := 1;
     txt := clWhite;
     cv.Font.Color := txt;

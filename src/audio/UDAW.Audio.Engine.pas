@@ -26,8 +26,8 @@ uses
 const
   TAP_RING_SIZE        = 4096;                // power of two (masking)
   CFG_SEC_AUDIO        = 'audio';
-  CFG_AUDIO_BACKEND    = 'backend';           // auto | wasapi | software
-  CFG_AUDIO_OUT_DEVICE = 'output_device';     // '' => backend default
+  CFG_AUDIO_BACKEND    = 'backend';           // auto | wasapi | directsound | software
+  CFG_AUDIO_OUT_DEVICE = 'output_device';     // '' => the system default output; used by every playback path
   CFG_AUDIO_IN_DEVICE  = 'input_device';
   CFG_AUDIO_RATE       = 'sample_rate';
   CFG_AUDIO_BUFFER     = 'buffer_frames';
@@ -49,11 +49,14 @@ type
   private
     FConfig: TConfig;
     FBackend: IAudioBackend;
+    FBackendKey: string;               // the Settings backend id FBackend was created for
     FStream: IAudioStream;
     FState: Integer;                         // atomic TAudioEngineState
     FControlLock: TUDAWLock;                 // serialises open/close/reopen
     FSourceLock: TUDAWLock;                  // guards FSource swap
     FSource: IAudioSource;
+    FOverlays: array[0..1] of IAudioSource;  // rendered on top of FSource: 0 Foley pads, 1 system sounds; guarded by FSourceLock
+    FOverlayBuf: TAudioBuffer;               // scratch the overlay renders into before it is added
 
     FRequest: TAudioStreamRequest;
     FGranted: TAudioStreamGranted;
@@ -99,6 +102,9 @@ type
     function Reopen: Boolean;
 
     procedure SetSource(ASource: IAudioSource);   // thread-safe
+    { Extra sources mixed on top of whatever SetSource plays (or on silence), through the same
+      output device. Slot 0 is the Foley pads, slot 1 the Windows system sounds. nil removes one. }
+    procedure SetOverlay(ASource: IAudioSource; ASlot: Integer = 0);
     procedure ClearSource;
 
     { Report that the current output device has gone away (called by a platform
@@ -170,7 +176,7 @@ end;
 { ---------------- recovery thread ---------------- }
 
 type
-  TRecoveryThread = class(TThread)
+  TRecoveryThread = class(TUDAWThread)
   private
     FEngine: TAudioEngine;
   protected
@@ -241,6 +247,9 @@ begin
   StopRecovery;
   Close;
   FSource := nil;
+  FOverlays[0] := nil;
+  FOverlays[1] := nil;
+  FOverlayBuf.Free;
   FControlLock.Free;
   FSourceLock.Free;
   inherited Destroy;
@@ -282,8 +291,10 @@ begin
   r.SampleRate := FConfig.GetInt(CFG_SEC_AUDIO, CFG_AUDIO_RATE, 0);
   if (r.SampleRate <> 0) and not ValidSampleRate(r.SampleRate) then
     r.SampleRate := UDAW_DEFAULT_SAMPLE_RATE;
-  r.BufferFrames := ClampBufferFrames(
-    FConfig.GetInt(CFG_SEC_AUDIO, CFG_AUDIO_BUFFER, UDAW_DEFAULT_BUFFER_FRAMES));
+  { 0 is Settings' "Device default": the engine's own default size, not the clamp's minimum }
+  r.BufferFrames := FConfig.GetInt(CFG_SEC_AUDIO, CFG_AUDIO_BUFFER, UDAW_DEFAULT_BUFFER_FRAMES);
+  if r.BufferFrames <= 0 then r.BufferFrames := UDAW_DEFAULT_BUFFER_FRAMES;
+  r.BufferFrames := ClampBufferFrames(r.BufferFrames);
   r.RenderChannels := FConfig.GetInt(CFG_SEC_AUDIO, CFG_AUDIO_OUT_CH, 2);
   r.CaptureChannels := FConfig.GetInt(CFG_SEC_AUDIO, CFG_AUDIO_IN_CH, 2);
   if FConfig.GetBool(CFG_SEC_AUDIO, CFG_AUDIO_EXCLUSIVE, False) then
@@ -316,14 +327,21 @@ end;
 procedure TAudioEngine.PersistGranted;
 begin
   if FConfig = nil then Exit;
-  FConfig.SetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND,
-    FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, 'auto'));
-  FConfig.SetInt(CFG_SEC_AUDIO, CFG_AUDIO_RATE, FGranted.SampleRate);
-  FConfig.SetInt(CFG_SEC_AUDIO, CFG_AUDIO_BUFFER, FGranted.BufferFrames);
-  FConfig.SetInt(CFG_SEC_AUDIO, CFG_AUDIO_OUT_CH, FGranted.RenderChannels);
-  if FGranted.CaptureChannels > 0 then
+  { What the device granted is only a starting point: it fills in a setting that was never chosen,
+    but never replaces one the user set in Settings (a requested 256 must stay 256 even when the
+    device rounds it, and "Device default" must stay 0) }
+  if FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, '#') = '#' then
+    FConfig.SetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, 'auto');
+  if FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_RATE, '#') = '#' then
+    FConfig.SetInt(CFG_SEC_AUDIO, CFG_AUDIO_RATE, FGranted.SampleRate);
+  if FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BUFFER, '#') = '#' then
+    FConfig.SetInt(CFG_SEC_AUDIO, CFG_AUDIO_BUFFER, FGranted.BufferFrames);
+  if FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_OUT_CH, '#') = '#' then
+    FConfig.SetInt(CFG_SEC_AUDIO, CFG_AUDIO_OUT_CH, FGranted.RenderChannels);
+  if (FGranted.CaptureChannels > 0) and (FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_IN_CH, '#') = '#') then
     FConfig.SetInt(CFG_SEC_AUDIO, CFG_AUDIO_IN_CH, FGranted.CaptureChannels);
-  FConfig.SetBool(CFG_SEC_AUDIO, CFG_AUDIO_EXCLUSIVE, FGranted.ShareMode = asmExclusive);
+  if FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_EXCLUSIVE, '#') = '#' then
+    FConfig.SetBool(CFG_SEC_AUDIO, CFG_AUDIO_EXCLUSIVE, FGranted.ShareMode = asmExclusive);
   try
     FConfig.Save;
   except
@@ -346,9 +364,13 @@ begin
       FStream := nil;
     end;
 
+    backendId := LowerCase(Trim(FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, 'auto')));
+    { choosing another backend in Settings replaces the one in use (the stream is already closed) }
+    if (FBackend <> nil) and (FBackendKey <> backendId) then
+      FBackend := nil;
     if FBackend = nil then
     begin
-      backendId := FConfig.GetString(CFG_SEC_AUDIO, CFG_AUDIO_BACKEND, 'auto');
+      FBackendKey := backendId;
       FBackend := CreateAudioBackend(backendId);
       FBackend.SetDeviceChangeHandler(BackendDeviceChange);
     end;
@@ -475,6 +497,31 @@ begin
   SetSource(nil);
 end;
 
+procedure TAudioEngine.SetOverlay(ASource: IAudioSource; ASlot: Integer);
+var
+  sr, bf, ch: Integer;
+begin
+  FSourceLock.Enter;
+  try
+    if (ASlot < 0) or (ASlot > High(FOverlays)) then Exit;
+    FOverlays[ASlot] := ASource;
+    if ASource <> nil then
+    begin
+      sr := FGranted.SampleRate;
+      bf := FGranted.BufferFrames;
+      ch := FGranted.RenderChannels;
+      if sr <= 0 then sr := UDAW_DEFAULT_SAMPLE_RATE;
+      if bf <= 0 then bf := UDAW_DEFAULT_BUFFER_FRAMES;
+      if ch <= 0 then ch := 2;
+      if FOverlayBuf = nil then
+        FOverlayBuf := TAudioBuffer.Create(ch, bf, sr);
+      ASource.Prepare(sr, bf, ch);
+    end;
+  finally
+    FSourceLock.Leave;
+  end;
+end;
+
 procedure TAudioEngine.NotifyDeviceLost(const AReason: string);
 begin
   StreamEvent(aseDeviceLost, AReason);
@@ -515,6 +562,7 @@ var
   monN: Integer;
   d2: PAudioSample;
   head: Integer;
+  ov: Integer;
 begin
   if AOutput <> nil then
   begin
@@ -526,6 +574,21 @@ begin
         FSource.Render(AOutput);
         gotSrc := True;
       end;
+      if FOverlayBuf <> nil then
+        for ov := 0 to High(FOverlays) do
+          if FOverlays[ov] <> nil then
+          begin
+            if not gotSrc then
+            begin
+              AOutput.Clear;
+              gotSrc := True;
+            end;
+            FOverlayBuf.Configure(AOutput.ChannelCount, AOutput.FrameCount, AOutput.SampleRate);
+            FOverlayBuf.SetActiveFrames(AOutput.FrameCount);
+            FOverlayBuf.Clear;
+            FOverlays[ov].Render(FOverlayBuf);
+            AOutput.MixFrom(FOverlayBuf, 1.0);
+          end;
     finally
       FSourceLock.Leave;
     end;

@@ -25,6 +25,7 @@ uses
   UDAW.Audio.Device in '..\src\audio\UDAW.Audio.Device.pas',
   UDAW.Audio.Backend.Software in '..\src\audio\backend\UDAW.Audio.Backend.Software.pas',
   UDAW.Audio.Backend.WASAPI in '..\src\audio\backend\UDAW.Audio.Backend.WASAPI.pas',
+  UDAW.Audio.Backend.DirectSound in '..\src\audio\backend\UDAW.Audio.Backend.DirectSound.pas',
   UDAW.Audio.Backend.Factory in '..\src\audio\UDAW.Audio.Backend.Factory.pas',
   UDAW.Audio.Engine in '..\src\audio\UDAW.Audio.Engine.pas',
   UDAW.DSP.MathTables in '..\src\audio\dsp\UDAW.DSP.MathTables.pas',

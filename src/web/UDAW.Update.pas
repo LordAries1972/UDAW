@@ -75,7 +75,7 @@ uses
   System.SysUtils, System.Classes, System.JSON, System.Hash, System.IOUtils,
   System.Generics.Collections, System.Math, System.Net.HttpClient, System.Zip, Winapi.Windows,
   Winapi.ShellAPI, Vcl.Forms,
-  UDAW.Types, UDAW.Version, UDAW.Licensing, UDAW.Paths;   // Licensing: shared server-access constants only; registration itself is disabled
+  UDAW.Types, UDAW.Version, UDAW.Licensing, UDAW.Paths, UDAW.Threading;   // Licensing: shared server-access constants only; registration itself is disabled
 
 const
   UDAW_VERSION_URL_WIN64 = UDAW_WEB_DOMAIN + '/udaw-version-win64.json';
@@ -439,7 +439,7 @@ begin
   Done := False;
   ThreadResult := False;
   ThreadError := '';
-  TThread.CreateAnonymousThread(
+  UDAWAnonymousThread('update worker',
     procedure
     var
       LocalResult: Boolean;

@@ -69,7 +69,7 @@ procedure CloseSplash(var ASplash: TfrmSplash);
 
 implementation
 
-uses Math, UDAW.UI.Theme
+uses Math, UDAW.Threading, UDAW.UI.Theme
   {$IFNDEF FPC}, Vcl.Themes{$ENDIF};
 
 {$IFDEF FPC}
@@ -82,7 +82,7 @@ uses Math, UDAW.UI.Theme
 type
   { Only raw GDI calls on this worker: no VCL access, synchronization or
     message-loop dependency. Startup audio keeps its original COM thread. }
-  TSplashActivityThread = class(TThread)
+  TSplashActivityThread = class(TUDAWThread)
   private
     FTarget: HWND;
     FWidth, FHeight: Integer;
@@ -130,8 +130,8 @@ begin
           (GetGValue(FForeground) * weight + GetGValue(FBackground) * (255 - weight)) div 255,
           (GetBValue(FForeground) * weight + GetBValue(FBackground) * (255 - weight)) div 255);
         angle := i * Pi / 6;
-        x := FWidth div 2 + Round(Cos(angle) * radius);
-        y := FHeight div 2 + Round(Sin(angle) * radius);
+        x := FWidth shr 1 + Round(Cos(angle) * radius);
+        y := FHeight shr 1 + Round(Sin(angle) * radius);
         brush := CreateSolidBrush(color); oldBrush := SelectObject(buffer, brush);
         Ellipse(buffer, x - dot, y - dot, x + dot + 1, y + dot + 1);
         SelectObject(buffer, oldBrush); DeleteObject(brush);
@@ -153,7 +153,7 @@ type
     rasterised once into a coverage mask; every frame colours the mask column by column (a travelling
     sine palette, a breathing brightness and a white glint sweeping leftwards) in a 32-bit DIB and
     blits it in one go, so it is smooth and flicker-free. }
-  TSplashTitleThread = class(TThread)
+  TSplashTitleThread = class(TUDAWThread)
   private
     FTarget: HWND;
     FWidth, FHeight: Integer;

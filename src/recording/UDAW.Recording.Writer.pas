@@ -30,7 +30,7 @@ const
   REC_WRITER_IDLE_WAIT_MS = 20;
 
 type
-  TRecordingWriterThread = class(TThread)
+  TRecordingWriterThread = class(TUDAWThread)
   private
     FEngine: TRecordingEngine;
     FRing: TAudioRing;

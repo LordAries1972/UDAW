@@ -253,14 +253,19 @@ var
   a: Double;
   tw: Integer;
 begin
-  inherited PaintGL;   { the rounded face; the caption is empty }
   cv := GL;
   th := CurrentTheme;
-  if Down then ink := clWhite
+  { no face and no border: just the icon on the header, in the header's own colour behind it; a lit
+    (pressed-in) button shows its icon in its lit colour, a hovered one in the text colour }
+  cv.Brush.Style := bsSolid;
+  cv.Pen.Style := psClear;
+  cv.Brush.Color := HeaderFace;
+  cv.FillRect(Rect(0, 0, Width, Height));
+  if Down then ink := LitColor
   else if Hover then ink := th.Text
   else ink := th.SecondaryText;
-  cx := Width div 2;
-  cy := Height div 2;
+  cx := Width shr 1;
+  cy := Height shr 1;
   cv.Pen.Style := psSolid;
   cv.Pen.Color := ink;
   cv.Pen.Width := 1;
@@ -358,7 +363,7 @@ begin
   cv.FillRect(Rect(0, 0, Width, Height));
   l := 8;
   r := Width - 8;   { TGLSlider.DragTo's horizontal travel }
-  cy := Height div 2;
+  cy := Height shr 1;
   cv.Brush.Color := FieldFace;
   cv.RoundRect(l, cy - 3, r, cy + 3, 5, 5);
   tx := l + Round((r - l) * Fraction);
@@ -426,8 +431,8 @@ begin
   cv.Pen.Style := psClear;
   cv.Brush.Color := HeaderFace;
   cv.FillRect(Rect(0, 0, Width, Height));
-  cx := Width div 2;
-  cy := Height div 2;
+  cx := Width shr 1;
+  cy := Height shr 1;
   r := System.Math.Min(Width, Height) div 2 - 3;
   cv.Brush.Color := FieldFace;
   cv.Ellipse(cx - r + 3, cy - r + 3, cx + r - 2, cy + r - 2);

@@ -31,6 +31,7 @@ uses
   UDAW.Audio.Device in 'src\audio\UDAW.Audio.Device.pas',
   UDAW.Audio.Backend.Software in 'src\audio\backend\UDAW.Audio.Backend.Software.pas',
   UDAW.Audio.Backend.WASAPI in 'src\audio\backend\UDAW.Audio.Backend.WASAPI.pas',
+  UDAW.Audio.Backend.DirectSound in 'src\audio\backend\UDAW.Audio.Backend.DirectSound.pas',
   UDAW.Audio.Backend.Factory in 'src\audio\UDAW.Audio.Backend.Factory.pas',
   UDAW.Audio.Engine in 'src\audio\UDAW.Audio.Engine.pas',
   UDAW.DSP.MathTables in 'src\audio\dsp\UDAW.DSP.MathTables.pas',
@@ -188,6 +189,7 @@ uses
   UDAW.UI.Theme in 'src\ui\UDAW.UI.Theme.pas',
   UDAW.UI.ThemeColors in 'src\ui\UDAW.UI.ThemeColors.pas',
   UDAW.UI.Hints in 'src\ui\UDAW.UI.Hints.pas',
+  UDAW.UI.ShellMenu in 'src\ui\UDAW.UI.ShellMenu.pas',
   UDAW.Web.HelpClient in 'src\web\UDAW.Web.HelpClient.pas',
   // UDAW.Licensing in 'src\web\UDAW.Licensing.pas',   // registration disabled: full version by default
   UDAW.Update in 'src\web\UDAW.Update.pas',
@@ -195,13 +197,21 @@ uses
   UDAW.UI.HelpForm in 'src\ui\UDAW.UI.HelpForm.pas' {frmHelp},
   UDAW.UI.AboutForm in 'src\ui\UDAW.UI.AboutForm.pas' {frmAbout},
   UDAW.UI.VST2Editor in 'src\ui\UDAW.UI.VST2Editor.pas' {frmVST2Editor},
+  UDAW.Scripting.PyPlugin in 'src\ai\UDAW.Scripting.PyPlugin.pas',
+  UDAW.Scripting.PluginSdk in 'src\ai\UDAW.Scripting.PluginSdk.pas',
+  UDAW.Scripting.PyAudition in 'src\audio\UDAW.Scripting.PyAudition.pas',
+  UDAW.UI.PluginUI in 'src\ui\UDAW.UI.PluginUI.pas',
+  UDAW.UI.PluginWindow in 'src\ui\UDAW.UI.PluginWindow.pas' {frmPyPlugin},
+  UDAW.UI.PluginEditor in 'src\ui\UDAW.UI.PluginEditor.pas' {frmPyEditor},
   UDAW.UI.SplashForm in 'src\ui\UDAW.UI.SplashForm.pas' {frmSplash},
   UDAW.UI.ProjectStartForm in 'src\ui\UDAW.UI.ProjectStartForm.pas' {frmProjectStart},
   UDAW.UI.LogForm in 'src\ui\UDAW.UI.LogForm.pas' {frmLogViewer},
   UDAW.UI.MeterForm in 'src\ui\UDAW.UI.MeterForm.pas' {frmMeters},
   UDAW.UI.VideoForm in 'src\ui\UDAW.UI.VideoForm.pas' {frmVideoPlayer},
   UDAW.UI.SpectrumForm in 'src\ui\UDAW.UI.SpectrumForm.pas' {frmSpectrum},
-  UDAW.UI.FoleyForm in 'src\ui\UDAW.UI.FoleyForm.pas' {frmFoley},
+  UDAW.UI.FoleySampler in 'src\ui\UDAW.UI.FoleySampler.pas',
+  UDAW.UI.SystemSounds in 'src\ui\UDAW.UI.SystemSounds.pas',
+  UDAW.UI.CrashForm in 'src\ui\UDAW.UI.CrashForm.pas' {frmCrash},
   UDAW.UI.CurvePaint in 'src\ui\UDAW.UI.CurvePaint.pas',
   UDAW.UI.EffectEditor in 'src\ui\UDAW.UI.EffectEditor.pas' {frmEffectEditor},
   UDAW.UI.InstrumentEditor in 'src\ui\UDAW.UI.InstrumentEditor.pas' {frmInstrumentEditor},
@@ -245,7 +255,7 @@ begin
   Application.Title := UDAW_PRODUCT_NAME;
 
   splash := ShowSplash(FindSplashLogo, UDAW_PRODUCT_NAME,
-    'Version ' + UDAWDisplayVersionString, UDAW_AUTHOR_LINE);
+    UDAWVersionBannerText, UDAW_AUTHOR_LINE);
 
   LCore := TUDAWApp.Create;
   SetApp(LCore);

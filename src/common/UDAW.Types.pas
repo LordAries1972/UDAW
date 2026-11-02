@@ -13,7 +13,7 @@ const
   UDAW_PRODUCT_NAME    = 'Ultimanium Digital Audio Workstation (UDAW)';
   UDAW_SHORT_NAME      = 'UDAW';
   UDAW_VENDOR_NAME     = 'Ultimanium';
-  UDAW_AUTHOR_LINE     = 'Daniel J. Hobson of Australia, 2026';
+  UDAW_AUTHOR_LINE     = #$00A9 + ' Daniel J. Hobson of Australia, 2026';   // (c) sign
   { The product version is "1.0.<build>.<dd/mm/yyyy>" - see UDAW.Version
     (UDAWDisplayVersionString) for the full scheme. UDAW_VERSION_MAJOR/MINOR
     are the fixed 1.0 prefix; the build number and date are read from the

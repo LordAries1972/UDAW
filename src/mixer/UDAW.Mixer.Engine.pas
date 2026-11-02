@@ -158,7 +158,7 @@ begin
   Result := AKind in [nkGain, nkPan, nkBiquad, nkFilterChain, nkDCBlock,
                       nkDelay, nkChannelMap, nkMeter,
                       nkCompressor, nkModulation, nkDistortion, nkReverb,
-                      nkGraphicEQ, nkVST2, nkCLAP, nkVST3,
+                      nkGraphicEQ, nkVST2, nkCLAP, nkVST3, nkPython,
                       nkParametricEQ, nkStereoWidth, nkTransientShaper,
                       nkExciter, nkPitchShift, nkLookaheadLimiter,
                       nkMultibandComp, nkMastering];
@@ -659,6 +659,30 @@ begin
           TVST2Node(ARt.FInserts[k]).Host.SetParam(lane.SubIndex,
             lane.Evaluate(FPlayheadSeconds));
       end;
+    { Python plug-in parameters: sub-index = the parameter's position, values 0..1 }
+    if (ARt.FInserts[k] is TPythonNode) and (TPythonNode(ARt.FInserts[k]).Host <> nil) then
+    begin
+      if modOn then
+        for i := 0 to FModulation.RouteCount - 1 do
+          if (FModulation.GetRoute(i).StripId = s.Id) and
+             (FModulation.GetRoute(i).Param = apInsertParam) and
+             (FModulation.GetRoute(i).TargetIndex = k) then
+          begin
+            modV := FModulation.Offset(s.Id, apInsertParam, k,
+              FModulation.GetRoute(i).SubIndex, FPlayheadSeconds);
+            TPythonNode(ARt.FInserts[k]).Host.SetParamNorm(FModulation.GetRoute(i).SubIndex,
+              EnsureRange(FModulation.GetRoute(i).Base + modV, 0.0, 1.0));
+          end;
+      if readAuto then
+        for i := 0 to FAutomation.LaneCount - 1 do
+        begin
+          lane := FAutomation.GetLane(i);
+          if (lane.StripId = s.Id) and (lane.Param = apInsertParam) and
+             (lane.TargetIndex = k) and (lane.PointCount > 0) then
+            TPythonNode(ARt.FInserts[k]).Host.SetParamNorm(lane.SubIndex,
+              lane.Evaluate(FPlayheadSeconds));
+        end;
+    end;
     if (k <= High(ARt.FInsertScPlanIndex)) and (ARt.FInsertScPlanIndex[k] >= 0) then
       ARt.FInserts[k].SetSidechain(FPlan[ARt.FInsertScPlanIndex[k]].FScTap)
     else

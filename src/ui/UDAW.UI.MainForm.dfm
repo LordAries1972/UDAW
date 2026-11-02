@@ -17,6 +17,7 @@ object frmMain: TfrmMain
   OnClose = FormClose
   OnDestroy = FormDestroy
   OnKeyDown = FormKeyDown
+  OnKeyUp = FormKeyUp
   OnResize = FormResize
   TextHeight = 15
   object mbMain: TGLMenuBar
@@ -29,31 +30,58 @@ object frmMain: TfrmMain
   end
   object pnlTop: TGLPanel
     Left = 0
-    Top = 0
+    Top = 24
     Width = 960
-    Height = 40
+    Height = 3
     Align = alTop
     BevelOuter = bvNone
     TabOrder = 0
-    object lblHeader: TGLLabel
-      Transparent = True
-      Left = 12
-      Top = 11
-      Width = 300
-      Height = 15
-      Caption = 'Ultimanium Digital Audio Workstation (UDAW) - system diagnostics'
-    end
   end
   object pgc: TGLPageControl
     Left = 0
-    Top = 40
+    Top = 27
     Width = 960
-    Height = 561
+    Height = 574
     ActivePage = tabTimeline
     Align = alClient
     MultiLine = True
     TabOrder = 1
     OnChange = pgcChange
+    OnResize = pgcResize
+    object bvlTlMasterSep: TGLBevel
+      Left = 300
+      Top = 4
+      Width = 2
+      Height = 20
+      Shape = bsLeftLine
+    end
+    object lblTlMasterVol: TGLLabel
+      Transparent = True
+      Left = 314
+      Top = 6
+      Width = 150
+      Height = 15
+      Caption = 'Master Vol  0.0 dB'
+    end
+    object tbTlMasterVol: TGLTrackBar
+      Left = 470
+      Top = 3
+      Width = 120
+      Height = 22
+      Max = 12
+      Min = -60
+      Position = 0
+      TabOrder = 3
+      ThumbLength = 12
+      OnChange = tbTlMasterVolChange
+    end
+    object pbTlMeters: TGLView
+      Left = 600
+      Top = 2
+      Width = 164
+      Height = 24
+      OnPaint = pbTlMetersPaint
+    end
     object tabTimeline: TGLPage
       Caption = 'Timeline'
       ImageIndex = 8
@@ -67,19 +95,18 @@ object frmMain: TfrmMain
         BevelKind = bkFlat
         BevelEdges = [beBottom]
         TabOrder = 0
-        OnResize = pnlTimelineTopResize
         object ibTlTransport: TGLIconBar
           Left = 8
           Top = 16
-          Width = 433
+          Width = 463
           Height = 32
           ShowHint = True
-          Buttons = 'tostart;play;stop;toend;record;loop;video;editor;stage;browser;metronome;lanes;chords;deletecache'
-          Hints = 'Go to the start of the Timeline;Play from the playhead (Space);Stop playback;Go to the end of the Timeline;Record: open the Recording view to arm tracks and record takes;Loop: repeat the loop region while playing;Video: show or hide the video playback panel (lit = shown);Editor: show or hide the editor under the Timeline - piano roll, mixer, tracker, recording (lit = shown);Clip Stage: show or hide the Clip Stage - patterns as scenes, one launch slot per track (lit = shown);Browser: show or hide the browser panel - instruments, effects, samples and presets (lit = shown);Metronome: a click on every beat while the Timeline plays (lit = on);Lanes: show or hide the Markers, Tempo and Signature lanes under the ruler (lit = shown);Chords: show or hide the Chords lane under the Markers lane - chord symbols over the Timeline (lit = shown);Delete Cache: removes the files in the local cache folder that are NOT used by this project (or your recent projects)'
+          Buttons = 'tostart;play;stop;toend;record;loop;video;editor;stage;browser;metronome;lanes;chords;foley;deletecache'
+          Hints = 'Go to the start of the Timeline;Play from the playhead (Space);Stop playback;Go to the end of the Timeline;Record: open the Recording view to arm tracks and record takes;Loop: repeat the loop region while playing;Video: show or hide the video playback panel (lit = shown);Editor: show or hide the editor under the Timeline - piano roll, mixer, tracker, recording (lit = shown);Clip Stage: show or hide the Clip Stage - patterns as scenes, one launch slot per track (lit = shown);Browser: show or hide the browser panel - instruments, effects, samples and presets (lit = shown);Metronome: a click on every beat while the Timeline plays (lit = on);Lanes: show or hide the Markers, Tempo and Signature lanes under the ruler (lit = shown);Chords: show or hide the Chords lane under the Markers lane - chord symbols over the Timeline (lit = shown);Foley: show or hide the Foley Sampler under the Timeline - sixteen sound-effect pads you can play, record against the picture and add to the Timeline (lit = shown);Delete Cache: removes the files in the local cache folder that are NOT used by this project (or your recent projects)'
           OnButtonClick = ibTlTransportClick
         end
         object bvlTlSep1: TGLBevel
-          Left = 451
+          Left = 481
           Top = 8
           Width = 2
           Height = 48
@@ -87,7 +114,7 @@ object frmMain: TfrmMain
         end
         object lblTlTime: TGLLabel
           Transparent = True
-          Left = 465
+          Left = 495
           Top = 8
           Width = 150
           Height = 28
@@ -99,7 +126,7 @@ object frmMain: TfrmMain
         end
         object lblTlTimeCap: TGLLabel
           Transparent = True
-          Left = 467
+          Left = 497
           Top = 40
           Width = 28
           Height = 13
@@ -109,7 +136,7 @@ object frmMain: TfrmMain
         end
         object lblTlBars: TGLLabel
           Transparent = True
-          Left = 629
+          Left = 659
           Top = 8
           Width = 110
           Height = 28
@@ -121,7 +148,7 @@ object frmMain: TfrmMain
         end
         object lblTlBarsCap: TGLLabel
           Transparent = True
-          Left = 631
+          Left = 661
           Top = 40
           Width = 30
           Height = 13
@@ -130,7 +157,7 @@ object frmMain: TfrmMain
           ParentFont = False
         end
         object edtTlTempo: TGLEdit
-          Left = 753
+          Left = 783
           Top = 12
           Width = 64
           Height = 26
@@ -140,7 +167,7 @@ object frmMain: TfrmMain
         end
         object lblTlTempo: TGLLabel
           Transparent = True
-          Left = 755
+          Left = 785
           Top = 40
           Width = 24
           Height = 13
@@ -149,7 +176,7 @@ object frmMain: TfrmMain
           ParentFont = False
         end
         object bvlTlSep2: TGLBevel
-          Left = 831
+          Left = 861
           Top = 8
           Width = 2
           Height = 48
@@ -157,7 +184,7 @@ object frmMain: TfrmMain
         end
         object lblTlSnap: TGLLabel
           Transparent = True
-          Left = 845
+          Left = 875
           Top = 40
           Width = 30
           Height = 13
@@ -166,46 +193,12 @@ object frmMain: TfrmMain
           ParentFont = False
         end
         object cboTlSnap: TGLCombo
-          Left = 845
+          Left = 875
           Top = 12
           Width = 150
           Height = 26
           TabOrder = 0
           OnChange = cboTlSnapChange
-        end
-        object bvlTlSep3: TGLBevel
-          Left = 1007
-          Top = 8
-          Width = 2
-          Height = 48
-          Shape = bsLeftLine
-        end
-        object lblTlMasterVol: TGLLabel
-          Transparent = True
-          Left = 956
-          Top = 10
-          Width = 110
-          Height = 15
-          Caption = 'Master Vol  0.0 dB'
-        end
-        object tbTlMasterVol: TGLTrackBar
-          Left = 954
-          Top = 30
-          Width = 130
-          Height = 26
-          Max = 12
-          Min = -60
-          Position = 0
-          TabOrder = 1
-          ThumbLength = 12
-          OnChange = tbTlMasterVolChange
-        end
-        object pbTlMeters: TGLView
-          Left = 1092
-          Top = 30
-          Width = 80
-          Height = 26
-          OnPaint = pbTlMetersPaint
         end
       end
       object pnlTlMode: TGLPanel
@@ -220,14 +213,14 @@ object frmMain: TfrmMain
           CurvedTabs = True
           Left = 8
           Top = 3
-          Width = 720
+          Width = 800
           Height = 28
-          Tabs = 'TIMELINE;PIANO;SCORE;INST;PATTERN;MIX;TRACKER;REC;AI'
-          Hints = 'Timeline: the lanes, tracks and clips;Piano: the piano roll for the selected MIDI clip, with the chord lane;Score: the selected MIDI tracks as music notation;Inst: the drum machine - sample pads on every MIDI note, 16 at a time;Pattern: the step sequencer for rhythm patterns - saved in the project and placed on the Timeline as clips;Mix: the channel strips, faders and effects;Tracker: tracker patterns and instruments;Rec: record takes and comp them;AI: providers, prompts and generation'
+          Tabs = 'TIMELINE;PIANO;SCORE;INST;PATTERN;MIX;TRACKER;REC;AI/SI;FOLEY'
+          Hints = 'Timeline: the lanes, tracks and clips;Piano: the piano roll for the selected MIDI clip, with the chord lane;Score: the selected MIDI tracks as music notation;Inst: the drum machine - sample pads on every MIDI note, 16 at a time;Pattern: the step sequencer for rhythm patterns - saved in the project and placed on the Timeline as clips;Mix: the channel strips, faders and effects;Tracker: tracker patterns and instruments;Rec: record takes and comp them;AI: providers, prompts and generation;Foley: sixteen sound-effect pads to play, record against the picture and add to the Timeline'
           OnChange = tsTlModeChange
         end
       end
-      object pnlTlViews: TGLPanel
+      object pnlTlViews: TGLRecessPanel
         Left = 0
         Top = 98
         Width = 952
@@ -307,3276 +300,3588 @@ object frmMain: TfrmMain
         BevelOuter = bvNone
         TabOrder = 5
         Visible = False
-        object pgcDock: TGLPageControl
+        object sbTlDock: TGLScrollBox
           Left = 0
           Top = 0
           Width = 952
-          Height = 300
-          ActivePage = tabMixer
+          Height = 380
           Align = alClient
           TabOrder = 0
-          OnChange = pgcDockChange
-          object tabMixer: TGLPage
-            Caption = 'Mixer'
-            ImageIndex = 11
-            DoubleBuffered = True
-            ParentDoubleBuffered = False
-            object pnlMixBar: TGLPanel
-              Left = 0
-              Top = 0
-              Width = 952
-              Height = 30
-              Align = alTop
-              BevelOuter = bvNone
-              TabOrder = 3
-              object ibMixBar: TGLIconBar
-                Left = 8
-                Top = 1
-                Width = 240
-                Height = 28
-                ShowHint = True
-                Buttons = 'add;tools;undo;redo;zoomout;zoomin;left;right'
-                Hints = 'Add: a track, bus, aux or VCA strip (more on the strip right-click menu);Strip tools: show or hide the detailed strip, automation and meter settings;Undo the last mixer change;Redo the mixer change;Narrower strips;Wider strips;Scroll the strips left;Scroll the strips right'
-                OnButtonClick = ibMixBarClick
+          ContentPadding = 0
+          OnResize = sbTlDockResize
+          object pgcDock: TGLPageControl
+            Left = 0
+            Top = 0
+            Width = 940
+            Height = 372
+            ActivePage = tabMixer
+            TabOrder = 0
+            OnChange = pgcDockChange
+            object tabMixer: TGLPage
+              Caption = 'Mixer'
+              ImageIndex = 11
+              DoubleBuffered = True
+              ParentDoubleBuffered = False
+              object pnlMixBar: TGLPanel
+                Left = 0
+                Top = 0
+                Width = 952
+                Height = 30
+                Align = alTop
+                BevelOuter = bvNone
+                TabOrder = 3
+                object ibMixBar: TGLIconBar
+                  Left = 8
+                  Top = 1
+                  Width = 240
+                  Height = 28
+                  ShowHint = True
+                  Buttons = 'add;tools;undo;redo;zoomout;zoomin;left;right'
+                  Hints = 'Add: a track, bus, aux or VCA strip (more on the strip right-click menu);Strip tools: show or hide the detailed strip, automation and meter settings;Undo the last mixer change;Redo the mixer change;Narrower strips;Wider strips;Scroll the strips left;Scroll the strips right'
+                  OnButtonClick = ibMixBarClick
+                end
+                object bvlMixSep: TGLBevel
+                  Left = 256
+                  Top = 4
+                  Width = 2
+                  Height = 22
+                  Shape = bsLeftLine
+                end
+                object cboMixView: TGLCombo
+                  Left = 266
+                  Top = 3
+                  Width = 120
+                  Height = 24
+                  Hint = 'Which mixer to show: the Timeline strips, or the Tracker channel strips (TRK-CHN) with their EQ and Master'
+                  TabOrder = 1
+                  Items.Strings = (
+                    'Timeline'
+                    'Tracker')
+                  ItemIndex = 0
+                  OnChange = cboMixViewChange
+                end
               end
-              object bvlMixSep: TGLBevel
-                Left = 256
-                Top = 4
-                Width = 2
-                Height = 22
-                Shape = bsLeftLine
+              object pnlMixTop: TGLPanel
+                Left = 0
+                Top = 30
+                Width = 952
+                Height = 172
+                Align = alTop
+                BevelOuter = bvNone
+                TabOrder = 0
+                Visible = False
+                object lblMixStrip: TGLLabel
+                  Transparent = True
+                  Left = 8
+                  Top = 12
+                  Width = 27
+                  Height = 15
+                  Caption = 'Strip'
+                end
+                object lblMixFader: TGLLabel
+                  Transparent = True
+                  Left = 8
+                  Top = 46
+                  Width = 47
+                  Height = 15
+                  Caption = 'Fader dB'
+                end
+                object lblMixPan: TGLLabel
+                  Transparent = True
+                  Left = 128
+                  Top = 46
+                  Width = 20
+                  Height = 15
+                  Caption = 'Pan'
+                end
+                object lblMixRoute: TGLLabel
+                  Transparent = True
+                  Left = 488
+                  Top = 12
+                  Width = 46
+                  Height = 15
+                  Caption = 'Route to'
+                end
+                object cboMixStrip: TGLCombo
+                  Left = 44
+                  Top = 8
+                  Width = 180
+                  Height = 23
+                  TabOrder = 0
+                  OnChange = cboMixStripChange
+                end
+                object lblMixTrackLink: TGLLabel
+                  Transparent = True
+                  Left = 236
+                  Top = 12
+                  Width = 49
+                  Height = 15
+                  Caption = 'Link track'
+                end
+                object cboMixTrackLink: TGLCombo
+                  Left = 296
+                  Top = 8
+                  Width = 180
+                  Height = 23
+                  TabOrder = 21
+                  OnChange = cboMixTrackLinkChange
+                end
+                object edtMixFader: TGLEdit
+                  Left = 64
+                  Top = 42
+                  Width = 52
+                  Height = 23
+                  TabOrder = 6
+                  Text = '0'
+                end
+                object edtMixPan: TGLEdit
+                  Left = 156
+                  Top = 42
+                  Width = 52
+                  Height = 23
+                  TabOrder = 7
+                  Text = '0'
+                end
+                object chkMixMute: TGLCheck
+                  Left = 224
+                  Top = 44
+                  Width = 52
+                  Height = 17
+                  Caption = 'Mute'
+                  TabOrder = 8
+                  OnClick = chkMixMuteClick
+                end
+                object chkMixSolo: TGLCheck
+                  Left = 284
+                  Top = 44
+                  Width = 52
+                  Height = 17
+                  Caption = 'Solo'
+                  TabOrder = 9
+                  OnClick = chkMixSoloClick
+                end
+                object cboMixRoute: TGLCombo
+                  Left = 540
+                  Top = 8
+                  Width = 160
+                  Height = 23
+                  TabOrder = 10
+                end
+                object cboMixInsertKind: TGLCombo
+                  Left = 8
+                  Top = 76
+                  Width = 170
+                  Height = 23
+                  TabOrder = 12
+                end
+                object btnMixAddVST: TGLButton
+                  Left = 596
+                  Top = 75
+                  Width = 110
+                  Height = 25
+                  Caption = 'Add VST...'
+                  TabOrder = 13
+                  OnClick = btnMixAddVSTClick
+                end
+                object btnMixEditVST: TGLButton
+                  Left = 712
+                  Top = 75
+                  Width = 110
+                  Height = 25
+                  Caption = 'Edit VST...'
+                  TabOrder = 14
+                  OnClick = btnMixEditVSTClick
+                end
+                object lblMixAutoParam: TGLLabel
+                  Transparent = True
+                  Left = 352
+                  Top = 46
+                  Width = 30
+                  Height = 15
+                  Caption = 'Auto'
+                end
+                object cboMixAutoParam: TGLCombo
+                  Left = 386
+                  Top = 42
+                  Width = 190
+                  Height = 23
+                  TabOrder = 15
+                  OnChange = cboMixAutoParamChange
+                end
+                object cboMixAutoMode: TGLCombo
+                  Left = 584
+                  Top = 42
+                  Width = 100
+                  Height = 23
+                  TabOrder = 16
+                  OnChange = cboMixAutoModeChange
+                end
+                object lblMixZoom: TGLLabel
+                  Transparent = True
+                  Left = 8
+                  Top = 112
+                  Width = 60
+                  Height = 15
+                  Caption = 'Strip width'
+                end
+                object tbMixZoom: TGLTrackBar
+                  Left = 76
+                  Top = 104
+                  Width = 140
+                  Height = 30
+                  Max = 20
+                  Min = 5
+                  Position = 10
+                  TabOrder = 17
+                  OnChange = tbMixZoomChange
+                end
+                object lblMixMasterLoudness: TGLLabel
+                  Transparent = True
+                  Left = 724
+                  Top = 8
+                  Width = 220
+                  Height = 40
+                  Caption = 'Master:  -inf dBFS   M -inf LUFS   I -inf LUFS'
+                  WordWrap = True
+                end
+                object lblMixMeterHold: TGLLabel
+                  Transparent = True
+                  Left = 240
+                  Top = 112
+                  Width = 44
+                  Height = 15
+                  Caption = 'Hold ms'
+                end
+                object lblMixMeterDecay: TGLLabel
+                  Transparent = True
+                  Left = 356
+                  Top = 112
+                  Width = 52
+                  Height = 15
+                  Caption = 'Decay dB/s'
+                end
+                object edtMixMeterHold: TGLEdit
+                  Left = 292
+                  Top = 108
+                  Width = 48
+                  Height = 23
+                  TabOrder = 18
+                  Text = '1500'
+                end
+                object edtMixMeterDecay: TGLEdit
+                  Left = 424
+                  Top = 108
+                  Width = 48
+                  Height = 23
+                  TabOrder = 19
+                  Text = '10'
+                end
+                object btnMixMeterApply: TGLButton
+                  Left = 480
+                  Top = 107
+                  Width = 48
+                  Height = 25
+                  Caption = 'Set'
+                  TabOrder = 20
+                  OnClick = btnMixMeterApplyClick
+                end
+                object btnMixAddInsertRow: TGLButton
+                  Left = 186
+                  Top = 75
+                  Width = 90
+                  Height = 25
+                  Caption = 'Add insert'
+                  TabOrder = 22
+                  OnClick = btnMixAddEQClick
+                end
+                object btnMixDelInsertRow: TGLButton
+                  Left = 282
+                  Top = 75
+                  Width = 100
+                  Height = 25
+                  Caption = 'Remove insert'
+                  TabOrder = 23
+                  OnClick = btnMixDelInsertClick
+                end
+                object btnMixApplyRow: TGLButton
+                  Left = 388
+                  Top = 75
+                  Width = 64
+                  Height = 25
+                  Caption = 'Apply'
+                  TabOrder = 24
+                  OnClick = btnMixApplyClick
+                end
+                object btnMixUndoRow: TGLButton
+                  Left = 458
+                  Top = 75
+                  Width = 56
+                  Height = 25
+                  Caption = 'Undo'
+                  TabOrder = 25
+                  OnClick = btnMixUndoClick
+                end
+                object btnMixRedoRow: TGLButton
+                  Left = 520
+                  Top = 75
+                  Width = 56
+                  Height = 25
+                  Caption = 'Redo'
+                  TabOrder = 26
+                  OnClick = btnMixRedoClick
+                end
+                object pbMixAuto: TGLView
+                  Left = 0
+                  Top = 138
+                  Width = 952
+                  Height = 34
+                  OnMouseDown = pbMixAutoMouseDown
+                  OnMouseMove = pbMixAutoMouseMove
+                  OnMouseUp = pbMixAutoMouseUp
+                  OnPaint = pbMixAutoPaint
+                end
               end
-              object cboMixView: TGLCombo
-                Left = 266
-                Top = 3
-                Width = 120
-                Height = 24
-                Hint = 'Which mixer to show: the Timeline strips, or the Tracker channel strips (TRK-CHN) with their EQ and Master'
-                TabOrder = 1
-                Items.Strings = (
-                  'Timeline'
-                  'Tracker')
-                ItemIndex = 0
-                OnChange = cboMixViewChange
+              object pbMixer: TGLView
+                Left = 0
+                Top = 30
+                Width = 952
+                Height = 341
+                Align = alClient
+                PopupMenu = pmMixer
+                OnDragDrop = pbMixerDragDrop
+                OnDragOver = pbMixerDragOver
+                OnMouseWheel = pbMixerMouseWheel
+                OnPaint = pbMixerPaint
+                object sbMixH: TGLScrollBar
+                  Left = 0
+                  Top = 325
+                  Width = 952
+                  Height = 16
+                  Visible = False
+                  Kind = sbHorizontal
+                  PageSize = 0
+                  TabOrder = 1
+                  OnChange = sbMixHChange
+                end
+                object pnlMixEq: TGLCollapsePanel
+                  Left = 340
+                  Top = 4
+                  Width = 616
+                  Height = 241
+                  BevelOuter = bvNone
+                  TabOrder = 0
+                  Title = 'Master Graphic 16-Band EQ'
+                HeadHeight = 42
+                  AutoPlace = False
+                  OnToggle = MixEqToggle
+                  Hint = 'Graphic equaliser on the Master output. Click the title bar to collapse or expand it.'
+                  object cboMixEqPreset: TGLCombo
+                    Left = 368
+                    Top = 10
+                    Width = 150
+                    Height = 30
+                    Anchors = [akTop, akRight]
+                    Style = csDropDown
+                    Hint = 'Equaliser preset: pick a saved one to load it at once, or type a name for a new one and use the Save icon.'
+                    OnSelect = cboMixEqPresetSelect
+                    TabOrder = 18
+                  end
+                  object ibMixEqPreset: TGLIconBar
+                    Left = 526
+                    Top = 11
+                    Width = 56
+                    Height = 24
+                    Anchors = [akTop, akRight]
+                    ShowHint = True
+                    Transparent = True
+                    Buttons = 'load;save'
+                    Hints = 'Load the preset named in the box;Save the current band settings under the name in the box'
+                    CellWidth = 28
+                    OnButtonClick = MixEqPresetClick
+                  end
+                  object sbMixEq01: TGLEqSlider
+                    Left = 12
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 0
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 25 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 0
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq01: TGLLabel
+                    Left = 12
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '25'
+                    Transparent = True
+                  end
+                  object sbMixEq02: TGLEqSlider
+                    Left = 49
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 1
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 38 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 1
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq02: TGLLabel
+                    Left = 49
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '38'
+                    Transparent = True
+                  end
+                  object sbMixEq03: TGLEqSlider
+                    Left = 86
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 2
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 59 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 2
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq03: TGLLabel
+                    Left = 86
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '59'
+                    Transparent = True
+                  end
+                  object sbMixEq04: TGLEqSlider
+                    Left = 123
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 3
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 91 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 3
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq04: TGLLabel
+                    Left = 123
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '91'
+                    Transparent = True
+                  end
+                  object sbMixEq05: TGLEqSlider
+                    Left = 160
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 4
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 140 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 4
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq05: TGLLabel
+                    Left = 160
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '140'
+                    Transparent = True
+                  end
+                  object sbMixEq06: TGLEqSlider
+                    Left = 197
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 5
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 215 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 5
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq06: TGLLabel
+                    Left = 197
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '215'
+                    Transparent = True
+                  end
+                  object sbMixEq07: TGLEqSlider
+                    Left = 234
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 6
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 330 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 6
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq07: TGLLabel
+                    Left = 234
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '330'
+                    Transparent = True
+                  end
+                  object sbMixEq08: TGLEqSlider
+                    Left = 271
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 7
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 510 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 7
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq08: TGLLabel
+                    Left = 271
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '510'
+                    Transparent = True
+                  end
+                  object sbMixEq09: TGLEqSlider
+                    Left = 308
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 8
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 780 Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 8
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq09: TGLLabel
+                    Left = 308
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '780'
+                    Transparent = True
+                  end
+                  object sbMixEq10: TGLEqSlider
+                    Left = 345
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 9
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 1.2k Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 9
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq10: TGLLabel
+                    Left = 345
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '1.2k'
+                    Transparent = True
+                  end
+                  object sbMixEq11: TGLEqSlider
+                    Left = 382
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 10
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 1.9k Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 10
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq11: TGLLabel
+                    Left = 382
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '1.9k'
+                    Transparent = True
+                  end
+                  object sbMixEq12: TGLEqSlider
+                    Left = 419
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 11
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 2.8k Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 11
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq12: TGLLabel
+                    Left = 419
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '2.8k'
+                    Transparent = True
+                  end
+                  object sbMixEq13: TGLEqSlider
+                    Left = 456
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 12
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 4.4k Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 12
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq13: TGLLabel
+                    Left = 456
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '4.4k'
+                    Transparent = True
+                  end
+                  object sbMixEq14: TGLEqSlider
+                    Left = 493
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 13
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 6.7k Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 13
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq14: TGLLabel
+                    Left = 493
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '6.7k'
+                    Transparent = True
+                  end
+                  object sbMixEq15: TGLEqSlider
+                    Left = 530
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 14
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 10k Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 14
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq15: TGLLabel
+                    Left = 530
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '10k'
+                    Transparent = True
+                  end
+                  object sbMixEq16: TGLEqSlider
+                    Left = 567
+                    Top = 46
+                    Width = 37
+                    Height = 140
+                    Anchors = [akLeft, akTop, akBottom]
+                    Tag = 15
+                    Min = -12.000000000000000000
+                    Max = 12.000000000000000000
+                    DefaultPosition = 0.000000000000000000
+                    Step = 0.500000000000000000
+                    Vertical = True
+                    Hint = 'Gain of the 16k Hz band on the Master output. Double-click to reset it to 0 dB.'
+                    TabOrder = 15
+                    OnChange = MixEqSliderChange
+                  end
+                  object lblMixEq16: TGLLabel
+                    Left = 567
+                    Top = 190
+                    Width = 37
+                    Height = 15
+                    Anchors = [akLeft, akBottom]
+                    Alignment = taCenter
+                    AutoSize = False
+                    Caption = '16k'
+                    Transparent = True
+                  end
+                  object chkMixEqOn: TGLCheck
+                    Left = 12
+                    Top = 213
+                    Width = 120
+                    Height = 20
+                    Anchors = [akLeft, akBottom]
+                    Caption = 'EQ on'
+                    Checked = True
+                    Hint = 'Switch the Master graphic equaliser on or off.'
+                    TabOrder = 16
+                    OnChange = MixEqOnChange
+                  end
+                  object btnMixEqFlat: TGLButton
+                    Left = 140
+                    Top = 210
+                    Width = 80
+                    Height = 25
+                    Anchors = [akLeft, akBottom]
+                    Caption = 'Flat'
+                    Hint = 'Set every band back to 0 dB.'
+                    TabOrder = 17
+                    OnClick = MixEqFlatClick
+                  end
+                end
+  
               end
             end
-            object pnlMixTop: TGLPanel
-              Left = 0
-              Top = 30
-              Width = 952
-              Height = 172
-              Align = alTop
-              BevelOuter = bvNone
-              TabOrder = 0
-              Visible = False
-              object lblMixStrip: TGLLabel
-                Transparent = True
-                Left = 8
-                Top = 12
-                Width = 27
-                Height = 15
-                Caption = 'Strip'
-              end
-              object lblMixFader: TGLLabel
-                Transparent = True
-                Left = 8
-                Top = 46
-                Width = 47
-                Height = 15
-                Caption = 'Fader dB'
-              end
-              object lblMixPan: TGLLabel
-                Transparent = True
-                Left = 128
-                Top = 46
-                Width = 20
-                Height = 15
-                Caption = 'Pan'
-              end
-              object lblMixRoute: TGLLabel
-                Transparent = True
-                Left = 488
-                Top = 12
-                Width = 46
-                Height = 15
-                Caption = 'Route to'
-              end
-              object cboMixStrip: TGLCombo
-                Left = 44
-                Top = 8
-                Width = 180
-                Height = 23
+            object tabMIDI: TGLPage
+              Caption = 'MIDI'
+              ImageIndex = 15
+              object pnlMidiTop: TGLPanel
+                Left = 0
+                Top = 0
+                Width = 952
+                Height = 76
+                Align = alTop
+                BevelOuter = bvNone
                 TabOrder = 0
-                OnChange = cboMixStripChange
+                object lblMidiClip: TGLLabel
+                  Transparent = True
+                  Left = 10
+                  Top = 13
+                  Width = 22
+                  Height = 15
+                  Caption = 'Clip'
+                end
+                object cboMidiClip: TGLCombo
+                  Left = 46
+                  Top = 8
+                  Width = 200
+                  Height = 24
+                  TabOrder = 0
+                  OnChange = cboMidiClipChange
+                end
+                object lblMidiGrid: TGLLabel
+                  Transparent = True
+                  Left = 264
+                  Top = 13
+                  Width = 22
+                  Height = 15
+                  Caption = 'Grid'
+                end
+                object cboMidiGrid: TGLCombo
+                  Left = 294
+                  Top = 8
+                  Width = 84
+                  Height = 24
+                  TabOrder = 1
+                end
+                object bvlMidiSep1: TGLBevel
+                  Left = 394
+                  Top = 8
+                  Width = 2
+                  Height = 24
+                  Shape = bsLeftLine
+                end
+                object lblMidiNote: TGLLabel
+                  Transparent = True
+                  Left = 410
+                  Top = 13
+                  Width = 62
+                  Height = 15
+                  Caption = 'Add note'
+                end
+                object edtMidiNote: TGLEdit
+                  Left = 478
+                  Top = 8
+                  Width = 48
+                  Height = 24
+                  Hint = 'Note number (60 = middle C)'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 2
+                  Text = '60'
+                end
+                object edtMidiStart: TGLEdit
+                  Left = 530
+                  Top = 8
+                  Width = 60
+                  Height = 24
+                  Hint = 'Start, in ticks'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 3
+                  Text = '0'
+                end
+                object edtMidiLen: TGLEdit
+                  Left = 594
+                  Top = 8
+                  Width = 60
+                  Height = 24
+                  Hint = 'Length, in ticks'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 4
+                  Text = '480'
+                end
+                object edtMidiVel: TGLEdit
+                  Left = 658
+                  Top = 8
+                  Width = 48
+                  Height = 24
+                  Hint = 'Velocity (1 to 127)'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 5
+                  Text = '100'
+                end
+                object lblMidiTrack: TGLLabel
+                  Transparent = True
+                  Left = 722
+                  Top = 13
+                  Width = 33
+                  Height = 15
+                  Caption = 'Track'
+                end
+                object cboMidiTrack: TGLCombo
+                  Left = 760
+                  Top = 8
+                  Width = 184
+                  Height = 24
+                  TabOrder = 11
+                  OnChange = cboMidiTrackChange
+                end
+                object lblMidiScale: TGLLabel
+                  Transparent = True
+                  Left = 10
+                  Top = 46
+                  Width = 33
+                  Height = 15
+                  Caption = 'Scale'
+                end
+                object cboMidiScaleRoot: TGLCombo
+                  Left = 46
+                  Top = 41
+                  Width = 70
+                  Height = 24
+                  TabOrder = 6
+                  OnChange = cboMidiScaleChange
+                end
+                object cboMidiScaleType: TGLCombo
+                  Left = 122
+                  Top = 41
+                  Width = 150
+                  Height = 24
+                  TabOrder = 7
+                  OnChange = cboMidiScaleChange
+                end
+                object chkMidiScaleHighlight: TGLCheck
+                  Left = 288
+                  Top = 44
+                  Width = 130
+                  Height = 17
+                  Caption = 'Highlight scale'
+                  TabOrder = 8
+                  OnClick = chkMidiScaleHighlightClick
+                end
+                object bvlMidiSep2: TGLBevel
+                  Left = 430
+                  Top = 41
+                  Width = 2
+                  Height = 24
+                  Shape = bsLeftLine
+                end
+                object chkMidiChords: TGLCheck
+                  Left = 446
+                  Top = 44
+                  Width = 100
+                  Height = 17
+                  Hint = 'Show the chord symbols of the Chords lane over the roll'
+                  Caption = 'Chord lane'
+                  Checked = True
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 9
+                  OnClick = chkMidiChordsClick
+                end
+                object btnMidiDetectChords: TGLButton
+                  Left = 556
+                  Top = 41
+                  Width = 130
+                  Height = 24
+                  Hint = 'Name the chord of every bar from the notes and write them into the Chords lane'
+                  Caption = 'Detect chords'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 10
+                  OnClick = btnMidiDetectChordsClick
+                end
               end
-              object lblMixTrackLink: TGLLabel
-                Transparent = True
-                Left = 236
-                Top = 12
-                Width = 49
-                Height = 15
-                Caption = 'Link track'
+              object sbMidiH: TGLScrollBar
+                Left = 0
+                Top = 350
+                Width = 952
+                Height = 16
+                Align = alBottom
+                Kind = sbHorizontal
+                PageSize = 0
+                TabOrder = 2
+                OnChange = sbMidiHChange
               end
-              object cboMixTrackLink: TGLCombo
-                Left = 296
-                Top = 8
-                Width = 180
-                Height = 23
-                TabOrder = 21
-                OnChange = cboMixTrackLinkChange
-              end
-              object edtMixFader: TGLEdit
-                Left = 64
-                Top = 42
-                Width = 52
-                Height = 23
-                TabOrder = 6
-                Text = '0'
-              end
-              object edtMixPan: TGLEdit
-                Left = 156
-                Top = 42
-                Width = 52
-                Height = 23
-                TabOrder = 7
-                Text = '0'
-              end
-              object chkMixMute: TGLCheck
-                Left = 224
-                Top = 44
-                Width = 52
-                Height = 17
-                Caption = 'Mute'
-                TabOrder = 8
-                OnClick = chkMixMuteClick
-              end
-              object chkMixSolo: TGLCheck
-                Left = 284
-                Top = 44
-                Width = 52
-                Height = 17
-                Caption = 'Solo'
-                TabOrder = 9
-                OnClick = chkMixSoloClick
-              end
-              object cboMixRoute: TGLCombo
-                Left = 540
-                Top = 8
-                Width = 160
-                Height = 23
-                TabOrder = 10
-              end
-              object cboMixInsertKind: TGLCombo
-                Left = 8
+              object sbMidiV: TGLScrollBar
+                Left = 936
                 Top = 76
-                Width = 170
-                Height = 23
-                TabOrder = 12
+                Width = 16
+                Height = 274
+                Align = alRight
+                Hint = 'Scrolls the piano roll up and down. Ctrl + mouse wheel does the same.'
+                Kind = sbVertical
+                PageSize = 0
+                TabOrder = 3
+                OnChange = sbMidiVChange
               end
-              object btnMixAddVST: TGLButton
-                Left = 596
-                Top = 75
+              object pbPianoRoll: TGLView
+                Left = 0
+                Top = 76
+                Width = 952
+                Height = 290
+                Align = alClient
+                PopupMenu = pmPianoRoll
+                OnMouseDown = pbPianoRollMouseDown
+                OnMouseMove = pbPianoRollMouseMove
+                OnMouseUp = pbPianoRollMouseUp
+                OnMouseWheel = pbPianoRollMouseWheel
+                OnPaint = pbPianoRollPaint
+              end
+            end
+            object tabScore: TGLPage
+              Caption = 'Score'
+              object sbScoreParts: TGLScrollBox
+                Left = 0
+                Top = 0
+                Width = 250
+                Height = 400
+                Align = alLeft
+                TabOrder = 0
+                ContentPadding = 0
+              OnResize = sbScorePartsResize
+                object pnlScoreParts: TGLPanel
+                  Left = 0
+                  Top = 0
+                  Width = 236
+                  Height = 420
+                  BevelOuter = bvNone
+                  TabOrder = 0
+                  object pnlScorePartsHead: TGLPanel
+                    Left = 0
+                    Top = 0
+                    Width = 100
+                    Height = 92
+                    Align = alTop
+                    BevelOuter = bvNone
+                    TabOrder = 9
+                    object lblScoreParts: TGLLabel
+                      Transparent = True
+                      Left = 12
+                      Top = 10
+                      Width = 36
+                      Height = 15
+                      Caption = 'PARTS'
+                      Font.Style = [fsBold]
+                      ParentFont = False
+                    end
+                    object lblScoreCount: TGLLabel
+                      Transparent = True
+                      Left = 170
+                      Top = 10
+                      Width = 56
+                      Height = 15
+                      Caption = '0 of 0'
+                    end
+                    object btnScoreSel: TGLButton
+                      Left = 10
+                      Top = 32
+                      Width = 106
+                      Height = 24
+                      Hint = 'Show only the parts selected in the list'
+                      Caption = 'Selection'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 0
+                      Toggle = True
+                      Down = True
+                      OnChange = ScoreOptionChange
+                    end
+                    object btnScoreFull: TGLButton
+                      Left = 120
+                      Top = 32
+                      Width = 106
+                      Height = 24
+                      Hint = 'Show every MIDI part as one full score'
+                      Caption = 'Full score'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 1
+                      Toggle = True
+                      OnChange = ScoreOptionChange
+                    end
+                    object btnScoreChords: TGLButton
+                      Left = 10
+                      Top = 62
+                      Width = 106
+                      Height = 24
+                      Hint = 'Print the Chords lane symbols above the staves'
+                      Caption = 'Chord symbols'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 2
+                      Toggle = True
+                      Down = True
+                      OnChange = ScoreOptionChange
+                    end
+                    object btnScoreTab: TGLButton
+                      Left = 120
+                      Top = 62
+                      Width = 106
+                      Height = 24
+                      Hint = 'Show the notes as guitar tablature (six strings, fret numbers, standard tuning) instead of staff notation'
+                      Caption = 'Guitar tab'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 6
+                      Toggle = True
+                      OnChange = ScoreOptionChange
+                    end
+                  end
+                  object pnlScorePartsFoot: TGLPanel
+                    Left = 0
+                    Top = 0
+                    Width = 100
+                    Height = 34
+                    Align = alBottom
+                    BevelOuter = bvNone
+                    TabOrder = 9
+                    object btnScoreAll: TGLButton
+                      Left = 10
+                      Top = 5
+                      Width = 106
+                      Height = 24
+                      Hint = 'Select every part'
+                      Caption = 'All tracks'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 4
+                      OnClick = btnScoreAllClick
+                    end
+                    object btnScoreNone: TGLButton
+                      Left = 120
+                      Top = 5
+                      Width = 106
+                      Height = 24
+                      Hint = 'Clear the selection'
+                      Caption = 'Clear'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 5
+                      OnClick = btnScoreNoneClick
+                    end
+                  end
+                  object pnlScoreTrk: TGLPanel
+                    Left = 0
+                    Top = 0
+                    Width = 100
+                    Height = 192
+                    Align = alBottom
+                    BevelOuter = bvNone
+                    TabOrder = 10
+                    object lblScoreTrk: TGLLabel
+                      Transparent = True
+                      Left = 12
+                      Top = 9
+                      Width = 56
+                      Height = 15
+                      Caption = 'TRACKER'
+                      Font.Style = [fsBold]
+                      ParentFont = False
+                    end
+                    object tsScoreTrkBy: TGLTabStrip
+                      CurvedTabs = True
+                      TabColor = 7214150
+                      Left = 10
+                      Top = 34
+                      Width = 216
+                      Height = 28
+                      Tabs = 'Channels;Instruments'
+                      Hints = 'Pick the tracker channels to show;Pick the tracker instruments to show'
+                      OnChange = ScoreTrkByChange
+                    end
+                    object lstScoreTrk: TGLList
+                      Left = 10
+                      Top = 66
+                      Width = 216
+                      Height = 90
+                      Hint = 'Only the notes on the selected channels / instruments are shown (Ctrl / Shift for several)'
+                      MultiSelect = True
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 1
+                      OnClick = ScoreTrkListClick
+                    end
+                    object btnScoreTrkAll: TGLButton
+                      Left = 10
+                      Top = 162
+                      Width = 106
+                      Height = 24
+                      Hint = 'Show every channel / instrument'
+                      Caption = 'Show all'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 2
+                      OnClick = btnScoreTrkAllClick
+                    end
+                    object btnScoreTrkNone: TGLButton
+                      Left = 120
+                      Top = 162
+                      Width = 106
+                      Height = 24
+                      Hint = 'Hide every channel / instrument'
+                      Caption = 'Hide all'
+                      ParentShowHint = False
+                      ShowHint = True
+                      TabOrder = 3
+                      OnClick = btnScoreTrkNoneClick
+                    end
+                  end
+                  object lstScoreParts: TGLList
+                    Align = alClient
+                    AlignWithMargins = True
+                    Margins.Left = 10
+                    Margins.Top = 4
+                    Margins.Right = 10
+                    Margins.Bottom = 4
+                    Left = 10
+                    Top = 96
+                    Width = 216
+                    Height = 270
+                    Hint = 'The MIDI parts of the Timeline: select the ones to show (Ctrl / Shift for several)'
+                    MultiSelect = True
+                    ParentShowHint = False
+                    ShowHint = True
+                    TabOrder = 3
+                    OnClick = ScoreOptionChange
+                  end
+                end
+              end
+              object pnlScoreTop: TGLPanel
+                Left = 236
+                Top = 0
+                Width = 716
+                Height = 38
+                Align = alTop
+                BevelOuter = bvNone
+                TabOrder = 1
+                object ibScoreTools: TGLIconBar
+                  Left = 8
+                  Top = 5
+                  Width = 224
+                  Height = 28
+                  ShowHint = True
+                  Buttons = 'open;save;trash;zoomout;zoomin;play;stop'
+                  Hints = 'Load a tracker module onto the score;Save the score as laid out - staff notation or guitar tab - to a PDF file;Delete the selected score parts from the project (asks first);Smaller notation;Larger notation;Play the Timeline from the playhead: a thick line scrolls across the score at the Timeline tempo;Stop playback'
+                  OnButtonClick = ibScoreToolsClick
+                end
+                object tsScoreClef: TGLTabStrip
+                  CurvedTabs = True
+                  TabColor = 7214150
+                  Left = 244
+                  Top = 5
+                  Width = 280
+                  Height = 28
+                  Tabs = 'AUTO;TREBLE;BASS;GRAND'
+                  Hints = 'Choose the staff from the notes;Treble clef only;Bass clef only;Grand staff: treble above bass'
+                  OnChange = ScoreOptionChange
+                end
+                object lblScoreQuant: TGLLabel
+                  Transparent = True
+                  Left = 536
+                  Top = 11
+                  Width = 52
+                  Height = 15
+                  Caption = 'Quantize'
+                end
+                object cboScoreQuant: TGLCombo
+                  Left = 594
+                  Top = 7
+                  Width = 80
+                  Height = 24
+                  Hint = 'The shortest note value the notation is rounded to'
+                  ItemIndex = 2
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 0
+                  OnChange = ScoreOptionChange
+                  Items.Strings = (
+                    '1/4'
+                    '1/8'
+                    '1/16'
+                    '1/32')
+                end
+                object lblScoreZoom: TGLLabel
+                  Transparent = True
+                  Left = 686
+                  Top = 11
+                  Width = 40
+                  Height = 15
+                  Caption = '100%'
+                end
+              end
+              object sbScore: TGLScrollBar
+                Left = 934
+                Top = 38
+                Width = 18
+                Height = 362
+                Align = alRight
+                Kind = sbVertical
+                PageSize = 0
+                TabOrder = 3
+                OnChange = ScoreOptionChange
+              end
+              object sbScoreH: TGLScrollBar
+                Left = 236
+                Top = 382
+                Width = 698
+                Height = 18
+                Align = alBottom
+                Kind = sbHorizontal
+                PageSize = 0
+                TabOrder = 4
+                OnChange = ScoreOptionChange
+              end
+              object pbScore: TGLView
+                Left = 236
+                Top = 38
+                Width = 698
+                Height = 362
+                Align = alClient
+                OnMouseDown = pbScoreMouseDown
+                OnMouseWheel = pbScoreMouseWheel
+                OnPaint = pbScorePaint
+              end
+            end
+            object tabInst: TGLPage
+              Caption = 'Instrument'
+              object lblDrumTitle: TGLLabel
+                Transparent = True
+                Left = 18
+                Top = 14
                 Width = 110
-                Height = 25
-                Caption = 'Add VST...'
-                TabOrder = 13
-                OnClick = btnMixAddVSTClick
+                Height = 20
+                Caption = 'Drum Machine'
+                Font.Height = -16
+                Font.Style = [fsBold]
+                ParentFont = False
               end
-              object btnMixEditVST: TGLButton
-                Left = 712
-                Top = 75
-                Width = 110
-                Height = 25
-                Caption = 'Edit VST...'
-                TabOrder = 14
-                OnClick = btnMixEditVSTClick
-              end
-              object lblMixAutoParam: TGLLabel
+              object lblDrumHint: TGLLabel
                 Transparent = True
-                Left = 352
-                Top = 46
-                Width = 30
+                Left = 160
+                Top = 18
+                Width = 420
                 Height = 15
-                Caption = 'Auto'
+                Caption = 'Every MIDI note 0 to 127 has a pad - scroll the range, click a pad to play it, drop a WAV file on it or press its + to load one'
               end
-              object cboMixAutoParam: TGLCombo
-                Left = 386
-                Top = 42
-                Width = 190
-                Height = 23
-                TabOrder = 15
-                OnChange = cboMixAutoParamChange
-              end
-              object cboMixAutoMode: TGLCombo
-                Left = 584
-                Top = 42
-                Width = 100
-                Height = 23
-                TabOrder = 16
-                OnChange = cboMixAutoModeChange
-              end
-              object lblMixZoom: TGLLabel
-                Transparent = True
-                Left = 8
-                Top = 112
-                Width = 60
-                Height = 15
-                Caption = 'Strip width'
-              end
-              object tbMixZoom: TGLTrackBar
-                Left = 76
-                Top = 104
-                Width = 140
-                Height = 30
-                Max = 20
-                Min = 5
-                Position = 10
-                TabOrder = 17
-                OnChange = tbMixZoomChange
-              end
-              object lblMixMasterLoudness: TGLLabel
-                Transparent = True
-                Left = 724
-                Top = 8
-                Width = 220
-                Height = 40
-                Caption = 'Master:  -inf dBFS   M -inf LUFS   I -inf LUFS'
-                WordWrap = True
-              end
-              object lblMixMeterHold: TGLLabel
-                Transparent = True
-                Left = 240
-                Top = 112
+              object pbDrumMap: TGLView
+                Left = 18
+                Top = 48
                 Width = 44
-                Height = 15
-                Caption = 'Hold ms'
+                Height = 300
+                Cursor = crHandPoint
+                OnMouseDown = pbDrumMapMouseDown
+                OnMouseMove = pbDrumMapMouseMove
+                OnMouseUp = pbDrumMapMouseUp
+                OnPaint = pbDrumMapPaint
               end
-              object lblMixMeterDecay: TGLLabel
-                Transparent = True
-                Left = 356
-                Top = 112
-                Width = 52
-                Height = 15
-                Caption = 'Decay dB/s'
+              object pbDrumPads: TGLView
+                Left = 70
+                Top = 48
+                Width = 440
+                Height = 300
+                Cursor = crHandPoint
+                OnDropFiles = pbDrumPadsDropFiles
+                OnDblClick = pbDrumPadsDblClick
+                OnMouseDown = pbDrumPadsMouseDown
+                OnMouseUp = pbDrumPadsMouseUp
+                OnMouseWheel = pbDrumPadsMouseWheel
+                OnPaint = pbDrumPadsPaint
               end
-              object edtMixMeterHold: TGLEdit
-                Left = 292
+              object sbDrumRange: TGLScrollBar
+                Left = 514
+                Top = 48
+                Width = 18
+                Height = 300
+                Kind = sbVertical
+                Max = 31
+                PageSize = 4
+                Position = 19
+                LargeChange = 4
+                TabOrder = 1
+                OnChange = sbDrumRangeChange
+              end
+              object sbDrumPanels: TGLScrollBox
+                Left = 544
+                Top = 48
+                Width = 400
+                Height = 340
+                TabOrder = 0
+                object lblDrumEmpty: TGLLabel
+                  Transparent = True
+                  Left = 14
+                  Top = 14
+                  Width = 360
+                  Height = 60
+                  WordWrap = True
+                  Caption = 'Load a WAV file onto a pad (double-click it, press its + or drop a file on it) and the instrument gets its own panel here, with a graph of its sound.'
+                end
+              end
+            end
+            object tabPattern: TGLPage
+              Caption = 'Pattern'
+              object pnlPatTop: TGLPanel
+                Left = 0
+                Top = 0
+                Width = 952
+                Height = 108
+                Align = alTop
+                BevelOuter = bvNone
+                TabOrder = 0
+                object cboPatSel: TGLCombo
+                  Left = 10
+                  Top = 8
+                  Width = 210
+                  Height = 24
+                  Hint = 'The rhythm patterns of this project'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 0
+                  OnChange = cboPatSelChange
+                end
+                object ibPatFile: TGLIconBar
+                  Left = 228
+                  Top = 6
+                  Width = 184
+                  Height = 28
+                  ShowHint = True
+                  Buttons = 'add;clone;trash;save;saveas;load'
+                  Hints = 'New pattern (a row for every loaded drum pad);Clone this pattern;Delete this pattern;Save this pattern, with its instruments, as a preset file;Save this pattern as a preset file under a name you choose;Load a pattern preset into this project'
+                  OnButtonClick = ibPatFileClick
+                end
+                object ibPatPlay: TGLIconBar
+                  Left = 870
+                  Top = 6
+                  Width = 34
+                  Height = 28
+                  Anchors = [akTop, akRight]
+                  ShowHint = True
+                  Buttons = 'play'
+                  Hints = 'Play the pattern in a loop through the drum machine'
+                  OnButtonClick = ibPatPlayClick
+                end
+                object ibPatPlace: TGLIconBar
+                  Left = 908
+                  Top = 6
+                  Width = 34
+                  Height = 28
+                  Anchors = [akTop, akRight]
+                  ShowHint = True
+                  Buttons = 'place'
+                  Hints = 'Put the pattern on the Timeline at the playhead as a clip; edit the pattern later and every copy follows'
+                  OnButtonClick = ibPatPlaceClick
+                end
+                object lblPatName: TGLLabel
+                  Transparent = True
+                  Left = 10
+                  Top = 47
+                  Width = 40
+                  Height = 15
+                  Caption = 'Name'
+                end
+                object edtPatName: TGLEdit
+                  Left = 56
+                  Top = 42
+                  Width = 170
+                  Height = 24
+                  TabOrder = 9
+                  TextHint = 'Pattern name'
+                  OnChange = edtPatNameChange
+                end
+                object lblPatLen: TGLLabel
+                  Transparent = True
+                  Left = 240
+                  Top = 47
+                  Width = 46
+                  Height = 15
+                  Caption = 'Length'
+                end
+                object ibPatLen: TGLIconBar
+                  Left = 292
+                  Top = 40
+                  Width = 64
+                  Height = 28
+                  ShowHint = True
+                  Buttons = 'minus;add'
+                  Hints = 'One beat shorter;One beat longer'
+                  OnButtonClick = ibPatLenClick
+                end
+                object lblPatLenVal: TGLLabel
+                  Transparent = True
+                  Left = 364
+                  Top = 47
+                  Width = 28
+                  Height = 15
+                  Caption = '32'
+                end
+                object lblPatBars: TGLLabel
+                  Transparent = True
+                  Left = 396
+                  Top = 47
+                  Width = 110
+                  Height = 15
+                  Caption = 'rows / 2.00 bars'
+                end
+                object tsPatRes: TGLTabStrip
+                  Left = 512
+                  Top = 40
+                  Width = 170
+                  Height = 28
+                  Tabs = '1/8;1/16;1/32'
+                  Hints = 'Eighth-note steps;Sixteenth-note steps;Thirty-second-note steps'
+                  OnChange = tsPatResChange
+                end
+                object cboPatAdd: TGLCombo
+                  Left = 696
+                  Top = 42
+                  Width = 150
+                  Height = 24
+                  Hint = 'A loaded drum pad to add as a row'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 12
+                end
+                object ibPatRow: TGLIconBar
+                  Left = 852
+                  Top = 40
+                  Width = 64
+                  Height = 28
+                  ShowHint = True
+                  Buttons = 'addrow;delrow'
+                  Hints = 'Add the chosen pad (or the pad selected on the Instrument page) as an instrument row;Remove the selected instrument row'
+                  OnButtonClick = ibPatRowClick
+                end
+                object ibPatTools: TGLIconBar
+                  Left = 10
+                  Top = 74
+                  Width = 184
+                  Height = 28
+                  ShowHint = True
+                  Buttons = 'fill;euclid;left;right;random;clear'
+                  Hints = 'Fill: hit every n-th step on the selected row (every row if none is selected);Euclid: spread a number of hits evenly over the selected row;Rotate the steps one to the left;Rotate the steps one to the right;Random: scatter hits over the selected row (every row if none is selected);Clear: remove every hit from the selected row (every row if none is selected)'
+                  OnButtonClick = ibPatToolsClick
+                end
+                object lblPatInfo: TGLLabel
+                  Transparent = True
+                  Left = 206
+                  Top = 81
+                  Width = 734
+                  Height = 15
+                  Caption = ''
+                end
+              end
+              object sbPatV: TGLScrollBar
+                Left = 934
                 Top = 108
-                Width = 48
-                Height = 23
-                TabOrder = 18
-                Text = '1500'
+                Width = 18
+                Height = 176
+                Align = alRight
+                Kind = sbVertical
+                PageSize = 0
+                TabOrder = 1
+                OnChange = sbPatChange
               end
-              object edtMixMeterDecay: TGLEdit
-                Left = 424
+              object sbPatH: TGLScrollBar
+                Left = 0
+                Top = 284
+                Width = 934
+                Height = 16
+                Align = alBottom
+                Kind = sbHorizontal
+                PageSize = 0
+                TabOrder = 2
+                OnChange = sbPatChange
+              end
+              object pbPattern: TGLView
+                Left = 0
                 Top = 108
-                Width = 48
-                Height = 23
-                TabOrder = 19
-                Text = '10'
+                Width = 934
+                Height = 176
+                Align = alClient
+                Cursor = crHandPoint
+                OnMouseDown = pbPatternMouseDown
+                OnMouseMove = pbPatternMouseMove
+                OnMouseUp = pbPatternMouseUp
+                OnMouseWheel = pbPatternMouseWheel
+                OnPaint = pbPatternPaint
               end
-              object btnMixMeterApply: TGLButton
-                Left = 480
-                Top = 107
-                Width = 48
-                Height = 25
-                Caption = 'Set'
-                TabOrder = 20
-                OnClick = btnMixMeterApplyClick
+            end
+            object tabTracker: TGLPage
+              Caption = 'Tracker'
+              ImageIndex = 12
+              DoubleBuffered = True
+              ParentDoubleBuffered = False
+              object pgcTrk: TGLPageControl
+                Left = 0
+                Top = 0
+                Width = 952
+                Height = 556
+                ActivePage = tsTrkModule
+                Align = alClient
+                TabOrder = 0
+              object tsTrkModule: TGLPage
+                Caption = 'Module'
+              object pnlTrkTop: TGLPanel
+                Left = 0
+                Top = 0
+                Width = 952
+                Height = 42
+                Align = alTop
+                BevelOuter = bvNone
+                TabOrder = 0
+                object lblTrkPattern: TGLLabel
+                  Transparent = True
+                  Left = 10
+                  Top = 14
+                  Width = 41
+                  Height = 15
+                  Caption = 'Pattern'
+                end
+                object cboTrkPattern: TGLCombo
+                  Left = 62
+                  Top = 9
+                  Width = 190
+                  Height = 24
+                  TabOrder = 0
+                  OnChange = cboTrkPatternChange
+                end
+                object lblTrkSpeed: TGLLabel
+                  Transparent = True
+                  Left = 272
+                  Top = 14
+                  Width = 34
+                  Height = 15
+                  Caption = 'Speed'
+                end
+                object edtTrkSpeed: TGLEdit
+                  Left = 312
+                  Top = 9
+                  Width = 40
+                  Height = 24
+                  TabOrder = 1
+                  Text = '6'
+                end
+                object lblTrkBPM: TGLLabel
+                  Transparent = True
+                  Left = 368
+                  Top = 14
+                  Width = 27
+                  Height = 15
+                  Caption = 'BPM'
+                end
+                object edtTrkBPM: TGLEdit
+                  Left = 400
+                  Top = 9
+                  Width = 48
+                  Height = 24
+                  TabOrder = 2
+                  Text = '125'
+                end
+                object lblTrkInstrPick: TGLLabel
+                  Transparent = True
+                  Left = 468
+                  Top = 14
+                  Width = 60
+                  Height = 15
+                  Caption = 'Instrument'
+                end
+                object cboTrkInstr: TGLCombo
+                  Left = 534
+                  Top = 9
+                  Width = 240
+                  Height = 24
+                  Hint = 'The instrument notes are entered with; lists every instrument loaded in this module'
+                  TabOrder = 3
+                  OnChange = cboTrkInstrPickChange
+                end
               end
-              object btnMixAddInsertRow: TGLButton
-                Left = 186
-                Top = 75
-                Width = 90
-                Height = 25
-                Caption = 'Add insert'
-                TabOrder = 22
-                OnClick = btnMixAddEQClick
+              object pnlTrkSupport: TGLPanel
+                Left = 0
+                Top = 500
+                Width = 952
+                Height = 32
+                Align = alBottom
+                BevelOuter = bvNone
+                TabOrder = 3
+                object lblTrkSupport: TGLLabel
+                  Left = 0
+                  Top = 0
+                  Width = 740
+                  Height = 32
+                  Align = alClient
+                  AutoSize = False
+                  Caption = 'Dedicated tracker-module editing: visit and support ModPlug.'
+                  Layout = tlCenter
+                  WordWrap = True
+                end
+                object btnTrkSupport: TGLButton
+                  Left = 740
+                  Top = 0
+                  Width = 212
+                  Height = 32
+                  Align = alRight
+                  Caption = 'Visit www.modplug.com'
+                  TabOrder = 0
+                  OnClick = btnTrkSupportClick
+                end
               end
-              object btnMixDelInsertRow: TGLButton
-                Left = 282
-                Top = 75
-                Width = 100
-                Height = 25
-                Caption = 'Remove insert'
-                TabOrder = 23
-                OnClick = btnMixDelInsertClick
+              object pnlTrkTransport: TGLPanel
+                Left = 0
+                Top = 42
+                Width = 952
+                Height = 36
+                Align = alTop
+                BevelOuter = bvNone
+                TabOrder = 5
+                object ibTrkTransport: TGLIconBar
+                  Left = 8
+                  Top = 4
+                  Width = 272
+                  Height = 28
+                  ShowHint = True
+                  Buttons = 'tostart;play;playpat;pause;stop;toend;record;totimeline'
+                  Hints = 'Back to the beginning of the module;Play the module from the beginning (or continue after Pause);Play the pattern chosen in the pattern list on its own, over and over until Stop;Pause: hold the position, Play continues from there;Stop playback;Go to the last pattern in the module;Record: open the Recording view to arm tracks and record takes;Add the current tracker module to the Timeline (asks whether to keep it live as notation or convert it to an audio clip)'
+                  CellWidth = 34
+                  OnButtonClick = ibTrkTransportClick
+                end
+                object btnTrkMidiRec: TGLButton
+                  Left = 296
+                  Top = 5
+                  Width = 140
+                  Height = 26
+                  Hint = 'MIDI record: notes played on the MIDI keyboard chosen under Settings are written into the pattern grid - at the cursor while stopped (chords fill neighbouring channels), at the playing row while the module plays'
+                  Caption = 'MIDI record'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 1
+                  Toggle = True
+                end
               end
-              object btnMixApplyRow: TGLButton
-                Left = 388
-                Top = 75
-                Width = 64
-                Height = 25
-                Caption = 'Apply'
-                TabOrder = 24
-                OnClick = btnMixApplyClick
+              object pnlTrkSequence: TGLPanel
+                Left = 0
+                Top = 78
+                Width = 952
+                Height = 58
+                Align = alTop
+                BevelOuter = bvNone
+                TabOrder = 2
+                DoubleBuffered = True
+                ParentDoubleBuffered = False
+                object pbTrkSequence: TGLView
+                  Left = 0
+                  Top = 0
+                  Width = 952
+                  Height = 42
+                  Align = alTop
+                  Hint = 'Sequence: click a step to jump to its pattern, Ctrl+click to select several (Export Pattern to Timeline renders them together), double-click to change the pattern a step plays, right-click for more'
+                  ShowHint = True
+                  PopupMenu = pmTrkSeq
+                  OnDblClick = pbTrkSequenceDblClick
+                  OnMouseDown = pbTrkSequenceMouseDown
+                  OnPaint = pbTrkSequencePaint
+                end
+                object sbTrkSeq: TGLScrollBar
+                  Left = 0
+                  Top = 42
+                  Width = 952
+                  Height = 16
+                  Align = alTop
+                  PageSize = 0
+                  TabOrder = 0
+                  OnChange = sbTrkSeqChange
+                end
               end
-              object btnMixUndoRow: TGLButton
-                Left = 458
-                Top = 75
-                Width = 56
-                Height = 25
-                Caption = 'Undo'
-                TabOrder = 25
-                OnClick = btnMixUndoClick
-              end
-              object btnMixRedoRow: TGLButton
-                Left = 520
-                Top = 75
-                Width = 56
-                Height = 25
-                Caption = 'Redo'
-                TabOrder = 26
-                OnClick = btnMixRedoClick
-              end
-              object pbMixAuto: TGLView
+              object pbTracker: TGLView
                 Left = 0
                 Top = 138
                 Width = 952
-                Height = 34
-                OnMouseDown = pbMixAutoMouseDown
-                OnMouseMove = pbMixAutoMouseMove
-                OnMouseUp = pbMixAutoMouseUp
-                OnPaint = pbMixAutoPaint
+                Height = 227
+                Align = alClient
+                PopupMenu = pmTrkGrid
+                WantArrows = True
+                OnMouseDown = pbTrackerMouseDown
+                OnMouseMove = pbTrackerMouseMove
+                OnMouseLeave = pbTrackerMouseLeave
+                OnMouseUp = pbTrackerMouseUp
+                OnMouseWheel = pbTrackerMouseWheel
+                OnPaint = pbTrackerPaint
               end
-            end
-            object pbMixer: TGLView
-              Left = 0
-              Top = 30
-              Width = 952
-              Height = 341
-              Align = alClient
-              PopupMenu = pmMixer
-              OnDragDrop = pbMixerDragDrop
-              OnDragOver = pbMixerDragOver
-              OnMouseWheel = pbMixerMouseWheel
-              OnPaint = pbMixerPaint
-              object sbMixH: TGLScrollBar
+              object sbTrkChn: TGLScrollBar
                 Left = 0
-                Top = 325
+                Top = 365
                 Width = 952
                 Height = 16
-                Visible = False
-                Kind = sbHorizontal
+                Align = alBottom
                 PageSize = 0
-                TabOrder = 1
-                OnChange = sbMixHChange
-              end
-              object pnlMixEq: TGLCollapsePanel
-                Left = 340
-                Top = 4
-                Width = 616
-                Height = 241
-                BevelOuter = bvNone
-                TabOrder = 0
-                Title = 'Master Graphic 16-Band EQ'
-                AutoPlace = False
-                OnToggle = MixEqToggle
-                Hint = 'Graphic equaliser on the Master output. Click the title bar to collapse or expand it.'
-                object cboMixEqPreset: TGLCombo
-                  Left = 368
-                  Top = 3
-                  Width = 150
-                  Height = 22
-                  Anchors = [akTop, akRight]
-                  Style = csDropDown
-                  Hint = 'Equaliser preset: pick a saved one or type a name for a new one, then use the Load or Save icon.'
-                  TabOrder = 18
-                end
-                object ibMixEqPreset: TGLIconBar
-                  Left = 526
-                  Top = 2
-                  Width = 56
-                  Height = 24
-                  Anchors = [akTop, akRight]
-                  ShowHint = True
-                  Buttons = 'load;save'
-                  Hints = 'Load the preset named in the box;Save the current band settings under the name in the box'
-                  CellWidth = 28
-                  OnButtonClick = MixEqPresetClick
-                end
-                object sbMixEq01: TGLEqSlider
-                  Left = 12
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 0
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 25 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 0
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq01: TGLLabel
-                  Left = 12
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '25'
-                  Transparent = True
-                end
-                object sbMixEq02: TGLEqSlider
-                  Left = 49
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 1
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 38 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 1
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq02: TGLLabel
-                  Left = 49
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '38'
-                  Transparent = True
-                end
-                object sbMixEq03: TGLEqSlider
-                  Left = 86
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 2
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 59 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 2
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq03: TGLLabel
-                  Left = 86
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '59'
-                  Transparent = True
-                end
-                object sbMixEq04: TGLEqSlider
-                  Left = 123
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 3
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 91 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 3
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq04: TGLLabel
-                  Left = 123
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '91'
-                  Transparent = True
-                end
-                object sbMixEq05: TGLEqSlider
-                  Left = 160
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 4
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 140 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 4
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq05: TGLLabel
-                  Left = 160
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '140'
-                  Transparent = True
-                end
-                object sbMixEq06: TGLEqSlider
-                  Left = 197
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 5
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 215 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 5
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq06: TGLLabel
-                  Left = 197
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '215'
-                  Transparent = True
-                end
-                object sbMixEq07: TGLEqSlider
-                  Left = 234
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 6
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 330 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 6
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq07: TGLLabel
-                  Left = 234
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '330'
-                  Transparent = True
-                end
-                object sbMixEq08: TGLEqSlider
-                  Left = 271
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 7
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 510 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 7
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq08: TGLLabel
-                  Left = 271
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '510'
-                  Transparent = True
-                end
-                object sbMixEq09: TGLEqSlider
-                  Left = 308
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 8
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 780 Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 8
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq09: TGLLabel
-                  Left = 308
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '780'
-                  Transparent = True
-                end
-                object sbMixEq10: TGLEqSlider
-                  Left = 345
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 9
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 1.2k Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 9
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq10: TGLLabel
-                  Left = 345
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '1.2k'
-                  Transparent = True
-                end
-                object sbMixEq11: TGLEqSlider
-                  Left = 382
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 10
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 1.9k Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 10
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq11: TGLLabel
-                  Left = 382
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '1.9k'
-                  Transparent = True
-                end
-                object sbMixEq12: TGLEqSlider
-                  Left = 419
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 11
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 2.8k Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 11
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq12: TGLLabel
-                  Left = 419
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '2.8k'
-                  Transparent = True
-                end
-                object sbMixEq13: TGLEqSlider
-                  Left = 456
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 12
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 4.4k Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 12
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq13: TGLLabel
-                  Left = 456
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '4.4k'
-                  Transparent = True
-                end
-                object sbMixEq14: TGLEqSlider
-                  Left = 493
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 13
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 6.7k Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 13
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq14: TGLLabel
-                  Left = 493
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '6.7k'
-                  Transparent = True
-                end
-                object sbMixEq15: TGLEqSlider
-                  Left = 530
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 14
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 10k Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 14
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq15: TGLLabel
-                  Left = 530
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '10k'
-                  Transparent = True
-                end
-                object sbMixEq16: TGLEqSlider
-                  Left = 567
-                  Top = 34
-                  Width = 37
-                  Height = 152
-                  Anchors = [akLeft, akTop, akBottom]
-                  Tag = 15
-                  Min = -12.000000000000000000
-                  Max = 12.000000000000000000
-                  DefaultPosition = 0.000000000000000000
-                  Step = 0.500000000000000000
-                  Vertical = True
-                  Hint = 'Gain of the 16k Hz band on the Master output. Double-click to reset it to 0 dB.'
-                  TabOrder = 15
-                  OnChange = MixEqSliderChange
-                end
-                object lblMixEq16: TGLLabel
-                  Left = 567
-                  Top = 190
-                  Width = 37
-                  Height = 15
-                  Anchors = [akLeft, akBottom]
-                  Alignment = taCenter
-                  AutoSize = False
-                  Caption = '16k'
-                  Transparent = True
-                end
-                object chkMixEqOn: TGLCheck
-                  Left = 12
-                  Top = 213
-                  Width = 120
-                  Height = 20
-                  Anchors = [akLeft, akBottom]
-                  Caption = 'EQ on'
-                  Checked = True
-                  Hint = 'Switch the Master graphic equaliser on or off.'
-                  TabOrder = 16
-                  OnChange = MixEqOnChange
-                end
-                object btnMixEqFlat: TGLButton
-                  Left = 140
-                  Top = 210
-                  Width = 80
-                  Height = 25
-                  Anchors = [akLeft, akBottom]
-                  Caption = 'Flat'
-                  Hint = 'Set every band back to 0 dB.'
-                  TabOrder = 17
-                  OnClick = MixEqFlatClick
-                end
-              end
-
-            end
-          end
-          object tabMIDI: TGLPage
-            Caption = 'MIDI'
-            ImageIndex = 15
-            object pnlMidiTop: TGLPanel
-              Left = 0
-              Top = 0
-              Width = 952
-              Height = 76
-              Align = alTop
-              BevelOuter = bvNone
-              TabOrder = 0
-              object lblMidiClip: TGLLabel
-                Transparent = True
-                Left = 10
-                Top = 13
-                Width = 22
-                Height = 15
-                Caption = 'Clip'
-              end
-              object cboMidiClip: TGLCombo
-                Left = 46
-                Top = 8
-                Width = 200
-                Height = 24
-                TabOrder = 0
-                OnChange = cboMidiClipChange
-              end
-              object lblMidiGrid: TGLLabel
-                Transparent = True
-                Left = 264
-                Top = 13
-                Width = 22
-                Height = 15
-                Caption = 'Grid'
-              end
-              object cboMidiGrid: TGLCombo
-                Left = 294
-                Top = 8
-                Width = 84
-                Height = 24
-                TabOrder = 1
-              end
-              object bvlMidiSep1: TGLBevel
-                Left = 394
-                Top = 8
-                Width = 2
-                Height = 24
-                Shape = bsLeftLine
-              end
-              object lblMidiNote: TGLLabel
-                Transparent = True
-                Left = 410
-                Top = 13
-                Width = 62
-                Height = 15
-                Caption = 'Add note'
-              end
-              object edtMidiNote: TGLEdit
-                Left = 478
-                Top = 8
-                Width = 48
-                Height = 24
-                Hint = 'Note number (60 = middle C)'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 2
-                Text = '60'
-              end
-              object edtMidiStart: TGLEdit
-                Left = 530
-                Top = 8
-                Width = 60
-                Height = 24
-                Hint = 'Start, in ticks'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 3
-                Text = '0'
-              end
-              object edtMidiLen: TGLEdit
-                Left = 594
-                Top = 8
-                Width = 60
-                Height = 24
-                Hint = 'Length, in ticks'
-                ParentShowHint = False
-                ShowHint = True
                 TabOrder = 4
-                Text = '480'
+                OnChange = sbTrkChnChange
               end
-              object edtMidiVel: TGLEdit
-                Left = 658
-                Top = 8
-                Width = 48
-                Height = 24
-                Hint = 'Velocity (1 to 127)'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 5
-                Text = '100'
               end
-              object lblMidiTrack: TGLLabel
-                Transparent = True
-                Left = 722
-                Top = 13
-                Width = 33
-                Height = 15
-                Caption = 'Track'
+              object tsTrkInstruments: TGLPage
+                Caption = 'Instruments'
+                object pnlTrkInstrTop: TGLPanel
+                  Left = 0
+                  Top = 0
+                  Width = 952
+                  Height = 44
+                  Align = alTop
+                  BevelOuter = bvNone
+                  TabOrder = 0
+                  object lblTrkInstrSel: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 12
+                    Width = 56
+                    Height = 15
+                    Caption = 'Instrument'
+                  end
+                  object cboTrkInstrSel: TGLCombo
+                    Left = 76
+                    Top = 8
+                    Width = 260
+                    Height = 23
+                    TabOrder = 0
+                    OnChange = cboTrkInstrSelChange
+                  end
+                  object ibTrkInstr: TGLIconBar
+                    Left = 348
+                    Top = 6
+                    Width = 96
+                    Height = 28
+                    ShowHint = True
+                    Buttons = 'add;export;wavedit'
+                    Hints = 'Add to Timeline: bounce this instrument to a WAV in the Recordings folder and place it on the Timeline;Export sample: save as WAV, raw PCM or FLAC (WAV keeps loop points and all applied settings);WAV editor: edit this instrument''s sound (or double-click the waveform)'
+                    OnButtonClick = ibTrkInstrClick
+                  end
+                end
+                object pnlTrkInstrInfo: TGLPanel
+                  Left = 0
+                  Top = 44
+                  Width = 952
+                  Height = 24
+                  Align = alTop
+                  BevelOuter = bvNone
+                  TabOrder = 1
+                  object lblTrkInstrInfo: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 4
+                    Width = 300
+                    Height = 15
+                    Caption = '(no instrument selected)'
+                  end
+                end
+                object pbTrkInstrWave: TGLView
+                  Left = 0
+                  Top = 68
+                  Width = 952
+                  Height = 488
+                  Align = alClient
+                  OnPaint = pbTrkInstrWavePaint
+                  OnDblClick = pbTrkInstrWaveDblClick
+                end
               end
-              object cboMidiTrack: TGLCombo
-                Left = 760
-                Top = 8
-                Width = 184
-                Height = 24
-                TabOrder = 11
-                OnChange = cboMidiTrackChange
-              end
-              object lblMidiScale: TGLLabel
-                Transparent = True
-                Left = 10
-                Top = 46
-                Width = 33
-                Height = 15
-                Caption = 'Scale'
-              end
-              object cboMidiScaleRoot: TGLCombo
-                Left = 46
-                Top = 41
-                Width = 70
-                Height = 24
-                TabOrder = 6
-                OnChange = cboMidiScaleChange
-              end
-              object cboMidiScaleType: TGLCombo
-                Left = 122
-                Top = 41
-                Width = 150
-                Height = 24
-                TabOrder = 7
-                OnChange = cboMidiScaleChange
-              end
-              object chkMidiScaleHighlight: TGLCheck
-                Left = 288
-                Top = 44
-                Width = 130
-                Height = 17
-                Caption = 'Highlight scale'
-                TabOrder = 8
-                OnClick = chkMidiScaleHighlightClick
-              end
-              object bvlMidiSep2: TGLBevel
-                Left = 430
-                Top = 41
-                Width = 2
-                Height = 24
-                Shape = bsLeftLine
-              end
-              object chkMidiChords: TGLCheck
-                Left = 446
-                Top = 44
-                Width = 100
-                Height = 17
-                Hint = 'Show the chord symbols of the Chords lane over the roll'
-                Caption = 'Chord lane'
-                Checked = True
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 9
-                OnClick = chkMidiChordsClick
-              end
-              object btnMidiDetectChords: TGLButton
-                Left = 556
-                Top = 41
-                Width = 130
-                Height = 24
-                Hint = 'Name the chord of every bar from the notes and write them into the Chords lane'
-                Caption = 'Detect chords'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 10
-                OnClick = btnMidiDetectChordsClick
               end
             end
-            object sbMidiH: TGLScrollBar
-              Left = 0
-              Top = 350
-              Width = 952
-              Height = 16
-              Align = alBottom
-              Kind = sbHorizontal
-              PageSize = 0
-              TabOrder = 2
-              OnChange = sbMidiHChange
-            end
-            object sbMidiV: TGLScrollBar
-              Left = 936
-              Top = 76
-              Width = 16
-              Height = 274
-              Align = alRight
-              Hint = 'Scrolls the piano roll up and down. Ctrl + mouse wheel does the same.'
-              Kind = sbVertical
-              PageSize = 0
-              TabOrder = 3
-              OnChange = sbMidiVChange
-            end
-            object pbPianoRoll: TGLView
-              Left = 0
-              Top = 76
-              Width = 952
-              Height = 290
-              Align = alClient
-              PopupMenu = pmPianoRoll
-              OnMouseDown = pbPianoRollMouseDown
-              OnMouseMove = pbPianoRollMouseMove
-              OnMouseUp = pbPianoRollMouseUp
-              OnMouseWheel = pbPianoRollMouseWheel
-              OnPaint = pbPianoRollPaint
-            end
-          end
-          object tabScore: TGLPage
-            Caption = 'Score'
-            object pnlScoreParts: TGLPanel
-              Left = 0
-              Top = 0
-              Width = 236
-              Height = 400
-              Align = alLeft
-              BevelOuter = bvNone
-              TabOrder = 0
-              object pnlScorePartsHead: TGLPanel
+            object tabRecording: TGLPage
+              Caption = 'Recording'
+              ImageIndex = 9
+              object sbRecording: TGLScrollBox
                 Left = 0
                 Top = 0
-                Width = 100
-                Height = 92
-                Align = alTop
-                BevelOuter = bvNone
-                TabOrder = 9
-                object lblScoreParts: TGLLabel
+                Width = 952
+                Height = 531
+                Align = alClient
+                TabOrder = 0
+                object grpRecSetup: TGLGroup
+                  Left = 8
+                  Top = 4
+                  Width = 920
+                  Height = 134
+                  Anchors = [akLeft, akTop, akRight]
+                  Caption = ' Take Settings '
+                  TabOrder = 0
+                    object lblRecFormat: TGLLabel
+                      Transparent = True
+                      Left = 16
+                      Top = 29
+                      Width = 80
+                      Height = 15
+                      Caption = 'Take format'
+                    end
+                    object cboRecFormat: TGLCombo
+                      Left = 104
+                      Top = 26
+                      Width = 130
+                      Height = 23
+                      TabOrder = 0
+                    end
+                    object lblRecPreRoll: TGLLabel
+                      Transparent = True
+                      Left = 262
+                      Top = 29
+                      Width = 70
+                      Height = 15
+                      Caption = 'Pre-roll (s)'
+                    end
+                    object edtRecPreRoll: TGLEdit
+                      Left = 340
+                      Top = 26
+                      Width = 56
+                      Height = 23
+                      TabOrder = 1
+                      Text = '0'
+                    end
+                    object lblRecCountIn: TGLLabel
+                      Transparent = True
+                      Left = 424
+                      Top = 29
+                      Width = 100
+                      Height = 15
+                      Caption = 'Count-in (beats)'
+                    end
+                    object edtRecCountIn: TGLEdit
+                      Left = 530
+                      Top = 26
+                      Width = 56
+                      Height = 23
+                      TabOrder = 2
+                      Text = '0'
+                    end
+                    object chkRecMonitor: TGLCheck
+                      Left = 628
+                      Top = 28
+                      Width = 190
+                      Height = 19
+                      Caption = 'Input monitoring'
+                      TabOrder = 3
+                    end
+                    object lblRecPunch: TGLLabel
+                      Transparent = True
+                      Left = 16
+                      Top = 65
+                      Width = 80
+                      Height = 15
+                      Caption = 'Punch'
+                    end
+                    object cboRecPunch: TGLCombo
+                      Left = 104
+                      Top = 62
+                      Width = 130
+                      Height = 23
+                      TabOrder = 4
+                      OnChange = cboRecPunchChange
+                    end
+                    object lblRecPunchIn: TGLLabel
+                      Transparent = True
+                      Left = 262
+                      Top = 65
+                      Width = 70
+                      Height = 15
+                      Caption = 'Punch in (s)'
+                    end
+                    object edtRecPunchIn: TGLEdit
+                      Left = 340
+                      Top = 62
+                      Width = 56
+                      Height = 23
+                      TabOrder = 5
+                      Text = '1.0'
+                    end
+                    object lblRecPunchOut: TGLLabel
+                      Transparent = True
+                      Left = 424
+                      Top = 65
+                      Width = 100
+                      Height = 15
+                      Caption = 'Punch out (s)'
+                    end
+                    object edtRecPunchOut: TGLEdit
+                      Left = 530
+                      Top = 62
+                      Width = 56
+                      Height = 23
+                      TabOrder = 6
+                      Text = '3.0'
+                    end
+                    object chkRecLoop: TGLCheck
+                      Left = 16
+                      Top = 100
+                      Width = 120
+                      Height = 19
+                      Caption = 'Loop-record'
+                      TabOrder = 7
+                      OnClick = chkRecLoopClick
+                    end
+                    object lblRecLoopStart: TGLLabel
+                      Transparent = True
+                      Left = 262
+                      Top = 101
+                      Width = 76
+                      Height = 15
+                      Caption = 'Loop start (s)'
+                    end
+                    object edtRecLoopStart: TGLEdit
+                      Left = 340
+                      Top = 98
+                      Width = 56
+                      Height = 23
+                      TabOrder = 8
+                      Text = '0'
+                    end
+                    object lblRecLoopEnd: TGLLabel
+                      Transparent = True
+                      Left = 424
+                      Top = 101
+                      Width = 100
+                      Height = 15
+                      Caption = 'Loop end (s)'
+                    end
+                    object edtRecLoopEnd: TGLEdit
+                      Left = 530
+                      Top = 98
+                      Width = 56
+                      Height = 23
+                      TabOrder = 9
+                      Text = '2'
+                    end
+                end
+                object grpRecControl: TGLGroup
+                  Left = 8
+                  Top = 146
+                  Width = 920
+                  Height = 122
+                  Anchors = [akLeft, akTop, akRight]
+                  Caption = ' Record '
+                  TabOrder = 1
+                    object btnRecArm: TGLButton
+                      Left = 16
+                      Top = 26
+                      Width = 200
+                      Height = 32
+                      Caption = 'Start live recording'
+                      TabOrder = 10
+                      OnClick = btnRecArmClick
+                    end
+                    object btnRecCommit: TGLButton
+                      Left = 224
+                      Top = 26
+                      Width = 170
+                      Height = 32
+                      Caption = 'Retry adding take'
+                      TabOrder = 11
+                      OnClick = btnRecCommitClick
+                    end
+                    object btnRecSaved: TGLButton
+                      Left = 402
+                      Top = 26
+                      Width = 170
+                      Height = 32
+                      Caption = 'Add saved audio...'
+                      TabOrder = 12
+                      OnClick = btnRecSavedClick
+                    end
+                    object btnRecScan: TGLButton
+                      Left = 580
+                      Top = 26
+                      Width = 210
+                      Height = 32
+                      Caption = 'Recover unfinished takes'
+                      TabOrder = 13
+                      OnClick = btnRecScanClick
+                    end
+                    object lblRecMicState: TGLLabel
+                      Transparent = True
+                      Left = 16
+                      Top = 70
+                      Width = 888
+                      Height = 18
+                      Anchors = [akLeft, akTop, akRight]
+                      Caption = 'Microphone: OFF | Recording: OFF'
+                      ShowHint = True
+                    end
+                    object lblRecDestination: TGLLabel
+                      Transparent = True
+                      Left = 16
+                      Top = 92
+                      Width = 888
+                      Height = 18
+                      Anchors = [akLeft, akTop, akRight]
+                      Caption = 'Full input until Stop. Select input device and enable capture in Settings.'
+                    end
+                end
+                object grpRecTakes: TGLGroup
+                  Left = 8
+                  Top = 276
+                  Width = 920
+                  Height = 372
+                  Anchors = [akLeft, akTop, akRight]
+                  Caption = ' Takes and Comp '
+                  TabOrder = 2
+                    object btnRecSaveTake: TGLButton
+                      Left = 16
+                      Top = 24
+                      Width = 190
+                      Height = 28
+                      Caption = 'Save Selected Take As...'
+                      TabOrder = 14
+                      OnClick = btnRecSaveTakeClick
+                    end
+                    object btnRecAddTakeToTimeline: TGLButton
+                      Left = 214
+                      Top = 24
+                      Width = 220
+                      Height = 28
+                      Caption = 'Add Selected Take to Timeline'
+                      TabOrder = 15
+                      OnClick = btnRecAddTakeToTimelineClick
+                    end
+                    object btnRecCommitComp: TGLButton
+                      Left = 442
+                      Top = 24
+                      Width = 190
+                      Height = 28
+                      Caption = 'Commit Comp to Timeline'
+                      TabOrder = 16
+                      OnClick = btnRecCommitCompClick
+                    end
+                    object btnRecResetComp: TGLButton
+                      Left = 640
+                      Top = 24
+                      Width = 120
+                      Height = 28
+                      Caption = 'Reset Comp'
+                      TabOrder = 17
+                      OnClick = btnRecResetCompClick
+                    end
+                    object pbRecTakes: TGLView
+                      Left = 12
+                      Top = 60
+                      Width = 896
+                      Height = 300
+                      Anchors = [akLeft, akTop, akRight]
+                      PopupMenu = pmRecording
+                      OnMouseDown = pbRecTakesMouseDown
+                      OnMouseMove = pbRecTakesMouseMove
+                      OnMouseUp = pbRecTakesMouseUp
+                      OnPaint = pbRecTakesPaint
+                    end
+                end
+              end
+            end
+            object tabFoley: TGLPage
+              Caption = 'Foley'
+              object sbFoley: TGLScrollBox
+                Left = 0
+                Top = 0
+                Width = 952
+                Height = 531
+                Align = alClient
+                TabOrder = 0
+                object grpFoley: TGLGroup
+                  Left = 8
+                  Top = 4
+                  Width = 920
+                  Height = 326
+                  Anchors = [akLeft, akTop, akRight]
+                  Caption = ' Foley Sampler '
+                  TabOrder = 0
+                  object btnFoleyPad1: TGLButton
+                    Left = 16
+                    Top = 28
+                    Width = 116
+                    Height = 52
+                    Tag = 0
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 1 (key 1): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 0
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad2: TGLButton
+                    Left = 140
+                    Top = 28
+                    Width = 116
+                    Height = 52
+                    Tag = 1
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 2 (key 2): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 1
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad3: TGLButton
+                    Left = 264
+                    Top = 28
+                    Width = 116
+                    Height = 52
+                    Tag = 2
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 3 (key 3): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 2
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad4: TGLButton
+                    Left = 388
+                    Top = 28
+                    Width = 116
+                    Height = 52
+                    Tag = 3
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 4 (key 4): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 3
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad5: TGLButton
+                    Left = 16
+                    Top = 86
+                    Width = 116
+                    Height = 52
+                    Tag = 4
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 5 (key Q): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 4
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad6: TGLButton
+                    Left = 140
+                    Top = 86
+                    Width = 116
+                    Height = 52
+                    Tag = 5
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 6 (key W): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 5
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad7: TGLButton
+                    Left = 264
+                    Top = 86
+                    Width = 116
+                    Height = 52
+                    Tag = 6
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 7 (key E): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 6
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad8: TGLButton
+                    Left = 388
+                    Top = 86
+                    Width = 116
+                    Height = 52
+                    Tag = 7
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 8 (key R): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 7
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad9: TGLButton
+                    Left = 16
+                    Top = 144
+                    Width = 116
+                    Height = 52
+                    Tag = 8
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 9 (key A): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 8
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad10: TGLButton
+                    Left = 140
+                    Top = 144
+                    Width = 116
+                    Height = 52
+                    Tag = 9
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 10 (key S): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 9
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad11: TGLButton
+                    Left = 264
+                    Top = 144
+                    Width = 116
+                    Height = 52
+                    Tag = 10
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 11 (key D): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 10
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad12: TGLButton
+                    Left = 388
+                    Top = 144
+                    Width = 116
+                    Height = 52
+                    Tag = 11
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 12 (key F): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 11
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad13: TGLButton
+                    Left = 16
+                    Top = 202
+                    Width = 116
+                    Height = 52
+                    Tag = 12
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 13 (key Z): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 12
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad14: TGLButton
+                    Left = 140
+                    Top = 202
+                    Width = 116
+                    Height = 52
+                    Tag = 13
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 14 (key X): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 13
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad15: TGLButton
+                    Left = 264
+                    Top = 202
+                    Width = 116
+                    Height = 52
+                    Tag = 14
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 15 (key C): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 14
+                    OnClick = btnFoleyPadClick
+                  end
+                  object btnFoleyPad16: TGLButton
+                    Left = 388
+                    Top = 202
+                    Width = 116
+                    Height = 52
+                    Tag = 15
+                    Caption = 'Pad'
+                    Hint = 'Foley pad 16 (key V): click it, or press its key, to play the loaded sound.'
+                    TabOrder = 15
+                    OnClick = btnFoleyPadClick
+                  end
+                  object lblFoleySelected: TGLLabel
+                    Transparent = True
+                    Left = 540
+                    Top = 30
+                    Width = 360
+                    Height = 15
+                    Caption = 'Pad'
+                  end
+                  object btnFoleyLoad: TGLButton
+                    Left = 540
+                    Top = 54
+                    Width = 130
+                    Height = 26
+                    Caption = 'Load into pad...'
+                    Hint = 'Load a sound file (WAV or MP3) into the selected pad.'
+                    TabOrder = 16
+                    OnClick = btnFoleyLoadClick
+                  end
+                  object btnFoleyClear: TGLButton
+                    Left = 678
+                    Top = 54
+                    Width = 90
+                    Height = 26
+                    Caption = 'Clear pad'
+                    Hint = 'Remove the sound from the selected pad.'
+                    TabOrder = 17
+                    OnClick = btnFoleyClearClick
+                  end
+                  object btnFoleyPlace: TGLButton
+                    Left = 540
+                    Top = 88
+                    Width = 228
+                    Height = 26
+                    Caption = 'Place pad at playhead'
+                    Hint = 'Place the selected pad''s sound on the Timeline at the playhead.'
+                    TabOrder = 18
+                    OnClick = btnFoleyPlaceClick
+                  end
+                  object chkFoleyTimeline: TGLCheck
+                    Left = 540
+                    Top = 126
+                    Width = 370
+                    Height = 19
+                    Caption = 'A pad key adds its sound at the playhead (splits the clip it lands in)'
+                    Checked = True
+                    Hint = 'Pressing a pad key puts that pad''s sound on the selected Timeline lane at the playhead. If the playhead is inside a clip, the clip is split and the sound goes between the two halves.'
+                    TabOrder = 19
+                  end
+                  object chkFoleyRecord: TGLCheck
+                    Left = 540
+                    Top = 156
+                    Width = 370
+                    Height = 19
+                    Caption = 'Record hits while the Timeline plays'
+                    Hint = 'While the Timeline plays, note the playhead time of every pad hit so Add hits to Timeline can lay them out as clips.'
+                    TabOrder = 20
+                  end
+                  object lblFoleyHits: TGLLabel
+                    Transparent = True
+                    Left = 540
+                    Top = 186
+                    Width = 200
+                    Height = 15
+                    Caption = '0 hit(s) recorded'
+                  end
+                  object btnFoleyCommit: TGLButton
+                    Left = 540
+                    Top = 212
+                    Width = 226
+                    Height = 26
+                    Caption = 'Add hits to Timeline'
+                    Hint = 'Add every recorded hit to the Timeline as clips (one track per pad).'
+                    Enabled = False
+                    TabOrder = 21
+                    OnClick = btnFoleyCommitClick
+                  end
+                  object btnFoleyDiscard: TGLButton
+                    Left = 774
+                    Top = 212
+                    Width = 120
+                    Height = 26
+                    Caption = 'Discard hits'
+                    Hint = 'Throw away the recorded hits without adding them.'
+                    Enabled = False
+                    TabOrder = 22
+                    OnClick = btnFoleyDiscardClick
+                  end
+                  object lblFoleyHelp: TGLLabel
+                    Transparent = True
+                    Left = 16
+                    Top = 276
+                    Width = 880
+                    Height = 15
+                    Caption = 'Keyboard: 1 2 3 4 / Q W E R / A S D F / Z X C V play pads 1-16 while this page is showing. Pads play through the Output device chosen in Settings.'
+                  end
+                end
+              end
+            end
+            object tabDockAi: TGLPage
+              Caption = 'AI/SI'
+            object pcAiMain: TGLPageControl
+              Left = 0
+              Top = 0
+              Width = 952
+              Height = 380
+              Align = alTop
+              TabOrder = 0
+              object tsAiSelect: TGLPage
+                Caption = 'AI/SI Selection'
+                object lblAiProvider: TGLLabel
                   Transparent = True
-                  Left = 12
-                  Top = 10
-                  Width = 36
+                  Left = 8
+                  Top = 6
+                  Width = 40
                   Height = 15
-                  Caption = 'PARTS'
-                  Font.Style = [fsBold]
+                  Caption = 'Provider'
+                end
+                object lblAiKey: TGLLabel
+                  Transparent = True
+                  Left = 200
+                  Top = 6
+                  Width = 40
+                  Height = 15
+                  Caption = 'API key'
+                end
+                object lblAiModel: TGLLabel
+                  Transparent = True
+                  Left = 520
+                  Top = 6
+                  Width = 31
+                  Height = 15
+                  Caption = 'Model'
+                end
+                object cboAiProvider: TGLCombo
+                  Left = 8
+                  Top = 22
+                  Width = 180
+                  Height = 23
+                  TabOrder = 0
+                  OnChange = cboAiProviderChange
+                end
+                object edtAiApiKey: TGLEdit
+                  Left = 200
+                  Top = 22
+                  Width = 300
+                  Height = 23
+                  PasswordChar = '*'
+                  TabOrder = 1
+                end
+                object cboAiModel: TGLCombo
+                  Style = csDropDown
+                  Left = 520
+                  Top = 22
+                  Width = 280
+                  Height = 23
+                  TabOrder = 2
+                  OnChange = cboAiModelChange
+                end
+                object btnAiTest: TGLButton
+                  Left = 808
+                  Top = 21
+                  Width = 75
+                  Height = 25
+                  Caption = 'Test'
+                  TabOrder = 3
+                  Hint = 'Verify the stored API key against this provider and fetch its available models'
+                  ShowHint = True
+                  ParentShowHint = False
+                  OnClick = btnAiTestClick
+                end
+                object btnAiSave: TGLButton
+                  Left = 8
+                  Top = 50
+                  Width = 90
+                  Height = 25
+                  Caption = 'Save Key'
+                  TabOrder = 4
+                  OnClick = btnAiSaveClick
+                end
+                object btnAiDelete: TGLButton
+                  Left = 104
+                  Top = 50
+                  Width = 90
+                  Height = 25
+                  Caption = 'Delete Key'
+                  TabOrder = 5
+                  OnClick = btnAiDeleteClick
+                end
+              end
+              object tsAiMcp: TGLPage
+                Caption = 'MCP'
+                object lblAiMcpName: TGLLabel
+                  Transparent = True
+                  Left = 8
+                  Top = 8
+                  Width = 62
+                  Height = 15
+                  Caption = 'MCP name'
+                end
+                object lblAiMcpCmd: TGLLabel
+                  Transparent = True
+                  Left = 200
+                  Top = 8
+                  Width = 106
+                  Height = 15
+                  Caption = 'MCP command line'
+                end
+                object edtAiMcpName: TGLEdit
+                  Left = 8
+                  Top = 24
+                  Width = 180
+                  Height = 23
+                  TabOrder = 0
+                end
+                object edtAiMcpCommand: TGLEdit
+                  Left = 200
+                  Top = 24
+                  Width = 392
+                  Height = 23
+                  TabOrder = 1
+                end
+                object lblAiMcpToken: TGLLabel
+                  Transparent = True
+                  Left = 690
+                  Top = 8
+                  Width = 80
+                  Height = 15
+                  Caption = 'HTTP auth token'
+                end
+                object edtAiMcpToken: TGLEdit
+                  Left = 684
+                  Top = 24
+                  Width = 200
+                  Height = 23
+                  PasswordChar = '*'
+                  TabOrder = 20
+                end
+                object btnAiMcpTest: TGLButton
+                  Left = 600
+                  Top = 23
+                  Width = 75
+                  Height = 25
+                  Caption = 'Test'
+                  TabOrder = 2
+                  OnClick = btnAiMcpTestClick
+                end
+                object lblAiMcpHint: TGLLabel
+                  Transparent = True
+                  Left = 8
+                  Top = 52
+                  Width = 400
+                  Height = 15
+                  Caption = 'MCP command line starting with http:// or https:// connects over HTTP'
+                  Font.Color = clGrayText
+                  Font.Height = -11
                   ParentFont = False
                 end
-                object lblScoreCount: TGLLabel
+                object chkAiMcpExpose: TGLCheck
+                  Left = 8
+                  Top = 76
+                  Width = 260
+                  Height = 19
+                  Caption = 'Expose UDAW as an MCP server'
+                  TabOrder = 3
+                  OnClick = chkAiMcpExposeClick
+                end
+                object lblAiMcpExposePort: TGLLabel
                   Transparent = True
-                  Left = 170
-                  Top = 10
-                  Width = 56
+                  Left = 276
+                  Top = 80
+                  Width = 24
                   Height = 15
-                  Caption = '0 of 0'
+                  Caption = 'Port'
                 end
-                object btnScoreSel: TGLButton
-                  Left = 10
-                  Top = 32
-                  Width = 106
-                  Height = 24
-                  Hint = 'Show only the parts selected in the list'
-                  Caption = 'Selection'
-                  ParentShowHint = False
-                  ShowHint = True
-                  TabOrder = 0
-                  Toggle = True
-                  Down = True
-                  OnChange = ScoreOptionChange
+                object edtAiMcpExposePort: TGLEdit
+                  Left = 304
+                  Top = 76
+                  Width = 60
+                  Height = 23
+                  TabOrder = 4
+                  Text = '8765'
                 end
-                object btnScoreFull: TGLButton
-                  Left = 120
-                  Top = 32
-                  Width = 106
-                  Height = 24
-                  Hint = 'Show every MIDI part as one full score'
-                  Caption = 'Full score'
-                  ParentShowHint = False
-                  ShowHint = True
-                  TabOrder = 1
-                  Toggle = True
-                  OnChange = ScoreOptionChange
+                object chkAiMcpAllowDestructive: TGLCheck
+                  Left = 380
+                  Top = 76
+                  Width = 220
+                  Height = 19
+                  Caption = 'Allow destructive tools'
+                  TabOrder = 5
                 end
-                object btnScoreChords: TGLButton
-                  Left = 10
-                  Top = 62
-                  Width = 106
-                  Height = 24
-                  Hint = 'Print the Chords lane symbols above the staves'
-                  Caption = 'Chord symbols'
-                  ParentShowHint = False
-                  ShowHint = True
-                  TabOrder = 2
-                  Toggle = True
-                  Down = True
-                  OnChange = ScoreOptionChange
+                object lblAiMcpBind: TGLLabel
+                  Transparent = True
+                  Left = 608
+                  Top = 80
+                  Width = 28
+                  Height = 15
+                  Caption = 'Bind'
                 end
-                object btnScoreTab: TGLButton
-                  Left = 120
-                  Top = 62
-                  Width = 106
-                  Height = 24
-                  Hint = 'Show the notes as guitar tablature (six strings, fret numbers, standard tuning) instead of staff notation'
-                  Caption = 'Guitar tab'
+                object edtAiMcpBind: TGLEdit
+                  Left = 640
+                  Top = 76
+                  Width = 100
+                  Height = 23
+                  Hint = '127.0.0.1 = local only. 0.0.0.0 = every network interface (LAN/remote) - use a firewall rule to control who may reach it.'
                   ParentShowHint = False
                   ShowHint = True
                   TabOrder = 6
-                  Toggle = True
-                  OnChange = ScoreOptionChange
+                  Text = '127.0.0.1'
                 end
-              end
-              object pnlScorePartsFoot: TGLPanel
-                Left = 0
-                Top = 0
-                Width = 100
-                Height = 34
-                Align = alBottom
-                BevelOuter = bvNone
-                TabOrder = 9
-                object btnScoreAll: TGLButton
-                  Left = 10
-                  Top = 5
-                  Width = 106
-                  Height = 24
-                  Hint = 'Select every part'
-                  Caption = 'All tracks'
+                object chkAiMcpTls: TGLCheck
+                  Left = 8
+                  Top = 108
+                  Width = 210
+                  Height = 19
+                  Caption = 'HTTPS (TLS) for remote agents'
+                  Hint = 'Adds an encrypted https listener next to the local one, for AI/SI agents outside your network. Needs an auth token (always on), a PEM certificate + key, and a port-forward / tunnel to this PC.'
                   ParentShowHint = False
                   ShowHint = True
-                  TabOrder = 4
-                  OnClick = btnScoreAllClick
+                  TabOrder = 8
                 end
-                object btnScoreNone: TGLButton
-                  Left = 120
-                  Top = 5
-                  Width = 106
-                  Height = 24
-                  Hint = 'Clear the selection'
-                  Caption = 'Clear'
-                  ParentShowHint = False
-                  ShowHint = True
-                  TabOrder = 5
-                  OnClick = btnScoreNoneClick
-                end
-              end
-              object pnlScoreTrk: TGLPanel
-                Left = 0
-                Top = 0
-                Width = 100
-                Height = 192
-                Align = alBottom
-                BevelOuter = bvNone
-                TabOrder = 10
-                object lblScoreTrk: TGLLabel
+                object lblAiMcpTlsPort: TGLLabel
                   Transparent = True
-                  Left = 12
-                  Top = 9
+                  Left = 226
+                  Top = 112
+                  Width = 44
+                  Height = 15
+                  Caption = 'TLS port'
+                end
+                object edtAiMcpTlsPort: TGLEdit
+                  Left = 274
+                  Top = 108
+                  Width = 56
+                  Height = 23
+                  TabOrder = 9
+                  Text = '8766'
+                end
+                object lblAiMcpCert: TGLLabel
+                  Transparent = True
+                  Left = 342
+                  Top = 112
+                  Width = 60
+                  Height = 15
+                  Caption = 'Cert (PEM)'
+                end
+                object edtAiMcpCert: TGLEdit
+                  Left = 406
+                  Top = 108
+                  Width = 210
+                  Height = 23
+                  TabOrder = 10
+                end
+                object lblAiMcpKey: TGLLabel
+                  Transparent = True
+                  Left = 626
+                  Top = 112
                   Width = 56
                   Height = 15
-                  Caption = 'TRACKER'
-                  Font.Style = [fsBold]
-                  ParentFont = False
+                  Caption = 'Key (PEM)'
                 end
-                object tsScoreTrkBy: TGLTabStrip
-                  CurvedTabs = True
-                  TabColor = 7214150
-                  Left = 10
-                  Top = 34
-                  Width = 216
-                  Height = 28
-                  Tabs = 'Channels;Instruments'
-                  Hints = 'Pick the tracker channels to show;Pick the tracker instruments to show'
-                  OnChange = ScoreTrkByChange
+                object edtAiMcpKey: TGLEdit
+                  Left = 686
+                  Top = 108
+                  Width = 210
+                  Height = 23
+                  TabOrder = 11
                 end
-                object lstScoreTrk: TGLList
-                  Left = 10
-                  Top = 66
-                  Width = 216
+                object btnAiMcpTestLocal: TGLButton
+                  Left = 8
+                  Top = 138
+                  Width = 130
+                  Height = 25
+                  Caption = 'Test local'
+                  Hint = 'Connects to this UDAW MCP server on 127.0.0.1 exactly like a local agent would and reports every stage.'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 12
+                  OnClick = btnAiMcpTestLocalClick
+                end
+                object btnAiMcpTestTls: TGLButton
+                  Left = 146
+                  Top = 138
+                  Width = 130
+                  Height = 25
+                  Caption = 'Test TLS / URL'
+                  Hint = 'Tests the URL on the right (blank = the local https listener): DNS/TCP, TLS handshake + certificate, token, MCP handshake, tool list.'
+                  ParentShowHint = False
+                  ShowHint = True
+                  TabOrder = 13
+                  OnClick = btnAiMcpTestTlsClick
+                end
+                object edtAiMcpTestUrl: TGLEdit
+                  Left = 284
+                  Top = 139
+                  Width = 320
+                  Height = 23
+                  TextHint = 'https://your-host.example.com:8766/mcp  (blank = local https listener)'
+                  TabOrder = 14
+                end
+                object chkAiMcpSelfSigned: TGLCheck
+                  Left = 612
+                  Top = 139
+                  Width = 260
+                  Height = 19
+                  Caption = 'Allow self-signed certificate (test only)'
+                  TabOrder = 15
+                end
+                object lstAiMcpServers: TGLList
+                  Left = 0
+                  Top = 240
+                  Width = 952
                   Height = 90
-                  Hint = 'Only the notes on the selected channels / instruments are shown (Ctrl / Shift for several)'
-                  MultiSelect = True
-                  ParentShowHint = False
-                  ShowHint = True
+                  Align = alBottom
+                  ItemHeight = 15
+                  TabOrder = 7
+                  PopupMenu = pmAi
+                end
+              end
+              object tsAiRecordings: TGLPage
+                Caption = 'Recordings'
+                object lblSunoRefHint: TGLLabel
+                  Align = alTop
+                  AlignWithMargins = True
+                  Margins.Left = 8
+                  Margins.Top = 8
+                  Margins.Right = 8
+                  Margins.Bottom = 9
+                  Transparent = True
+                  Left = 8
+                  Top = 8
+                  Width = 900
+                  Height = 15
+                  Caption = 'Recordings available to Suno as reference audio for Cover/Extend (Generation tab). Add existing files or record new ones here.'
+                end
+                object lstSunoRefs: TGLList
+                  Align = alLeft
+                  AlignWithMargins = True
+                  Margins.Left = 8
+                  Margins.Top = 0
+                  Margins.Right = 12
+                  Margins.Bottom = 8
+                  Left = 8
+                  Top = 32
+                  Width = 560
+                  Height = 300
+                  ItemHeight = 15
+                  TabOrder = 0
+                end
+                object btnSunoRefAdd: TGLButton
+                  Left = 580
+                  Top = 32
+                  Width = 150
+                  Height = 25
+                  Caption = 'Add Recording...'
                   TabOrder = 1
-                  OnClick = ScoreTrkListClick
+                  OnClick = btnSunoRefAddClick
                 end
-                object btnScoreTrkAll: TGLButton
-                  Left = 10
-                  Top = 162
-                  Width = 106
-                  Height = 24
-                  Hint = 'Show every channel / instrument'
-                  Caption = 'Show all'
-                  ParentShowHint = False
-                  ShowHint = True
+                object btnSunoRefRemove: TGLButton
+                  Left = 580
+                  Top = 64
+                  Width = 150
+                  Height = 25
+                  Caption = 'Remove'
                   TabOrder = 2
-                  OnClick = btnScoreTrkAllClick
+                  OnClick = btnSunoRefRemoveClick
                 end
-                object btnScoreTrkNone: TGLButton
-                  Left = 120
-                  Top = 162
-                  Width = 106
-                  Height = 24
-                  Hint = 'Hide every channel / instrument'
-                  Caption = 'Hide all'
-                  ParentShowHint = False
-                  ShowHint = True
+                object btnSunoRefRefresh: TGLButton
+                  Left = 580
+                  Top = 96
+                  Width = 150
+                  Height = 25
+                  Caption = 'Refresh from Folder'
                   TabOrder = 3
-                  OnClick = btnScoreTrkNoneClick
+                  OnClick = btnSunoRefRefreshClick
+                end
+                object btnSunoRefRecord: TGLButton
+                  Left = 580
+                  Top = 136
+                  Width = 150
+                  Height = 25
+                  Caption = 'Record'
+                  Hint = 'Records from the current input device at full quality (native channels/rate) into the Recordings folder and adds it to the list above.'
+                  ShowHint = True
+                  ParentShowHint = False
+                  TabOrder = 4
+                  OnClick = btnSunoRefRecordClick
                 end
               end
-              object lstScoreParts: TGLList
-                Align = alClient
-                AlignWithMargins = True
-                Margins.Left = 10
-                Margins.Top = 4
-                Margins.Right = 10
-                Margins.Bottom = 4
-                Left = 10
-                Top = 96
-                Width = 216
-                Height = 270
-                Hint = 'The MIDI parts of the Timeline: select the ones to show (Ctrl / Shift for several)'
-                MultiSelect = True
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 3
-                OnClick = ScoreOptionChange
+              object tsAiLyrics: TGLPage
+                Caption = 'Lyrics and Styles'
+                object lblSunoPrompt: TGLLabel
+                  Transparent = True
+                  Left = 8
+                  Top = 10
+                  Width = 70
+                  Height = 15
+                  Caption = 'Suno prompt'
+                end
+                object lblSunoLyricsCount: TGLLabel
+                  Transparent = True
+                  Left = 180
+                  Top = 206
+                  Width = 120
+                  Height = 15
+                  Caption = '0 / 5000 characters'
+                  Visible = False
+                end
+                object lblSunoStyle: TGLLabel
+                  Left = 8
+                  Top = 233
+                  Anchors = [akLeft, akBottom]
+                  Caption = 'Style / BPM'
+                  Visible = False
+                end
+                object lblSunoTitle: TGLLabel
+                  Left = 8
+                  Top = 326
+                  Anchors = [akLeft, akBottom]
+                  Caption = 'Title'
+                  Visible = False
+                end
+                object edtSunoPrompt: TGLEdit
+                  Left = 88
+                  Top = 7
+                  Width = 640
+                  Height = 23
+                  Anchors = [akLeft, akTop, akRight]
+                  TabOrder = 0
+                end
+                object memSunoLyrics: TGLMemo
+                  ReadOnly = False
+                  Left = 88
+                  Top = 7
+                  Width = 640
+                  Height = 190
+                  Anchors = [akLeft, akTop, akRight, akBottom]
+                  Hint = 'Full song lyrics, e.g. with [Verse]/[Chorus] section tags. Suno custom mode caps this at 5000 characters.'
+                  ShowHint = True
+                  ParentShowHint = False
+                  MaxLength = 5000
+                  PopupMenu = pmSunoLyrics
+                  PlainText = True
+                  ScrollBars = ssVertical
+                  TabOrder = 1
+                  Visible = False
+                  OnChange = memSunoLyricsChange
+                end
+                object chkSunoInstrumental: TGLCheck
+                  Left = 740
+                  Top = 9
+                  Anchors = [akTop, akRight]
+                  Width = 100
+                  Height = 19
+                  Caption = 'Instrumental'
+                  TabOrder = 2
+                end
+                object chkSunoCustom: TGLCheck
+                  Left = 8
+                  Top = 204
+                  Anchors = [akLeft, akBottom]
+                  Width = 160
+                  Height = 19
+                  Caption = 'Custom lyrics/style'
+                  TabOrder = 3
+                  OnClick = chkSunoCustomClick
+                end
+                object edtSunoStyle: TGLMemo
+                  ReadOnly = False
+                  Left = 88
+                  Top = 230
+                  Anchors = [akLeft, akRight, akBottom]
+                  Width = 640
+                  Height = 84
+                  Hint = 'Custom mode style tags, for example: ambient, piano, 120 bpm. Tempo is a prompt hint, not guaranteed alignment.'
+                  ShowHint = True
+                  ParentShowHint = False
+                  PlainText = True
+                  ScrollBars = ssVertical
+                  TabOrder = 4
+                  Visible = False
+                end
+                object edtSunoTitle: TGLEdit
+                  Left = 88
+                  Top = 322
+                  Anchors = [akLeft, akBottom]
+                  Width = 300
+                  Height = 23
+                  TabOrder = 5
+                  Visible = False
+                end
+              end
+              object tsAiGeneration: TGLPage
+                Caption = 'Generation'
+                object pnlAiChat: TGLPanel
+                  Left = 0
+                  Top = 0
+                  Width = 952
+                  Height = 74
+                  Align = alTop
+                  BevelOuter = bvNone
+                  TabOrder = 0
+                  object edtAiPrompt: TGLEdit
+                    Left = 8
+                    Top = 8
+                    Width = 680
+                    Height = 23
+                    TabOrder = 0
+                  end
+                  object btnAiSend: TGLButton
+                    Left = 696
+                    Top = 7
+                    Width = 75
+                    Height = 25
+                    Caption = 'Send'
+                    Default = True
+                    TabOrder = 1
+                    OnClick = btnAiSendClick
+                  end
+                  object btnAiClear: TGLButton
+                    Left = 776
+                    Top = 7
+                    Width = 75
+                    Height = 25
+                    Caption = 'Clear'
+                    TabOrder = 2
+                    OnClick = btnAiClearClick
+                  end
+                  object btnAiGenerateTune: TGLButton
+                    Left = 8
+                    Top = 40
+                    Width = 280
+                    Height = 25
+                    Caption = 'Generate Tune from Browser Library'
+                    Hint = 'Ask the AI/SI to plan and build a full timeline arrangement using files from your Browser folders'
+                    ShowHint = True
+                    ParentShowHint = False
+                    TabOrder = 3
+                    OnClick = btnAiGenerateTuneClick
+                  end
+                end
+                object pnlAiLuma: TGLPanel
+                  Left = 0
+                  Top = 0
+                  Width = 952
+                  Height = 276
+                  Align = alTop
+                  BevelOuter = bvNone
+                  TabOrder = 2
+                  Visible = False
+                  object lblLumaKind: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 14
+                    Caption = 'Media type'
+                  end
+                  object cboLumaKind: TGLCombo
+                    Left = 124
+                    Top = 10
+                    Width = 120
+                    Height = 23
+                    ItemIndex = 0
+                    TabOrder = 0
+                    Items.Strings = (
+                      'Video'
+                      'Image')
+                    OnChange = cboLumaKindChange
+                  end
+                  object lblLumaModel: TGLLabel
+                    Transparent = True
+                    Left = 260
+                    Top = 14
+                    Caption = 'Model'
+                  end
+                  object cboLumaModel: TGLCombo
+                    Left = 304
+                    Top = 10
+                    Width = 150
+                    Height = 23
+                    ItemIndex = 0
+                    TabOrder = 1
+                    Items.Strings = (
+                      'ray-2'
+                      'ray-flash-2')
+                  end
+                  object btnLumaTest: TGLButton
+                    Left = 470
+                    Top = 9
+                    Width = 130
+                    Height = 25
+                    Caption = 'Test (credits)'
+                    TabOrder = 2
+                    OnClick = btnLumaTestClick
+                  end
+                  object lblLumaPrompt: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 46
+                    Caption = 'Prompt'
+                  end
+                  object edtLumaPrompt: TGLEdit
+                    Left = 124
+                    Top = 42
+                    Width = 560
+                    Height = 23
+                    Hint = 'Describe the video or image to generate.'
+                    ShowHint = True
+                    TabOrder = 3
+                  end
+                  object lblLumaAspect: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 78
+                    Caption = 'Aspect ratio'
+                  end
+                  object cboLumaAspect: TGLCombo
+                    Left = 124
+                    Top = 74
+                    Width = 80
+                    Height = 23
+                    ItemIndex = 0
+                    TabOrder = 4
+                    Items.Strings = (
+                      '16:9'
+                      '1:1'
+                      '9:16'
+                      '4:3'
+                      '3:4'
+                      '21:9'
+                      '9:21')
+                  end
+                  object lblLumaResolution: TGLLabel
+                    Transparent = True
+                    Left = 224
+                    Top = 78
+                    Caption = 'Resolution'
+                  end
+                  object cboLumaResolution: TGLCombo
+                    Left = 290
+                    Top = 74
+                    Width = 80
+                    Height = 23
+                    ItemIndex = 1
+                    TabOrder = 5
+                    Items.Strings = (
+                      '540p'
+                      '720p'
+                      '1080p'
+                      '4k')
+                  end
+                  object lblLumaDuration: TGLLabel
+                    Transparent = True
+                    Left = 388
+                    Top = 78
+                    Caption = 'Duration'
+                  end
+                  object cboLumaDuration: TGLCombo
+                    Left = 444
+                    Top = 74
+                    Width = 60
+                    Height = 23
+                    ItemIndex = 0
+                    TabOrder = 6
+                    Items.Strings = (
+                      '5s'
+                      '9s')
+                  end
+                  object lblLumaFormat: TGLLabel
+                    Transparent = True
+                    Left = 224
+                    Top = 78
+                    Caption = 'Format'
+                  end
+                  object cboLumaFormat: TGLCombo
+                    Left = 290
+                    Top = 74
+                    Width = 80
+                    Height = 23
+                    ItemIndex = 0
+                    TabOrder = 7
+                    Items.Strings = (
+                      'jpg'
+                      'png')
+                  end
+                  object chkLumaLoop: TGLCheck
+                    Left = 524
+                    Top = 76
+                    Width = 60
+                    Height = 17
+                    Caption = 'Loop'
+                    TabOrder = 8
+                  end
+                  object lblLumaStartFrame: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 110
+                    Caption = 'Start frame'
+                  end
+                  object edtLumaStartFrame: TGLEdit
+                    Left = 124
+                    Top = 106
+                    Width = 560
+                    Height = 23
+                    Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
+                    ShowHint = True
+                    TabOrder = 9
+                  end
+                  object lblLumaEndFrame: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 142
+                    Caption = 'End frame'
+                  end
+                  object edtLumaEndFrame: TGLEdit
+                    Left = 124
+                    Top = 138
+                    Width = 560
+                    Height = 23
+                    Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
+                    ShowHint = True
+                    TabOrder = 10
+                  end
+                  object lblLumaImageRef: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 110
+                    Caption = 'Image reference'
+                  end
+                  object edtLumaImageRef: TGLEdit
+                    Left = 124
+                    Top = 106
+                    Width = 560
+                    Height = 23
+                    Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
+                    ShowHint = True
+                    TabOrder = 11
+                  end
+                  object lblLumaImageRefWeight: TGLLabel
+                    Transparent = True
+                    Left = 696
+                    Top = 78
+                    Caption = 'Ref. weight'
+                  end
+                  object edtLumaImageRefWeight: TGLEdit
+                    Left = 696
+                    Top = 106
+                    Width = 50
+                    Height = 23
+                    Hint = 'Influence 0.0 - 1.0'
+                    ShowHint = True
+                    TabOrder = 12
+                    Text = '0.85'
+                  end
+                  object lblLumaStyleRef: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 142
+                    Caption = 'Style reference'
+                  end
+                  object edtLumaStyleRef: TGLEdit
+                    Left = 124
+                    Top = 138
+                    Width = 560
+                    Height = 23
+                    Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
+                    ShowHint = True
+                    TabOrder = 13
+                  end
+                  object edtLumaStyleWeight: TGLEdit
+                    Left = 696
+                    Top = 138
+                    Width = 50
+                    Height = 23
+                    Hint = 'Influence 0.0 - 1.0'
+                    ShowHint = True
+                    TabOrder = 14
+                    Text = '0.8'
+                  end
+                  object lblLumaCharRef: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 174
+                    Caption = 'Character reference'
+                  end
+                  object edtLumaCharRef: TGLEdit
+                    Left = 124
+                    Top = 170
+                    Width = 560
+                    Height = 23
+                    Hint = 'Public HTTPS URL of a face/character image (identity0).'
+                    ShowHint = True
+                    TabOrder = 15
+                  end
+                  object lblLumaModifyRef: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 206
+                    Caption = 'Modify image'
+                  end
+                  object edtLumaModifyRef: TGLEdit
+                    Left = 124
+                    Top = 202
+                    Width = 560
+                    Height = 23
+                    Hint = 'Public HTTPS URL of an image to modify with the prompt.'
+                    ShowHint = True
+                    TabOrder = 16
+                  end
+                  object edtLumaModifyWeight: TGLEdit
+                    Left = 696
+                    Top = 202
+                    Width = 50
+                    Height = 23
+                    Hint = 'Closeness to input 0.0 - 1.0 (use 0.0-0.1 for colour changes)'
+                    ShowHint = True
+                    TabOrder = 17
+                    Text = '1.0'
+                  end
+                  object lblLumaConcepts: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 174
+                    Caption = 'Camera concepts'
+                  end
+                  object lstLumaConcepts: TGLList
+                    Left = 124
+                    Top = 170
+                    Width = 440
+                    Height = 60
+                    ItemHeight = 15
+                    MultiSelect = True
+                    TabOrder = 20
+                  end
+                  object btnLumaConcepts: TGLButton
+                    Left = 572
+                    Top = 170
+                    Width = 112
+                    Height = 25
+                    Caption = 'Load concepts'
+                    TabOrder = 21
+                    OnClick = btnLumaConceptsClick
+                  end
+                  object btnLumaOpen: TGLButton
+                    Left = 219
+                    Top = 240
+                    Width = 110
+                    Height = 25
+                    Caption = 'Open result'
+                    Enabled = False
+                    TabOrder = 22
+                    OnClick = btnLumaOpenClick
+                  end
+                  object btnLumaGenerate: TGLButton
+                    Left = 8
+                    Top = 240
+                    Width = 120
+                    Height = 25
+                    Caption = 'Generate'
+                    TabOrder = 18
+                    OnClick = btnLumaGenerateClick
+                  end
+                  object chkLumaTabOnly: TGLCheck
+                    Left = 224
+                    Top = 244
+                    Width = 300
+                    Height = 17
+                    Caption = 'Music Tabular Only (PDF to AI\Rendered)'
+                    TabOrder = 20
+                  end
+                  object btnLumaCancel: TGLButton
+                    Left = 136
+                    Top = 240
+                    Width = 75
+                    Height = 25
+                    Caption = 'Cancel'
+                    TabOrder = 19
+                    OnClick = btnLumaCancelClick
+                  end
+                end
+                object pnlAiSuno: TGLPanel
+                  Left = 0
+                  Top = 74
+                  Width = 952
+                  Height = 180
+                  Align = alTop
+                  BevelOuter = bvNone
+                  TabOrder = 1
+                  object lblSunoBaseUrl: TGLLabel
+                    Transparent = True
+                    Left = 8
+                    Top = 13
+                    Width = 70
+                    Height = 15
+                    Caption = 'Suno proxy'
+                  end
+                  object edtSunoBaseUrl: TGLEdit
+                    Left = 88
+                    Top = 10
+                    Width = 300
+                    Height = 23
+                    Hint = 'Base URL for the selected API type, without /api routes. Local proxy: http://localhost:3000. Managed: use the base URL from your provider dashboard.'
+                    ParentShowHint = False
+                    ShowHint = True
+                    TabOrder = 0
+                    Enabled = False
+                    Text = 'https://apibox.erweima.ai'
+                  end
+                  object btnSunoTest: TGLButton
+                    Left = 396
+                    Top = 9
+                    Width = 75
+                    Height = 25
+                    Caption = 'Test'
+                    TabOrder = 1
+                    OnClick = btnSunoTestClick
+                  end
+                  object lblSunoApi: TGLLabel
+                    Left = 8
+                    Top = 46
+                    Caption = 'API type'
+                  end
+                  object cboSunoApi: TGLCombo
+                    Left = 88
+                    Top = 42
+                    Width = 240
+                    Height = 23
+                    ItemIndex = 1
+                    Enabled = False
+                    Items.Strings = (
+                      'Self-hosted gcui-art/suno-api'
+                      'Managed SunoAPI.org')
+                    TabOrder = 2
+                    OnChange = cboSunoApiChange
+                  end
+                  object lblSunoModel: TGLLabel
+                    Left = 340
+                    Top = 46
+                    Caption = 'Model'
+                  end
+                  object cboSunoModel: TGLCombo
+                    Left = 390
+                    Top = 42
+                    Width = 120
+                    Height = 23
+                    Hint = 'AI/SI model version. V6 is SunoAPI.org'#39's current standard/recommended default. V6_WILD/V6_MINI are current experimental/lightweight variants. Everything below the separator is deprecated - kept only for accounts still on an older tier.'
+                    ShowHint = True
+                    ParentShowHint = False
+                    ItemIndex = 0
+                    Items.Strings = (
+                      'V6'
+                      'V6_WILD'
+                      'V6_MINI'
+                      'V5_5 (deprecated)'
+                      'V5 (deprecated)'
+                      'V4_5PLUS (deprecated)'
+                      'V4_5ALL (deprecated)'
+                      'V4_5 (deprecated)'
+                      'V4 (deprecated)')
+                    Enabled = False
+                    TabOrder = 3
+                  end
+                  object chkSunoAdvanced: TGLCheck
+                    Left = 520
+                    Top = 45
+                    Width = 185
+                    Height = 19
+                    Hint = 'Off (default): UDAW configures the managed API automatically - just paste in your Suno API key. On: pick the API type and edit base URL/model/callback yourself, e.g. to use a self-hosted proxy.'
+                    ShowHint = True
+                    ParentShowHint = False
+                    Caption = 'Advanced (self-hosted)'
+                    TabOrder = 5
+                    OnClick = chkSunoAdvancedClick
+                  end
+                  object lblSunoCallback: TGLLabel
+                    Left = 8
+                    Top = 78
+                    Caption = 'Callback URL'
+                  end
+                  object edtSunoCallback: TGLEdit
+                    Left = 88
+                    Top = 74
+                    Width = 560
+                    Height = 23
+                    Enabled = False
+                    Hint = 'Managed API: your public HTTPS callback endpoint. UDAW polls for results; it does not host a webhook.'
+                    ShowHint = True
+                    ParentShowHint = False
+                    TabOrder = 4
+                  end
+                  object lblSunoRefMode: TGLLabel
+                    Left = 8
+                    Top = 110
+                    Caption = 'Ref Audio'
+                  end
+                  object cboSunoRefMode: TGLCombo
+                    Left = 88
+                    Top = 106
+                    Width = 170
+                    Height = 23
+                    Hint = 'Uses the recording selected on the Recordings tab. None: ordinary text-to-music generation. Cover: restyle the recording. Extend: continue it from the time below.'
+                    ShowHint = True
+                    ParentShowHint = False
+                    ItemIndex = 0
+                    Items.Strings = (
+                      'None'
+                      'Cover (restyle)'
+                      'Extend (continue)')
+                    TabOrder = 6
+                    OnChange = cboSunoRefModeChange
+                  end
+                  object lblSunoContinueAt: TGLLabel
+                    Left = 270
+                    Top = 110
+                    Caption = 'Continue at (s)'
+                    Visible = False
+                  end
+                  object edtSunoContinueAt: TGLEdit
+                    Left = 360
+                    Top = 106
+                    Width = 70
+                    Height = 23
+                    TabOrder = 7
+                    Text = '0'
+                    Visible = False
+                  end
+                  object btnSunoGenerate: TGLButton
+                    Left = 8
+                    Top = 144
+                    Width = 85
+                    Height = 25
+                    Caption = 'Generate'
+                    TabOrder = 8
+                    OnClick = btnSunoGenerateClick
+                  end
+                  object btnSunoCancel: TGLButton
+                    Left = 100
+                    Top = 144
+                    Width = 85
+                    Height = 25
+                    Caption = 'Cancel'
+                    TabOrder = 9
+                    OnClick = btnSunoCancelClick
+                  end
+                end
               end
             end
-            object pnlScoreTop: TGLPanel
-              Left = 236
-              Top = 0
-              Width = 716
-              Height = 38
-              Align = alTop
-              BevelOuter = bvNone
-              TabOrder = 1
-              object ibScoreTools: TGLIconBar
-                Left = 8
-                Top = 5
-                Width = 224
-                Height = 28
-                ShowHint = True
-                Buttons = 'open;save;trash;zoomout;zoomin;play;stop'
-                Hints = 'Load a tracker module onto the score;Save the score as laid out - staff notation or guitar tab - to a PDF file;Delete the selected score parts from the project (asks first);Smaller notation;Larger notation;Play the Timeline from the playhead: a thick line scrolls across the score at the Timeline tempo;Stop playback'
-                OnButtonClick = ibScoreToolsClick
-              end
-              object tsScoreClef: TGLTabStrip
-                CurvedTabs = True
-                TabColor = 7214150
-                Left = 244
-                Top = 5
-                Width = 280
-                Height = 28
-                Tabs = 'AUTO;TREBLE;BASS;GRAND'
-                Hints = 'Choose the staff from the notes;Treble clef only;Bass clef only;Grand staff: treble above bass'
-                OnChange = ScoreOptionChange
-              end
-              object lblScoreQuant: TGLLabel
-                Transparent = True
-                Left = 536
-                Top = 11
-                Width = 52
-                Height = 15
-                Caption = 'Quantize'
-              end
-              object cboScoreQuant: TGLCombo
-                Left = 594
-                Top = 7
-                Width = 80
-                Height = 24
-                Hint = 'The shortest note value the notation is rounded to'
-                ItemIndex = 2
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 0
-                OnChange = ScoreOptionChange
-                Items.Strings = (
-                  '1/4'
-                  '1/8'
-                  '1/16'
-                  '1/32')
-              end
-              object lblScoreZoom: TGLLabel
-                Transparent = True
-                Left = 686
-                Top = 11
-                Width = 40
-                Height = 15
-                Caption = '100%'
-              end
-            end
-            object sbScore: TGLScrollBar
-              Left = 934
-              Top = 38
-              Width = 18
-              Height = 362
-              Align = alRight
-              Kind = sbVertical
-              PageSize = 0
-              TabOrder = 3
-              OnChange = ScoreOptionChange
-            end
-            object sbScoreH: TGLScrollBar
-              Left = 236
-              Top = 382
-              Width = 698
-              Height = 18
-              Align = alBottom
-              Kind = sbHorizontal
-              PageSize = 0
-              TabOrder = 4
-              OnChange = ScoreOptionChange
-            end
-            object pbScore: TGLView
-              Left = 236
-              Top = 38
-              Width = 698
-              Height = 362
-              Align = alClient
-              OnMouseDown = pbScoreMouseDown
-              OnMouseWheel = pbScoreMouseWheel
-              OnPaint = pbScorePaint
-            end
-          end
-          object tabInst: TGLPage
-            Caption = 'Instrument'
-            object lblDrumTitle: TGLLabel
-              Transparent = True
-              Left = 18
-              Top = 14
-              Width = 110
-              Height = 20
-              Caption = 'Drum Machine'
-              Font.Height = -16
-              Font.Style = [fsBold]
-              ParentFont = False
-            end
-            object lblDrumHint: TGLLabel
-              Transparent = True
-              Left = 160
-              Top = 18
-              Width = 420
-              Height = 15
-              Caption = 'Every MIDI note 0 to 127 has a pad - scroll the range, click a pad to play it, drop a WAV file on it or press its + to load one'
-            end
-            object pbDrumMap: TGLView
-              Left = 18
-              Top = 48
-              Width = 44
-              Height = 300
-              Cursor = crHandPoint
-              OnMouseDown = pbDrumMapMouseDown
-              OnMouseMove = pbDrumMapMouseMove
-              OnMouseUp = pbDrumMapMouseUp
-              OnPaint = pbDrumMapPaint
-            end
-            object pbDrumPads: TGLView
-              Left = 70
-              Top = 48
-              Width = 440
-              Height = 300
-              Cursor = crHandPoint
-              OnDropFiles = pbDrumPadsDropFiles
-              OnDblClick = pbDrumPadsDblClick
-              OnMouseDown = pbDrumPadsMouseDown
-              OnMouseUp = pbDrumPadsMouseUp
-              OnMouseWheel = pbDrumPadsMouseWheel
-              OnPaint = pbDrumPadsPaint
-            end
-            object sbDrumRange: TGLScrollBar
-              Left = 514
-              Top = 48
-              Width = 18
-              Height = 300
-              Kind = sbVertical
-              Max = 31
-              PageSize = 4
-              Position = 19
-              LargeChange = 4
-              TabOrder = 1
-              OnChange = sbDrumRangeChange
-            end
-            object sbDrumPanels: TGLScrollBox
-              Left = 544
-              Top = 48
-              Width = 400
-              Height = 340
-              TabOrder = 0
-              object lblDrumEmpty: TGLLabel
-                Transparent = True
-                Left = 14
-                Top = 14
-                Width = 360
-                Height = 60
-                WordWrap = True
-                Caption = 'Load a WAV file onto a pad (double-click it, press its + or drop a file on it) and the instrument gets its own panel here, with a graph of its sound.'
-              end
-            end
-          end
-          object tabPattern: TGLPage
-            Caption = 'Pattern'
-            object pnlPatTop: TGLPanel
+            object pnlAiVoice: TGLPanel
               Left = 0
-              Top = 0
-              Width = 952
-              Height = 108
-              Align = alTop
-              BevelOuter = bvNone
-              TabOrder = 0
-              object cboPatSel: TGLCombo
-                Left = 10
-                Top = 8
-                Width = 210
-                Height = 24
-                Hint = 'The rhythm patterns of this project'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 0
-                OnChange = cboPatSelChange
-              end
-              object ibPatFile: TGLIconBar
-                Left = 228
-                Top = 6
-                Width = 184
-                Height = 28
-                ShowHint = True
-                Buttons = 'add;clone;trash;save;saveas;load'
-                Hints = 'New pattern (a row for every loaded drum pad);Clone this pattern;Delete this pattern;Save this pattern, with its instruments, as a preset file;Save this pattern as a preset file under a name you choose;Load a pattern preset into this project'
-                OnButtonClick = ibPatFileClick
-              end
-              object ibPatPlay: TGLIconBar
-                Left = 870
-                Top = 6
-                Width = 34
-                Height = 28
-                Anchors = [akTop, akRight]
-                ShowHint = True
-                Buttons = 'play'
-                Hints = 'Play the pattern in a loop through the drum machine'
-                OnButtonClick = ibPatPlayClick
-              end
-              object ibPatPlace: TGLIconBar
-                Left = 908
-                Top = 6
-                Width = 34
-                Height = 28
-                Anchors = [akTop, akRight]
-                ShowHint = True
-                Buttons = 'place'
-                Hints = 'Put the pattern on the Timeline at the playhead as a clip; edit the pattern later and every copy follows'
-                OnButtonClick = ibPatPlaceClick
-              end
-              object lblPatName: TGLLabel
-                Transparent = True
-                Left = 10
-                Top = 47
-                Width = 40
-                Height = 15
-                Caption = 'Name'
-              end
-              object edtPatName: TGLEdit
-                Left = 56
-                Top = 42
-                Width = 170
-                Height = 24
-                TabOrder = 9
-                TextHint = 'Pattern name'
-                OnChange = edtPatNameChange
-              end
-              object lblPatLen: TGLLabel
-                Transparent = True
-                Left = 240
-                Top = 47
-                Width = 46
-                Height = 15
-                Caption = 'Length'
-              end
-              object ibPatLen: TGLIconBar
-                Left = 292
-                Top = 40
-                Width = 64
-                Height = 28
-                ShowHint = True
-                Buttons = 'minus;add'
-                Hints = 'One beat shorter;One beat longer'
-                OnButtonClick = ibPatLenClick
-              end
-              object lblPatLenVal: TGLLabel
-                Transparent = True
-                Left = 364
-                Top = 47
-                Width = 28
-                Height = 15
-                Caption = '32'
-              end
-              object lblPatBars: TGLLabel
-                Transparent = True
-                Left = 396
-                Top = 47
-                Width = 110
-                Height = 15
-                Caption = 'rows / 2.00 bars'
-              end
-              object tsPatRes: TGLTabStrip
-                Left = 512
-                Top = 40
-                Width = 170
-                Height = 28
-                Tabs = '1/8;1/16;1/32'
-                Hints = 'Eighth-note steps;Sixteenth-note steps;Thirty-second-note steps'
-                OnChange = tsPatResChange
-              end
-              object cboPatAdd: TGLCombo
-                Left = 696
-                Top = 42
-                Width = 150
-                Height = 24
-                Hint = 'A loaded drum pad to add as a row'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 12
-              end
-              object ibPatRow: TGLIconBar
-                Left = 852
-                Top = 40
-                Width = 64
-                Height = 28
-                ShowHint = True
-                Buttons = 'addrow;delrow'
-                Hints = 'Add the chosen pad (or the pad selected on the Instrument page) as an instrument row;Remove the selected instrument row'
-                OnButtonClick = ibPatRowClick
-              end
-              object ibPatTools: TGLIconBar
-                Left = 10
-                Top = 74
-                Width = 184
-                Height = 28
-                ShowHint = True
-                Buttons = 'fill;euclid;left;right;random;clear'
-                Hints = 'Fill: hit every n-th step on the selected row (every row if none is selected);Euclid: spread a number of hits evenly over the selected row;Rotate the steps one to the left;Rotate the steps one to the right;Random: scatter hits over the selected row (every row if none is selected);Clear: remove every hit from the selected row (every row if none is selected)'
-                OnButtonClick = ibPatToolsClick
-              end
-              object lblPatInfo: TGLLabel
-                Transparent = True
-                Left = 206
-                Top = 81
-                Width = 734
-                Height = 15
-                Caption = ''
-              end
-            end
-            object sbPatV: TGLScrollBar
-              Left = 934
-              Top = 108
-              Width = 18
-              Height = 176
-              Align = alRight
-              Kind = sbVertical
-              PageSize = 0
-              TabOrder = 1
-              OnChange = sbPatChange
-            end
-            object sbPatH: TGLScrollBar
-              Left = 0
-              Top = 284
-              Width = 934
-              Height = 16
-              Align = alBottom
-              Kind = sbHorizontal
-              PageSize = 0
-              TabOrder = 2
-              OnChange = sbPatChange
-            end
-            object pbPattern: TGLView
-              Left = 0
-              Top = 108
-              Width = 934
-              Height = 176
-              Align = alClient
-              Cursor = crHandPoint
-              OnMouseDown = pbPatternMouseDown
-              OnMouseMove = pbPatternMouseMove
-              OnMouseUp = pbPatternMouseUp
-              OnMouseWheel = pbPatternMouseWheel
-              OnPaint = pbPatternPaint
-            end
-          end
-          object tabTracker: TGLPage
-            Caption = 'Tracker'
-            ImageIndex = 12
-            DoubleBuffered = True
-            ParentDoubleBuffered = False
-            object pgcTrk: TGLPageControl
-              Left = 0
-              Top = 0
-              Width = 952
-              Height = 556
-              ActivePage = tsTrkModule
-              Align = alClient
-              TabOrder = 0
-            object tsTrkModule: TGLPage
-              Caption = 'Module'
-            object pnlTrkTop: TGLPanel
-              Left = 0
-              Top = 0
-              Width = 952
-              Height = 42
-              Align = alTop
-              BevelOuter = bvNone
-              TabOrder = 0
-              object lblTrkPattern: TGLLabel
-                Transparent = True
-                Left = 10
-                Top = 14
-                Width = 41
-                Height = 15
-                Caption = 'Pattern'
-              end
-              object cboTrkPattern: TGLCombo
-                Left = 62
-                Top = 9
-                Width = 190
-                Height = 24
-                TabOrder = 0
-                OnChange = cboTrkPatternChange
-              end
-              object lblTrkSpeed: TGLLabel
-                Transparent = True
-                Left = 272
-                Top = 14
-                Width = 34
-                Height = 15
-                Caption = 'Speed'
-              end
-              object edtTrkSpeed: TGLEdit
-                Left = 312
-                Top = 9
-                Width = 40
-                Height = 24
-                TabOrder = 1
-                Text = '6'
-              end
-              object lblTrkBPM: TGLLabel
-                Transparent = True
-                Left = 368
-                Top = 14
-                Width = 27
-                Height = 15
-                Caption = 'BPM'
-              end
-              object edtTrkBPM: TGLEdit
-                Left = 400
-                Top = 9
-                Width = 48
-                Height = 24
-                TabOrder = 2
-                Text = '125'
-              end
-              object lblTrkInstrPick: TGLLabel
-                Transparent = True
-                Left = 468
-                Top = 14
-                Width = 60
-                Height = 15
-                Caption = 'Instrument'
-              end
-              object cboTrkInstr: TGLCombo
-                Left = 534
-                Top = 9
-                Width = 240
-                Height = 24
-                Hint = 'The instrument notes are entered with; lists every instrument loaded in this module'
-                TabOrder = 3
-                OnChange = cboTrkInstrPickChange
-              end
-            end
-            object pnlTrkSupport: TGLPanel
-              Left = 0
-              Top = 500
-              Width = 952
-              Height = 32
-              Align = alBottom
-              BevelOuter = bvNone
-              TabOrder = 3
-              object lblTrkSupport: TGLLabel
-                Left = 0
-                Top = 0
-                Width = 740
-                Height = 32
-                Align = alClient
-                AutoSize = False
-                Caption = 'Dedicated tracker-module editing: visit and support ModPlug.'
-                Layout = tlCenter
-                WordWrap = True
-              end
-              object btnTrkSupport: TGLButton
-                Left = 740
-                Top = 0
-                Width = 212
-                Height = 32
-                Align = alRight
-                Caption = 'Visit www.modplug.com'
-                TabOrder = 0
-                OnClick = btnTrkSupportClick
-              end
-            end
-            object pnlTrkTransport: TGLPanel
-              Left = 0
-              Top = 42
-              Width = 952
-              Height = 36
-              Align = alTop
-              BevelOuter = bvNone
-              TabOrder = 5
-              object ibTrkTransport: TGLIconBar
-                Left = 8
-                Top = 4
-                Width = 272
-                Height = 28
-                ShowHint = True
-                Buttons = 'tostart;play;playpat;pause;stop;toend;record;totimeline'
-                Hints = 'Back to the beginning of the module;Play the module from the beginning (or continue after Pause);Play the pattern chosen in the pattern list on its own, over and over until Stop;Pause: hold the position, Play continues from there;Stop playback;Go to the last pattern in the module;Record: open the Recording view to arm tracks and record takes;Add the current tracker module to the Timeline (asks whether to keep it live as notation or convert it to an audio clip)'
-                CellWidth = 34
-                OnButtonClick = ibTrkTransportClick
-              end
-              object btnTrkMidiRec: TGLButton
-                Left = 296
-                Top = 5
-                Width = 140
-                Height = 26
-                Hint = 'MIDI record: notes played on the MIDI keyboard chosen under Settings are written into the pattern grid - at the cursor while stopped (chords fill neighbouring channels), at the playing row while the module plays'
-                Caption = 'MIDI record'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 1
-                Toggle = True
-              end
-            end
-            object pnlTrkSequence: TGLPanel
-              Left = 0
-              Top = 78
+              Top = 380
               Width = 952
               Height = 40
               Align = alTop
               BevelOuter = bvNone
-              TabOrder = 2
-              DoubleBuffered = True
-              ParentDoubleBuffered = False
-              object pbTrkSequence: TGLView
-                Left = 0
-                Top = 0
-                Width = 952
-                Height = 24
-                Align = alTop
-                Hint = 'Sequence: click a step to jump to its pattern, Ctrl+click to select several (Export Pattern to Timeline renders them together), double-click to change the pattern a step plays, right-click for more'
-                ShowHint = True
-                PopupMenu = pmTrkSeq
-                OnDblClick = pbTrkSequenceDblClick
-                OnMouseDown = pbTrkSequenceMouseDown
-                OnPaint = pbTrkSequencePaint
-              end
-              object sbTrkSeq: TGLScrollBar
-                Left = 0
-                Top = 24
-                Width = 952
-                Height = 16
-                Align = alTop
-                PageSize = 0
-                TabOrder = 0
-                OnChange = sbTrkSeqChange
-              end
-            end
-            object pbTracker: TGLView
-              Left = 0
-              Top = 138
-              Width = 952
-              Height = 227
-              Align = alClient
-              PopupMenu = pmTrkGrid
-              WantArrows = True
-              OnMouseDown = pbTrackerMouseDown
-              OnMouseMove = pbTrackerMouseMove
-              OnMouseLeave = pbTrackerMouseLeave
-              OnMouseUp = pbTrackerMouseUp
-              OnMouseWheel = pbTrackerMouseWheel
-              OnPaint = pbTrackerPaint
-            end
-            object sbTrkChn: TGLScrollBar
-              Left = 0
-              Top = 365
-              Width = 952
-              Height = 16
-              Align = alBottom
-              PageSize = 0
-              TabOrder = 4
-              OnChange = sbTrkChnChange
-            end
-            end
-            object tsTrkInstruments: TGLPage
-              Caption = 'Instruments'
-              object pnlTrkInstrTop: TGLPanel
-                Left = 0
-                Top = 0
-                Width = 952
-                Height = 44
-                Align = alTop
-                BevelOuter = bvNone
-                TabOrder = 0
-                object lblTrkInstrSel: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 12
-                  Width = 56
-                  Height = 15
-                  Caption = 'Instrument'
-                end
-                object cboTrkInstrSel: TGLCombo
-                  Left = 76
-                  Top = 8
-                  Width = 260
-                  Height = 23
-                  TabOrder = 0
-                  OnChange = cboTrkInstrSelChange
-                end
-                object ibTrkInstr: TGLIconBar
-                  Left = 348
-                  Top = 6
-                  Width = 96
-                  Height = 28
-                  ShowHint = True
-                  Buttons = 'add;export;wavedit'
-                  Hints = 'Add to Timeline: bounce this instrument to a WAV in the Recordings folder and place it on the Timeline;Export sample: save as WAV, raw PCM or FLAC (WAV keeps loop points and all applied settings);WAV editor: edit this instrument''s sound (or double-click the waveform)'
-                  OnButtonClick = ibTrkInstrClick
-                end
-              end
-              object pnlTrkInstrInfo: TGLPanel
-                Left = 0
-                Top = 44
-                Width = 952
-                Height = 24
-                Align = alTop
-                BevelOuter = bvNone
-                TabOrder = 1
-                object lblTrkInstrInfo: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 4
-                  Width = 300
-                  Height = 15
-                  Caption = '(no instrument selected)'
-                end
-              end
-              object pbTrkInstrWave: TGLView
-                Left = 0
-                Top = 68
-                Width = 952
-                Height = 488
-                Align = alClient
-                OnPaint = pbTrkInstrWavePaint
-                OnDblClick = pbTrkInstrWaveDblClick
-              end
-            end
-            end
-          end
-          object tabRecording: TGLPage
-            Caption = 'Recording'
-            ImageIndex = 9
-            object sbRecording: TGLScrollBox
-              Left = 0
-              Top = 0
-              Width = 952
-              Height = 531
-              Align = alClient
-              TabOrder = 0
-              object grpRecSetup: TGLGroup
-                Left = 8
-                Top = 4
-                Width = 920
-                Height = 134
-                Anchors = [akLeft, akTop, akRight]
-                Caption = ' Take Settings '
-                TabOrder = 0
-                  object lblRecFormat: TGLLabel
-                    Transparent = True
-                    Left = 16
-                    Top = 29
-                    Width = 80
-                    Height = 15
-                    Caption = 'Take format'
-                  end
-                  object cboRecFormat: TGLCombo
-                    Left = 104
-                    Top = 26
-                    Width = 130
-                    Height = 23
-                    TabOrder = 0
-                  end
-                  object lblRecPreRoll: TGLLabel
-                    Transparent = True
-                    Left = 262
-                    Top = 29
-                    Width = 70
-                    Height = 15
-                    Caption = 'Pre-roll (s)'
-                  end
-                  object edtRecPreRoll: TGLEdit
-                    Left = 340
-                    Top = 26
-                    Width = 56
-                    Height = 23
-                    TabOrder = 1
-                    Text = '0'
-                  end
-                  object lblRecCountIn: TGLLabel
-                    Transparent = True
-                    Left = 424
-                    Top = 29
-                    Width = 100
-                    Height = 15
-                    Caption = 'Count-in (beats)'
-                  end
-                  object edtRecCountIn: TGLEdit
-                    Left = 530
-                    Top = 26
-                    Width = 56
-                    Height = 23
-                    TabOrder = 2
-                    Text = '0'
-                  end
-                  object chkRecMonitor: TGLCheck
-                    Left = 628
-                    Top = 28
-                    Width = 190
-                    Height = 19
-                    Caption = 'Input monitoring'
-                    TabOrder = 3
-                  end
-                  object lblRecPunch: TGLLabel
-                    Transparent = True
-                    Left = 16
-                    Top = 65
-                    Width = 80
-                    Height = 15
-                    Caption = 'Punch'
-                  end
-                  object cboRecPunch: TGLCombo
-                    Left = 104
-                    Top = 62
-                    Width = 130
-                    Height = 23
-                    TabOrder = 4
-                    OnChange = cboRecPunchChange
-                  end
-                  object lblRecPunchIn: TGLLabel
-                    Transparent = True
-                    Left = 262
-                    Top = 65
-                    Width = 70
-                    Height = 15
-                    Caption = 'Punch in (s)'
-                  end
-                  object edtRecPunchIn: TGLEdit
-                    Left = 340
-                    Top = 62
-                    Width = 56
-                    Height = 23
-                    TabOrder = 5
-                    Text = '1.0'
-                  end
-                  object lblRecPunchOut: TGLLabel
-                    Transparent = True
-                    Left = 424
-                    Top = 65
-                    Width = 100
-                    Height = 15
-                    Caption = 'Punch out (s)'
-                  end
-                  object edtRecPunchOut: TGLEdit
-                    Left = 530
-                    Top = 62
-                    Width = 56
-                    Height = 23
-                    TabOrder = 6
-                    Text = '3.0'
-                  end
-                  object chkRecLoop: TGLCheck
-                    Left = 16
-                    Top = 100
-                    Width = 120
-                    Height = 19
-                    Caption = 'Loop-record'
-                    TabOrder = 7
-                    OnClick = chkRecLoopClick
-                  end
-                  object lblRecLoopStart: TGLLabel
-                    Transparent = True
-                    Left = 262
-                    Top = 101
-                    Width = 76
-                    Height = 15
-                    Caption = 'Loop start (s)'
-                  end
-                  object edtRecLoopStart: TGLEdit
-                    Left = 340
-                    Top = 98
-                    Width = 56
-                    Height = 23
-                    TabOrder = 8
-                    Text = '0'
-                  end
-                  object lblRecLoopEnd: TGLLabel
-                    Transparent = True
-                    Left = 424
-                    Top = 101
-                    Width = 100
-                    Height = 15
-                    Caption = 'Loop end (s)'
-                  end
-                  object edtRecLoopEnd: TGLEdit
-                    Left = 530
-                    Top = 98
-                    Width = 56
-                    Height = 23
-                    TabOrder = 9
-                    Text = '2'
-                  end
-              end
-              object grpRecControl: TGLGroup
-                Left = 8
-                Top = 146
-                Width = 920
-                Height = 122
-                Anchors = [akLeft, akTop, akRight]
-                Caption = ' Record '
-                TabOrder = 1
-                  object btnRecArm: TGLButton
-                    Left = 16
-                    Top = 26
-                    Width = 200
-                    Height = 32
-                    Caption = 'Start live recording'
-                    TabOrder = 10
-                    OnClick = btnRecArmClick
-                  end
-                  object btnRecCommit: TGLButton
-                    Left = 224
-                    Top = 26
-                    Width = 170
-                    Height = 32
-                    Caption = 'Retry adding take'
-                    TabOrder = 11
-                    OnClick = btnRecCommitClick
-                  end
-                  object btnRecSaved: TGLButton
-                    Left = 402
-                    Top = 26
-                    Width = 170
-                    Height = 32
-                    Caption = 'Add saved audio...'
-                    TabOrder = 12
-                    OnClick = btnRecSavedClick
-                  end
-                  object btnRecScan: TGLButton
-                    Left = 580
-                    Top = 26
-                    Width = 210
-                    Height = 32
-                    Caption = 'Recover unfinished takes'
-                    TabOrder = 13
-                    OnClick = btnRecScanClick
-                  end
-                  object lblRecMicState: TGLLabel
-                    Transparent = True
-                    Left = 16
-                    Top = 70
-                    Width = 888
-                    Height = 18
-                    Anchors = [akLeft, akTop, akRight]
-                    Caption = 'Microphone: OFF | Recording: OFF'
-                    ShowHint = True
-                  end
-                  object lblRecDestination: TGLLabel
-                    Transparent = True
-                    Left = 16
-                    Top = 92
-                    Width = 888
-                    Height = 18
-                    Anchors = [akLeft, akTop, akRight]
-                    Caption = 'Full input until Stop. Select input device and enable capture in Settings.'
-                  end
-              end
-              object grpRecTakes: TGLGroup
-                Left = 8
-                Top = 276
-                Width = 920
-                Height = 372
-                Anchors = [akLeft, akTop, akRight]
-                Caption = ' Takes and Comp '
-                TabOrder = 2
-                  object btnRecSaveTake: TGLButton
-                    Left = 16
-                    Top = 24
-                    Width = 190
-                    Height = 28
-                    Caption = 'Save Selected Take As...'
-                    TabOrder = 14
-                    OnClick = btnRecSaveTakeClick
-                  end
-                  object btnRecAddTakeToTimeline: TGLButton
-                    Left = 214
-                    Top = 24
-                    Width = 220
-                    Height = 28
-                    Caption = 'Add Selected Take to Timeline'
-                    TabOrder = 15
-                    OnClick = btnRecAddTakeToTimelineClick
-                  end
-                  object btnRecCommitComp: TGLButton
-                    Left = 442
-                    Top = 24
-                    Width = 190
-                    Height = 28
-                    Caption = 'Commit Comp to Timeline'
-                    TabOrder = 16
-                    OnClick = btnRecCommitCompClick
-                  end
-                  object btnRecResetComp: TGLButton
-                    Left = 640
-                    Top = 24
-                    Width = 120
-                    Height = 28
-                    Caption = 'Reset Comp'
-                    TabOrder = 17
-                    OnClick = btnRecResetCompClick
-                  end
-                  object pbRecTakes: TGLView
-                    Left = 12
-                    Top = 60
-                    Width = 896
-                    Height = 300
-                    Anchors = [akLeft, akTop, akRight]
-                    PopupMenu = pmRecording
-                    OnMouseDown = pbRecTakesMouseDown
-                    OnMouseMove = pbRecTakesMouseMove
-                    OnMouseUp = pbRecTakesMouseUp
-                    OnPaint = pbRecTakesPaint
-                  end
-              end
-            end
-          end
-          object tabDockAi: TGLPage
-            Caption = 'AI'
-          object pcAiMain: TGLPageControl
-            Left = 0
-            Top = 0
-            Width = 952
-            Height = 380
-            Align = alTop
-            TabOrder = 0
-            object tsAiSelect: TGLPage
-              Caption = 'AI Selection'
-              object lblAiProvider: TGLLabel
-                Transparent = True
-                Left = 8
-                Top = 6
-                Width = 40
-                Height = 15
-                Caption = 'Provider'
-              end
-              object lblAiKey: TGLLabel
-                Transparent = True
-                Left = 200
-                Top = 6
-                Width = 40
-                Height = 15
-                Caption = 'API key'
-              end
-              object lblAiModel: TGLLabel
-                Transparent = True
-                Left = 520
-                Top = 6
-                Width = 31
-                Height = 15
-                Caption = 'Model'
-              end
-              object cboAiProvider: TGLCombo
-                Left = 8
-                Top = 22
-                Width = 180
-                Height = 23
-                TabOrder = 0
-                OnChange = cboAiProviderChange
-              end
-              object edtAiApiKey: TGLEdit
-                Left = 200
-                Top = 22
-                Width = 300
-                Height = 23
-                PasswordChar = '*'
-                TabOrder = 1
-              end
-              object cboAiModel: TGLCombo
-                Style = csDropDown
-                Left = 520
-                Top = 22
-                Width = 280
-                Height = 23
-                TabOrder = 2
-                OnChange = cboAiModelChange
-              end
-              object btnAiTest: TGLButton
-                Left = 808
-                Top = 21
-                Width = 75
-                Height = 25
-                Caption = 'Test'
-                TabOrder = 3
-                Hint = 'Verify the stored API key against this provider and fetch its available models'
-                ShowHint = True
-                ParentShowHint = False
-                OnClick = btnAiTestClick
-              end
-              object btnAiSave: TGLButton
-                Left = 8
-                Top = 50
-                Width = 90
-                Height = 25
-                Caption = 'Save Key'
-                TabOrder = 4
-                OnClick = btnAiSaveClick
-              end
-              object btnAiDelete: TGLButton
-                Left = 104
-                Top = 50
-                Width = 90
-                Height = 25
-                Caption = 'Delete Key'
-                TabOrder = 5
-                OnClick = btnAiDeleteClick
-              end
-            end
-            object tsAiMcp: TGLPage
-              Caption = 'MCP'
-              object lblAiMcpName: TGLLabel
-                Transparent = True
-                Left = 8
-                Top = 8
-                Width = 62
-                Height = 15
-                Caption = 'MCP name'
-              end
-              object lblAiMcpCmd: TGLLabel
-                Transparent = True
-                Left = 200
-                Top = 8
-                Width = 106
-                Height = 15
-                Caption = 'MCP command line'
-              end
-              object edtAiMcpName: TGLEdit
-                Left = 8
-                Top = 24
-                Width = 180
-                Height = 23
-                TabOrder = 0
-              end
-              object edtAiMcpCommand: TGLEdit
-                Left = 200
-                Top = 24
-                Width = 392
-                Height = 23
-                TabOrder = 1
-              end
-              object lblAiMcpToken: TGLLabel
-                Transparent = True
-                Left = 690
-                Top = 8
-                Width = 80
-                Height = 15
-                Caption = 'HTTP auth token'
-              end
-              object edtAiMcpToken: TGLEdit
-                Left = 684
-                Top = 24
-                Width = 200
-                Height = 23
-                PasswordChar = '*'
-                TabOrder = 20
-              end
-              object btnAiMcpTest: TGLButton
-                Left = 600
-                Top = 23
-                Width = 75
-                Height = 25
-                Caption = 'Test'
-                TabOrder = 2
-                OnClick = btnAiMcpTestClick
-              end
-              object lblAiMcpHint: TGLLabel
-                Transparent = True
-                Left = 8
-                Top = 52
-                Width = 400
-                Height = 15
-                Caption = 'MCP command line starting with http:// or https:// connects over HTTP'
-                Font.Color = clGrayText
-                Font.Height = -11
-                ParentFont = False
-              end
-              object chkAiMcpExpose: TGLCheck
-                Left = 8
-                Top = 78
-                Width = 260
-                Height = 19
-                Caption = 'Expose UDAW as an MCP server'
-                TabOrder = 3
-                OnClick = chkAiMcpExposeClick
-              end
-              object lblAiMcpExposePort: TGLLabel
-                Transparent = True
-                Left = 276
-                Top = 80
-                Width = 24
-                Height = 15
-                Caption = 'Port'
-              end
-              object edtAiMcpExposePort: TGLEdit
-                Left = 304
-                Top = 76
-                Width = 60
-                Height = 23
-                TabOrder = 4
-                Text = '8765'
-              end
-              object chkAiMcpAllowDestructive: TGLCheck
-                Left = 380
-                Top = 78
-                Width = 220
-                Height = 19
-                Caption = 'Allow destructive tools'
-                TabOrder = 5
-              end
-              object lblAiMcpBind: TGLLabel
-                Transparent = True
-                Left = 608
-                Top = 80
-                Width = 28
-                Height = 15
-                Caption = 'Bind'
-              end
-              object edtAiMcpBind: TGLEdit
-                Left = 640
-                Top = 76
-                Width = 100
-                Height = 23
-                Hint = '127.0.0.1 = local only. 0.0.0.0 = every network interface (LAN/remote) - use a firewall rule to control who may reach it.'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 6
-                Text = '127.0.0.1'
-              end
-              object chkAiMcpTls: TGLCheck
-                Left = 8
-                Top = 110
-                Width = 210
-                Height = 19
-                Caption = 'HTTPS (TLS) for remote agents'
-                Hint = 'Adds an encrypted https listener next to the local one, for AI agents outside your network. Needs an auth token (always on), a PEM certificate + key, and a port-forward / tunnel to this PC.'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 8
-              end
-              object lblAiMcpTlsPort: TGLLabel
-                Transparent = True
-                Left = 226
-                Top = 112
-                Width = 44
-                Height = 15
-                Caption = 'TLS port'
-              end
-              object edtAiMcpTlsPort: TGLEdit
-                Left = 274
-                Top = 108
-                Width = 56
-                Height = 23
-                TabOrder = 9
-                Text = '8766'
-              end
-              object lblAiMcpCert: TGLLabel
-                Transparent = True
-                Left = 342
-                Top = 112
-                Width = 60
-                Height = 15
-                Caption = 'Cert (PEM)'
-              end
-              object edtAiMcpCert: TGLEdit
-                Left = 406
-                Top = 108
-                Width = 210
-                Height = 23
-                TabOrder = 10
-              end
-              object lblAiMcpKey: TGLLabel
-                Transparent = True
-                Left = 626
-                Top = 112
-                Width = 56
-                Height = 15
-                Caption = 'Key (PEM)'
-              end
-              object edtAiMcpKey: TGLEdit
-                Left = 686
-                Top = 108
-                Width = 210
-                Height = 23
-                TabOrder = 11
-              end
-              object btnAiMcpTestLocal: TGLButton
-                Left = 8
-                Top = 138
-                Width = 130
-                Height = 25
-                Caption = 'Test local'
-                Hint = 'Connects to this UDAW MCP server on 127.0.0.1 exactly like a local agent would and reports every stage.'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 12
-                OnClick = btnAiMcpTestLocalClick
-              end
-              object btnAiMcpTestTls: TGLButton
-                Left = 146
-                Top = 138
-                Width = 130
-                Height = 25
-                Caption = 'Test TLS / URL'
-                Hint = 'Tests the URL on the right (blank = the local https listener): DNS/TCP, TLS handshake + certificate, token, MCP handshake, tool list.'
-                ParentShowHint = False
-                ShowHint = True
-                TabOrder = 13
-                OnClick = btnAiMcpTestTlsClick
-              end
-              object edtAiMcpTestUrl: TGLEdit
-                Left = 284
-                Top = 139
-                Width = 320
-                Height = 23
-                TextHint = 'https://your-host.example.com:8766/mcp  (blank = local https listener)'
-                TabOrder = 14
-              end
-              object chkAiMcpSelfSigned: TGLCheck
-                Left = 612
-                Top = 141
-                Width = 260
-                Height = 19
-                Caption = 'Allow self-signed certificate (test only)'
-                TabOrder = 15
-              end
-              object lstAiMcpServers: TGLList
-                Left = 0
-                Top = 240
-                Width = 952
-                Height = 90
-                Align = alBottom
-                ItemHeight = 15
-                TabOrder = 7
-                PopupMenu = pmAi
-              end
-            end
-            object tsAiRecordings: TGLPage
-              Caption = 'Recordings'
-              object lblSunoRefHint: TGLLabel
-                Align = alTop
-                AlignWithMargins = True
-                Margins.Left = 8
-                Margins.Top = 8
-                Margins.Right = 8
-                Margins.Bottom = 9
-                Transparent = True
-                Left = 8
-                Top = 8
-                Width = 900
-                Height = 15
-                Caption = 'Recordings available to Suno as reference audio for Cover/Extend (Generation tab). Add existing files or record new ones here.'
-              end
-              object lstSunoRefs: TGLList
-                Align = alLeft
-                AlignWithMargins = True
-                Margins.Left = 8
-                Margins.Top = 0
-                Margins.Right = 12
-                Margins.Bottom = 8
-                Left = 8
-                Top = 32
-                Width = 560
-                Height = 300
-                ItemHeight = 15
-                TabOrder = 0
-              end
-              object btnSunoRefAdd: TGLButton
-                Left = 580
-                Top = 32
-                Width = 150
-                Height = 25
-                Caption = 'Add Recording...'
-                TabOrder = 1
-                OnClick = btnSunoRefAddClick
-              end
-              object btnSunoRefRemove: TGLButton
-                Left = 580
-                Top = 64
-                Width = 150
-                Height = 25
-                Caption = 'Remove'
-                TabOrder = 2
-                OnClick = btnSunoRefRemoveClick
-              end
-              object btnSunoRefRefresh: TGLButton
-                Left = 580
-                Top = 96
-                Width = 150
-                Height = 25
-                Caption = 'Refresh from Folder'
-                TabOrder = 3
-                OnClick = btnSunoRefRefreshClick
-              end
-              object btnSunoRefRecord: TGLButton
-                Left = 580
-                Top = 136
-                Width = 150
-                Height = 25
-                Caption = 'Record'
-                Hint = 'Records from the current input device at full quality (native channels/rate) into the Recordings folder and adds it to the list above.'
-                ShowHint = True
-                ParentShowHint = False
-                TabOrder = 4
-                OnClick = btnSunoRefRecordClick
-              end
-            end
-            object tsAiLyrics: TGLPage
-              Caption = 'Lyrics and Styles'
-              object lblSunoPrompt: TGLLabel
+              TabOrder = 1
+              object lblVoiceHint: TGLLabel
                 Transparent = True
                 Left = 8
                 Top = 10
-                Width = 70
+                Width = 500
                 Height = 15
-                Caption = 'Suno prompt'
-              end
-              object lblSunoLyricsCount: TGLLabel
-                Transparent = True
-                Left = 180
-                Top = 206
-                Width = 120
-                Height = 15
-                Caption = '0 / 5000 characters'
-                Visible = False
-              end
-              object lblSunoStyle: TGLLabel
-                Left = 8
-                Top = 233
-                Anchors = [akLeft, akBottom]
-                Caption = 'Style / BPM'
-                Visible = False
-              end
-              object lblSunoTitle: TGLLabel
-                Left = 8
-                Top = 326
-                Anchors = [akLeft, akBottom]
-                Caption = 'Title'
-                Visible = False
-              end
-              object edtSunoPrompt: TGLEdit
-                Left = 88
-                Top = 7
-                Width = 640
-                Height = 23
-                Anchors = [akLeft, akTop, akRight]
-                TabOrder = 0
-              end
-              object memSunoLyrics: TGLMemo
-                ReadOnly = False
-                Left = 88
-                Top = 7
-                Width = 640
-                Height = 190
-                Anchors = [akLeft, akTop, akRight, akBottom]
-                Hint = 'Full song lyrics, e.g. with [Verse]/[Chorus] section tags. Suno custom mode caps this at 5000 characters.'
-                ShowHint = True
-                ParentShowHint = False
-                MaxLength = 5000
-                PopupMenu = pmSunoLyrics
-                PlainText = True
-                ScrollBars = ssVertical
-                TabOrder = 1
-                Visible = False
-                OnChange = memSunoLyricsChange
-              end
-              object chkSunoInstrumental: TGLCheck
-                Left = 740
-                Top = 9
-                Anchors = [akTop, akRight]
-                Width = 100
-                Height = 19
-                Caption = 'Instrumental'
-                TabOrder = 2
-              end
-              object chkSunoCustom: TGLCheck
-                Left = 8
-                Top = 204
-                Anchors = [akLeft, akBottom]
-                Width = 160
-                Height = 19
-                Caption = 'Custom lyrics/style'
-                TabOrder = 3
-                OnClick = chkSunoCustomClick
-              end
-              object edtSunoStyle: TGLMemo
-                ReadOnly = False
-                Left = 88
-                Top = 230
-                Anchors = [akLeft, akRight, akBottom]
-                Width = 640
-                Height = 84
-                Hint = 'Custom mode style tags, for example: ambient, piano, 120 bpm. Tempo is a prompt hint, not guaranteed alignment.'
-                ShowHint = True
-                ParentShowHint = False
-                PlainText = True
-                ScrollBars = ssVertical
-                TabOrder = 4
-                Visible = False
-              end
-              object edtSunoTitle: TGLEdit
-                Left = 88
-                Top = 322
-                Anchors = [akLeft, akBottom]
-                Width = 300
-                Height = 23
-                TabOrder = 5
-                Visible = False
+                Caption = 'Voice command: records ~4s from the input device, transcribes, then acts or chats'
               end
             end
-            object tsAiGeneration: TGLPage
-              Caption = 'Generation'
-              object pnlAiChat: TGLPanel
-                Left = 0
-                Top = 0
-                Width = 952
-                Height = 74
-                Align = alTop
-                BevelOuter = bvNone
-                TabOrder = 0
-                object edtAiPrompt: TGLEdit
-                  Left = 8
-                  Top = 8
-                  Width = 680
-                  Height = 23
-                  TabOrder = 0
-                end
-                object btnAiSend: TGLButton
-                  Left = 696
-                  Top = 7
-                  Width = 75
-                  Height = 25
-                  Caption = 'Send'
-                  Default = True
-                  TabOrder = 1
-                  OnClick = btnAiSendClick
-                end
-                object btnAiClear: TGLButton
-                  Left = 776
-                  Top = 7
-                  Width = 75
-                  Height = 25
-                  Caption = 'Clear'
-                  TabOrder = 2
-                  OnClick = btnAiClearClick
-                end
-                object btnAiGenerateTune: TGLButton
-                  Left = 8
-                  Top = 40
-                  Width = 280
-                  Height = 25
-                  Caption = 'Generate Tune from Browser Library'
-                  Hint = 'Ask the AI to plan and build a full timeline arrangement using files from your Browser folders'
-                  ShowHint = True
-                  ParentShowHint = False
-                  TabOrder = 3
-                  OnClick = btnAiGenerateTuneClick
-                end
-              end
-              object pnlAiLuma: TGLPanel
-                Left = 0
-                Top = 0
-                Width = 952
-                Height = 276
-                Align = alTop
-                BevelOuter = bvNone
-                TabOrder = 2
-                Visible = False
-                object lblLumaKind: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 14
-                  Caption = 'Media type'
-                end
-                object cboLumaKind: TGLCombo
-                  Left = 124
-                  Top = 10
-                  Width = 120
-                  Height = 23
-                  ItemIndex = 0
-                  TabOrder = 0
-                  Items.Strings = (
-                    'Video'
-                    'Image')
-                  OnChange = cboLumaKindChange
-                end
-                object lblLumaModel: TGLLabel
-                  Transparent = True
-                  Left = 260
-                  Top = 14
-                  Caption = 'Model'
-                end
-                object cboLumaModel: TGLCombo
-                  Left = 304
-                  Top = 10
-                  Width = 150
-                  Height = 23
-                  ItemIndex = 0
-                  TabOrder = 1
-                  Items.Strings = (
-                    'ray-2'
-                    'ray-flash-2')
-                end
-                object btnLumaTest: TGLButton
-                  Left = 470
-                  Top = 9
-                  Width = 130
-                  Height = 25
-                  Caption = 'Test (credits)'
-                  TabOrder = 2
-                  OnClick = btnLumaTestClick
-                end
-                object lblLumaPrompt: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 46
-                  Caption = 'Prompt'
-                end
-                object edtLumaPrompt: TGLEdit
-                  Left = 124
-                  Top = 42
-                  Width = 560
-                  Height = 23
-                  Hint = 'Describe the video or image to generate.'
-                  ShowHint = True
-                  TabOrder = 3
-                end
-                object lblLumaAspect: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 78
-                  Caption = 'Aspect ratio'
-                end
-                object cboLumaAspect: TGLCombo
-                  Left = 124
-                  Top = 74
-                  Width = 80
-                  Height = 23
-                  ItemIndex = 0
-                  TabOrder = 4
-                  Items.Strings = (
-                    '16:9'
-                    '1:1'
-                    '9:16'
-                    '4:3'
-                    '3:4'
-                    '21:9'
-                    '9:21')
-                end
-                object lblLumaResolution: TGLLabel
-                  Transparent = True
-                  Left = 224
-                  Top = 78
-                  Caption = 'Resolution'
-                end
-                object cboLumaResolution: TGLCombo
-                  Left = 290
-                  Top = 74
-                  Width = 80
-                  Height = 23
-                  ItemIndex = 1
-                  TabOrder = 5
-                  Items.Strings = (
-                    '540p'
-                    '720p'
-                    '1080p'
-                    '4k')
-                end
-                object lblLumaDuration: TGLLabel
-                  Transparent = True
-                  Left = 388
-                  Top = 78
-                  Caption = 'Duration'
-                end
-                object cboLumaDuration: TGLCombo
-                  Left = 444
-                  Top = 74
-                  Width = 60
-                  Height = 23
-                  ItemIndex = 0
-                  TabOrder = 6
-                  Items.Strings = (
-                    '5s'
-                    '9s')
-                end
-                object lblLumaFormat: TGLLabel
-                  Transparent = True
-                  Left = 224
-                  Top = 78
-                  Caption = 'Format'
-                end
-                object cboLumaFormat: TGLCombo
-                  Left = 290
-                  Top = 74
-                  Width = 80
-                  Height = 23
-                  ItemIndex = 0
-                  TabOrder = 7
-                  Items.Strings = (
-                    'jpg'
-                    'png')
-                end
-                object chkLumaLoop: TGLCheck
-                  Left = 524
-                  Top = 76
-                  Width = 60
-                  Height = 17
-                  Caption = 'Loop'
-                  TabOrder = 8
-                end
-                object lblLumaStartFrame: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 110
-                  Caption = 'Start frame'
-                end
-                object edtLumaStartFrame: TGLEdit
-                  Left = 124
-                  Top = 106
-                  Width = 560
-                  Height = 23
-                  Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
-                  ShowHint = True
-                  TabOrder = 9
-                end
-                object lblLumaEndFrame: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 142
-                  Caption = 'End frame'
-                end
-                object edtLumaEndFrame: TGLEdit
-                  Left = 124
-                  Top = 138
-                  Width = 560
-                  Height = 23
-                  Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
-                  ShowHint = True
-                  TabOrder = 10
-                end
-                object lblLumaImageRef: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 110
-                  Caption = 'Image reference'
-                end
-                object edtLumaImageRef: TGLEdit
-                  Left = 124
-                  Top = 106
-                  Width = 560
-                  Height = 23
-                  Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
-                  ShowHint = True
-                  TabOrder = 11
-                end
-                object lblLumaImageRefWeight: TGLLabel
-                  Transparent = True
-                  Left = 696
-                  Top = 78
-                  Caption = 'Ref. weight'
-                end
-                object edtLumaImageRefWeight: TGLEdit
-                  Left = 696
-                  Top = 106
-                  Width = 50
-                  Height = 23
-                  Hint = 'Influence 0.0 - 1.0'
-                  ShowHint = True
-                  TabOrder = 12
-                  Text = '0.85'
-                end
-                object lblLumaStyleRef: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 142
-                  Caption = 'Style reference'
-                end
-                object edtLumaStyleRef: TGLEdit
-                  Left = 124
-                  Top = 138
-                  Width = 560
-                  Height = 23
-                  Hint = 'Public HTTPS image URL (Luma only accepts CDN/web URLs, not local files).'
-                  ShowHint = True
-                  TabOrder = 13
-                end
-                object edtLumaStyleWeight: TGLEdit
-                  Left = 696
-                  Top = 138
-                  Width = 50
-                  Height = 23
-                  Hint = 'Influence 0.0 - 1.0'
-                  ShowHint = True
-                  TabOrder = 14
-                  Text = '0.8'
-                end
-                object lblLumaCharRef: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 174
-                  Caption = 'Character reference'
-                end
-                object edtLumaCharRef: TGLEdit
-                  Left = 124
-                  Top = 170
-                  Width = 560
-                  Height = 23
-                  Hint = 'Public HTTPS URL of a face/character image (identity0).'
-                  ShowHint = True
-                  TabOrder = 15
-                end
-                object lblLumaModifyRef: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 206
-                  Caption = 'Modify image'
-                end
-                object edtLumaModifyRef: TGLEdit
-                  Left = 124
-                  Top = 202
-                  Width = 560
-                  Height = 23
-                  Hint = 'Public HTTPS URL of an image to modify with the prompt.'
-                  ShowHint = True
-                  TabOrder = 16
-                end
-                object edtLumaModifyWeight: TGLEdit
-                  Left = 696
-                  Top = 202
-                  Width = 50
-                  Height = 23
-                  Hint = 'Closeness to input 0.0 - 1.0 (use 0.0-0.1 for colour changes)'
-                  ShowHint = True
-                  TabOrder = 17
-                  Text = '1.0'
-                end
-                object lblLumaConcepts: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 174
-                  Caption = 'Camera concepts'
-                end
-                object lstLumaConcepts: TGLList
-                  Left = 124
-                  Top = 170
-                  Width = 440
-                  Height = 60
-                  ItemHeight = 15
-                  MultiSelect = True
-                  TabOrder = 20
-                end
-                object btnLumaConcepts: TGLButton
-                  Left = 572
-                  Top = 170
-                  Width = 112
-                  Height = 25
-                  Caption = 'Load concepts'
-                  TabOrder = 21
-                  OnClick = btnLumaConceptsClick
-                end
-                object btnLumaOpen: TGLButton
-                  Left = 219
-                  Top = 240
-                  Width = 110
-                  Height = 25
-                  Caption = 'Open result'
-                  Enabled = False
-                  TabOrder = 22
-                  OnClick = btnLumaOpenClick
-                end
-                object btnLumaGenerate: TGLButton
-                  Left = 8
-                  Top = 240
-                  Width = 120
-                  Height = 25
-                  Caption = 'Generate'
-                  TabOrder = 18
-                  OnClick = btnLumaGenerateClick
-                end
-                object chkLumaTabOnly: TGLCheck
-                  Left = 224
-                  Top = 244
-                  Width = 300
-                  Height = 17
-                  Caption = 'Music Tabular Only (PDF to AI\Rendered)'
-                  TabOrder = 20
-                end
-                object btnLumaCancel: TGLButton
-                  Left = 136
-                  Top = 240
-                  Width = 75
-                  Height = 25
-                  Caption = 'Cancel'
-                  TabOrder = 19
-                  OnClick = btnLumaCancelClick
-                end
-              end
-              object pnlAiSuno: TGLPanel
-                Left = 0
-                Top = 74
-                Width = 952
-                Height = 180
-                Align = alTop
-                BevelOuter = bvNone
-                TabOrder = 1
-                object lblSunoBaseUrl: TGLLabel
-                  Transparent = True
-                  Left = 8
-                  Top = 13
-                  Width = 70
-                  Height = 15
-                  Caption = 'Suno proxy'
-                end
-                object edtSunoBaseUrl: TGLEdit
-                  Left = 88
-                  Top = 10
-                  Width = 300
-                  Height = 23
-                  Hint = 'Base URL for the selected API type, without /api routes. Local proxy: http://localhost:3000. Managed: use the base URL from your provider dashboard.'
-                  ParentShowHint = False
-                  ShowHint = True
-                  TabOrder = 0
-                  Enabled = False
-                  Text = 'https://apibox.erweima.ai'
-                end
-                object btnSunoTest: TGLButton
-                  Left = 396
-                  Top = 9
-                  Width = 75
-                  Height = 25
-                  Caption = 'Test'
-                  TabOrder = 1
-                  OnClick = btnSunoTestClick
-                end
-                object lblSunoApi: TGLLabel
-                  Left = 8
-                  Top = 46
-                  Caption = 'API type'
-                end
-                object cboSunoApi: TGLCombo
-                  Left = 88
-                  Top = 42
-                  Width = 240
-                  Height = 23
-                  ItemIndex = 1
-                  Enabled = False
-                  Items.Strings = (
-                    'Self-hosted gcui-art/suno-api'
-                    'Managed SunoAPI.org')
-                  TabOrder = 2
-                  OnChange = cboSunoApiChange
-                end
-                object lblSunoModel: TGLLabel
-                  Left = 340
-                  Top = 46
-                  Caption = 'Model'
-                end
-                object cboSunoModel: TGLCombo
-                  Left = 390
-                  Top = 42
-                  Width = 120
-                  Height = 23
-                  Hint = 'AI model version. V6 is SunoAPI.org'#39's current standard/recommended default. V6_WILD/V6_MINI are current experimental/lightweight variants. Everything below the separator is deprecated - kept only for accounts still on an older tier.'
-                  ShowHint = True
-                  ParentShowHint = False
-                  ItemIndex = 0
-                  Items.Strings = (
-                    'V6'
-                    'V6_WILD'
-                    'V6_MINI'
-                    'V5_5 (deprecated)'
-                    'V5 (deprecated)'
-                    'V4_5PLUS (deprecated)'
-                    'V4_5ALL (deprecated)'
-                    'V4_5 (deprecated)'
-                    'V4 (deprecated)')
-                  Enabled = False
-                  TabOrder = 3
-                end
-                object chkSunoAdvanced: TGLCheck
-                  Left = 520
-                  Top = 45
-                  Width = 185
-                  Height = 19
-                  Hint = 'Off (default): UDAW configures the managed API automatically - just paste in your Suno API key. On: pick the API type and edit base URL/model/callback yourself, e.g. to use a self-hosted proxy.'
-                  ShowHint = True
-                  ParentShowHint = False
-                  Caption = 'Advanced (self-hosted)'
-                  TabOrder = 5
-                  OnClick = chkSunoAdvancedClick
-                end
-                object lblSunoCallback: TGLLabel
-                  Left = 8
-                  Top = 78
-                  Caption = 'Callback URL'
-                end
-                object edtSunoCallback: TGLEdit
-                  Left = 88
-                  Top = 74
-                  Width = 560
-                  Height = 23
-                  Enabled = False
-                  Hint = 'Managed API: your public HTTPS callback endpoint. UDAW polls for results; it does not host a webhook.'
-                  ShowHint = True
-                  ParentShowHint = False
-                  TabOrder = 4
-                end
-                object lblSunoRefMode: TGLLabel
-                  Left = 8
-                  Top = 110
-                  Caption = 'Ref Audio'
-                end
-                object cboSunoRefMode: TGLCombo
-                  Left = 88
-                  Top = 106
-                  Width = 170
-                  Height = 23
-                  Hint = 'Uses the recording selected on the Recordings tab. None: ordinary text-to-music generation. Cover: restyle the recording. Extend: continue it from the time below.'
-                  ShowHint = True
-                  ParentShowHint = False
-                  ItemIndex = 0
-                  Items.Strings = (
-                    'None'
-                    'Cover (restyle)'
-                    'Extend (continue)')
-                  TabOrder = 6
-                  OnChange = cboSunoRefModeChange
-                end
-                object lblSunoContinueAt: TGLLabel
-                  Left = 270
-                  Top = 110
-                  Caption = 'Continue at (s)'
-                  Visible = False
-                end
-                object edtSunoContinueAt: TGLEdit
-                  Left = 360
-                  Top = 106
-                  Width = 70
-                  Height = 23
-                  TabOrder = 7
-                  Text = '0'
-                  Visible = False
-                end
-                object btnSunoGenerate: TGLButton
-                  Left = 8
-                  Top = 144
-                  Width = 85
-                  Height = 25
-                  Caption = 'Generate'
-                  TabOrder = 8
-                  OnClick = btnSunoGenerateClick
-                end
-                object btnSunoCancel: TGLButton
-                  Left = 100
-                  Top = 144
-                  Width = 85
-                  Height = 25
-                  Caption = 'Cancel'
-                  TabOrder = 9
-                  OnClick = btnSunoCancelClick
-                end
-              end
+            object splAiLog: TGLSplitter
+              Left = 0
+              Top = 420
+              Width = 952
+              Height = 5
+              Cursor = crVSplit
+              Align = alTop
+              MinSize = 60
             end
-          end
-          object pnlAiVoice: TGLPanel
-            Left = 0
-            Top = 380
-            Width = 952
-            Height = 40
-            Align = alTop
-            BevelOuter = bvNone
-            TabOrder = 1
-            object lblVoiceHint: TGLLabel
-              Transparent = True
-              Left = 8
-              Top = 10
-              Width = 500
-              Height = 15
-              Caption = 'Voice command: records ~4s from the input device, transcribes, then acts or chats'
             end
-          end
-          object splAiLog: TGLSplitter
-            Left = 0
-            Top = 420
-            Width = 952
-            Height = 5
-            Cursor = crVSplit
-            Align = alTop
-            MinSize = 60
-          end
           end
         end
       end
@@ -3696,7 +4001,7 @@ object frmMain: TfrmMain
           Margins.Right = 8
           Margins.Bottom = 6
           Tabs = 'Instruments;Samples;Effects;Tracker;Presets'
-          Hints = 'Add tracks and tracker instruments;Audio files from your library folders - double-click to import at the playhead;Effects for the selected track - double-click to add one;Tracker modules (.mod .xm .it .mptm .s3m .stm .669 .okt .mtm .ult .amf .ptm .far .dsm) in the Audio media folder - double-click to load into the Tracker player;Mix presets for the selected track - double-click to apply one'
+          Hints = 'Add tracks (double-click) and edit tracker instruments in the WAV editor (double-click);Audio files from your library folders - drag onto the Timeline to add at the playhead, double-click to edit in the WAV editor;Effects for the selected track - double-click to add one;Tracker modules (.mod .xm .it .mptm .s3m) in the Audio media folder - double-click to load into the Tracker player;Mix presets for the selected track - double-click to apply one'
           OnChange = tsTlRightChange
         end
         object edtTlRightSearch: TGLEdit
@@ -3741,6 +4046,7 @@ object frmMain: TfrmMain
           Margins.Bottom = 8
           TabOrder = 1
           OnDblClick = trTlRightDblClick
+          OnMouseDown = trTlRightMouseDown
           OnExpanding = trTlRightExpanding
         end
       end
@@ -3774,6 +4080,7 @@ object frmMain: TfrmMain
             Height = 531
             Align = alClient
             TabOrder = 0
+            BottomPadding = 200
             object grpStartup: TGLGroup
               Left = 8
               Top = 0
@@ -3852,6 +4159,21 @@ object frmMain: TfrmMain
                 TabOrder = 3
                 Text = '2'
               end
+              object lblSetOutDevice: TGLLabel
+                Transparent = True
+                Left = 240
+                Top = 123
+                Width = 90
+                Height = 15
+                Caption = 'Output device'
+              end
+              object cboSetOutDevice: TGLCombo
+                Left = 336
+                Top = 120
+                Width = 260
+                Height = 23
+                TabOrder = 16
+              end
               object lblSetInCh: TGLLabel
                 Transparent = True
                 Left = 16
@@ -3903,9 +4225,9 @@ object frmMain: TfrmMain
               object chkSetExclusive: TGLCheck
                 Left = 16
                 Top = 248
-                Width = 400
+                Width = 600
                 Height = 17
-                Caption = 'Exclusive-mode output (WASAPI)'
+                Caption = 'Exclusive-mode output (applies to the selected backend: WASAPI or DirectSound)'
                 TabOrder = 7
               end
               object lblSetLogLevel: TGLLabel
@@ -4025,7 +4347,7 @@ object frmMain: TfrmMain
               Left = 8
               Top = 398
               Width = 920
-              Height = 330
+              Height = 366
               Caption = ' Working Directories '
               TabOrder = 1
               object lblDirProjects: TGLLabel
@@ -4257,10 +4579,37 @@ object frmMain: TfrmMain
                 Tag = 9
                 OnClick = btnSettingsBrowseDirClick
               end
+              object lblDirPlugins: TGLLabel
+                Transparent = True
+                Left = 16
+                Top = 329
+                Width = 150
+                Height = 15
+                Caption = 'Python plug-ins folder'
+              end
+              object edDirPlugins: TGLEdit
+                Left = 170
+                Top = 326
+                Width = 650
+                Height = 23
+                Hint = 'Where your Python plug-ins live and where the Plugins menu looks. The default is the plugins folder next to UDAW.exe.'
+                ShowHint = True
+                TabOrder = 18
+              end
+              object btnDirPlugins: TGLButton
+                Left = 828
+                Top = 325
+                Width = 80
+                Height = 25
+                Caption = 'Browse...'
+                TabOrder = 19
+                Tag = 10
+                OnClick = btnSettingsBrowseDirClick
+              end
             end
             object grpSystemPaths: TGLGroup
               Left = 8
-              Top = 736
+              Top = 772
               Width = 920
               Height = 170
               Caption = ' System Locations (read-only) '
@@ -4380,7 +4729,7 @@ object frmMain: TfrmMain
             end
             object grpColorTheme: TGLGroup
               Left = 8
-              Top = 914
+              Top = 950
               Width = 920
               Height = 90
               Caption = ' Color Theme'
@@ -4448,7 +4797,7 @@ object frmMain: TfrmMain
             end
             object grpMidiDevices: TGLGroup
               Left = 8
-              Top = 1012
+              Top = 1048
               Width = 920
               Height = 110
               Caption = ' MIDI Devices'
@@ -5113,7 +5462,11 @@ object frmMain: TfrmMain
               end
               item
                 Caption = 'Context'
-                Width = 350
+                Width = 300
+              end
+              item
+                Caption = 'Description'
+                Width = 560
               end
               item
                 Caption = 'Status'
@@ -6019,7 +6372,7 @@ object frmMain: TfrmMain
       end
     end
     object tabAI: TGLPage
-      Caption = 'AI'
+      Caption = 'AI/SI'
       TabVisible = False
     end
   end
@@ -6033,9 +6386,9 @@ object frmMain: TfrmMain
   end
   object prgStatus: TGLCapsuleProgress
     Left = 554
-    Top = 601
+    Top = 604
     Width = 400
-    Height = 17
+    Height = 16
     Anchors = [akRight, akBottom]
     Min = 0
     Max = 100
@@ -6044,12 +6397,14 @@ object frmMain: TfrmMain
   end
   object lblGlFps: TGLLabel
     Left = 700
-    Top = 3
-    Width = 252
-    Height = 18
+    Top = 2
+    Width = 262
+    Height = 20
     Anchors = [akTop, akRight]
     Alignment = taRightJustify
     AutoSize = False
+    Layout = tlCenter
+    Sunken = True
     Caption = ' '
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
@@ -6096,6 +6451,12 @@ object frmMain: TfrmMain
     Options = [ofFileMustExist]
     Left = 880
     Top = 88
+  end
+  object dlgOpenFoley: TGLOpenDialog
+    Filter = 'Sound effects (*.wav;*.mp3)|*.wav;*.mp3|All files (*.*)|*.*'
+    Title = 'Load a sound into the pad'
+    Left = 880
+    Top = 168
   end
   object dlgOpenWav: TGLOpenDialog
     DefaultExt = 'wav'
@@ -6207,8 +6568,8 @@ object frmMain: TfrmMain
   object dlgOpenTrkAny: TGLOpenDialog
     DefaultExt = 'xm'
     Filter =
-      'Tracker modules (*.mod;*.xm;*.it;*.mptm;*.s3m;*.stm;*.669;*.okt;*.mtm;*.ult;*.amf;*.ptm;*.far;*.dsm)|*.mod;*.xm;*.it;*.mptm;*.s3m;*.stm;*.669;*.okt;*.mtm;*.ult;*.amf;*.ptm;*.far;*.dsm|' +
-      'Other tracker modules (*.s3m;*.stm;*.669;*.okt;*.mtm;*.ult;*.amf;*.ptm;*.far;*.dsm)|*.s3m;*.stm;*.669;*.okt;*.mtm;*.ult;*.amf;*.ptm;*.far;*.dsm|' +
+      'Tracker modules (*.mod;*.xm;*.it;*.mptm;*.s3m)|*.mod;*.xm;*.it;*.mptm;*.s3m|' +
+      'ScreamTracker 3 modules (*.s3m)|*.s3m|' +
       'All files (*.*)|*.*'
     Options = [ofFileMustExist]
     Left = 912
@@ -6357,35 +6718,6 @@ object frmMain: TfrmMain
           OnClick = btnProjectSaveAsClick
         end
       end
-      object mnuProjectMetadata: TMenuItem
-        Caption = 'Metadata'
-        object mnuProjectApply: TMenuItem
-          Caption = 'Apply metadata'
-          OnClick = btnProjectApplyClick
-        end
-      end
-      object mnuProjectEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuProjectUndo: TMenuItem
-          Caption = 'Undo'
-          OnClick = btnUndoClick
-        end
-        object mnuProjectRedo: TMenuItem
-          Caption = 'Redo'
-          OnClick = btnRedoClick
-        end
-      end
-      object mnuProjectGraph: TMenuItem
-        Caption = 'Graph'
-        object mnuProjectAddGainNode: TMenuItem
-          Caption = 'Add gain node'
-          OnClick = btnAddGainNodeClick
-        end
-        object mnuProjectRemoveLastNode: TMenuItem
-          Caption = 'Remove last node'
-          OnClick = btnRemoveLastNodeClick
-        end
-      end
       object mnuProjectAutosave: TMenuItem
         Caption = 'Autosave'
         object mnuProjectAutosaveNow: TMenuItem
@@ -6397,519 +6729,28 @@ object frmMain: TfrmMain
           OnClick = btnRecoverClick
         end
       end
-    end
-    object mnuTracker: TMenuItem
-      Caption = 'Tracker'
-      Visible = False
-      object mnuTrkNew: TMenuItem
-        Caption = 'New'
-        object mnuTrkNewTracker: TMenuItem
-          Caption = 'Tracker'
-          OnClick = mnuTrkNewTrackerClick
-        end
-      end
-      object mnuTrkPattern: TMenuItem
-        Caption = 'Pattern'
-        object mnuTrkAddPattern: TMenuItem
-          Caption = 'Add pattern'
-          OnClick = btnTrkAddPatternClick
-        end
-        object mnuTrkDelPattern: TMenuItem
-          Caption = 'Remove pattern'
-          OnClick = btnTrkDelPatternClick
-        end
-      end
-      object mnuTrkCell: TMenuItem
-        Caption = 'Cell'
-        object mnuTrkClearCell: TMenuItem
-          Caption = 'Clear cell'
-          OnClick = btnTrkClearCellClick
-        end
-        object mnuTrkFillDemo: TMenuItem
-          Caption = 'Fill demo (sine arpeggio)'
-          OnClick = btnTrkFillDemoClick
-        end
-      end
-      object mnuTrkTransport: TMenuItem
-        Caption = 'Transport'
-        object mnuTrkApplyXport: TMenuItem
-          Caption = 'Apply speed / BPM'
-          OnClick = btnTrkApplyXportClick
-        end
-        object mnuTrkPlay: TMenuItem
-          Caption = 'Play'
-          OnClick = btnTrkPlayClick
-        end
-        object mnuTrkStop: TMenuItem
-          Caption = 'Stop'
-          OnClick = btnTrkStopClick
-        end
-      end
-      object mnuTrkEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuTrkUndo: TMenuItem
-          Caption = 'Undo'
-          OnClick = btnTrkUndoClick
-        end
-        object mnuTrkRedo: TMenuItem
-          Caption = 'Redo'
-          OnClick = btnTrkRedoClick
-        end
-      end
-      object mnuTrkImport: TMenuItem
-        Caption = 'Import'
-        object mnuTrkImportMod: TMenuItem
-          Caption = 'ProTracker .mod...'
-          OnClick = btnTrkImportModClick
-        end
-        object mnuTrkImportXm: TMenuItem
-          Caption = 'FastTracker .xm...'
-          OnClick = btnTrkImportXmClick
-        end
-        object mnuTrkImportMptm: TMenuItem
-          Caption = 'OpenMPT .mptm / .it...'
-          OnClick = btnTrkImportMptmClick
-        end
-        object mnuTrkImportLegacy: TMenuItem
-          Caption = 'Other formats (.s3m .stm .669 .okt .mtm .ult .amf .ptm .far .dsm)...'
-          OnClick = btnTrkImportLegacyClick
-        end
-      end
-      object mnuTrkExport: TMenuItem
-        Caption = 'Export'
-        OnClick = mnuTrkExportClick
-        object mnuTrkExportFiles: TMenuItem
-          Caption = 'Files'
-          object mnuTrkExportMod: TMenuItem
-            Caption = 'ProTracker .mod...'
-            OnClick = btnTrkExportModClick
-          end
-          object mnuTrkExportXm: TMenuItem
-            Caption = 'FastTracker .xm...'
-            OnClick = btnTrkExportXmClick
-          end
-          object mnuTrkExportMptm: TMenuItem
-            Caption = 'OpenMPT .mptm...'
-            OnClick = btnTrkExportMptmClick
-          end
-        end
-        object mnuTrkExportFilesSep: TMenuItem
-          Caption = '-'
-        end
-        object mnuTrkExportRegion: TMenuItem
-          Caption = 'Export Marked Region to Timeline'
-          Enabled = False
-          OnClick = pmTrkExportRegionToTimelineClick
-        end
-        object mnuTrkExportPattern: TMenuItem
-          Caption = 'Export Pattern to Timeline'
-          OnClick = pmTrkExportPatternToTimelineClick
-        end
-      end
-    end
-    object mnuMixer: TMenuItem
-      Caption = 'Mixer'
-      Visible = False
-      object mnuMixMeters: TMenuItem
-        Caption = 'Loudness and Phase Meters...'
-        OnClick = ShowMetersClick
-      end
-      object mnuMixStrip: TMenuItem
-        Caption = 'Strip'
-        object mnuMixAddTrack: TMenuItem
-          Caption = 'Add track'
-          OnClick = btnMixAddTrackClick
-        end
-        object mnuMixAddBus: TMenuItem
-          Caption = 'Add bus'
-          OnClick = btnMixAddBusClick
-        end
-        object mnuMixAddAux: TMenuItem
-          Caption = 'Add aux'
-          OnClick = btnMixAddAuxClick
-        end
-        object mnuMixAddVCA: TMenuItem
-          Caption = 'Add VCA'
-          OnClick = btnMixAddVCAClick
-        end
-        object mnuMixRemove: TMenuItem
-          Caption = 'Remove strip'
-          OnClick = btnMixRemoveClick
-        end
-        object mnuMixApply: TMenuItem
-          Caption = 'Apply strip'
-          OnClick = btnMixApplyClick
-        end
-      end
-      object mnuMixInsert: TMenuItem
-        Caption = 'Insert'
-        object mnuMixAddInsert: TMenuItem
-          Caption = 'Add insert'
-          OnClick = btnMixAddEQClick
-        end
-        object mnuMixLoadPlugin: TMenuItem
-          Caption = 'Load plug-in (VST3 / VST2 / CLAP)...'
-          OnClick = btnMixAddVSTClick
-        end
-        object mnuMixDelInsert: TMenuItem
-          Caption = 'Remove insert'
-          OnClick = btnMixDelInsertClick
-        end
-      end
-      object mnuMixEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuMixUndo: TMenuItem
-          Caption = 'Undo'
-          OnClick = btnMixUndoClick
-        end
-        object mnuMixRedo: TMenuItem
-          Caption = 'Redo'
-          OnClick = btnMixRedoClick
-        end
-      end
-      object mnuMixModulation: TMenuItem
-        Caption = 'Modulation'
-        object mnuMixModLFO: TMenuItem
-          Tag = 1
-          Caption = 'Add LFO modulator...'
-          OnClick = MixModMenuClick
-        end
-        object mnuMixModRandom: TMenuItem
-          Tag = 2
-          Caption = 'Add smooth random modulator...'
-          OnClick = MixModMenuClick
-        end
-        object mnuMixModSteps: TMenuItem
-          Tag = 3
-          Caption = 'Add step modulator...'
-          OnClick = MixModMenuClick
-        end
-        object mnuMixModFollower: TMenuItem
-          Tag = 4
-          Caption = 'Add envelope follower (selected strip)'
-          OnClick = MixModMenuClick
-        end
-        object mnuMixModMacro: TMenuItem
-          Tag = 5
-          Caption = 'Add macro knob...'
-          OnClick = MixModMenuClick
-        end
-        object mnuMixModRoute: TMenuItem
-          Tag = 6
-          Caption = 'Route modulator to selected strip...'
-          OnClick = MixModMenuClick
-        end
-        object mnuMixModList: TMenuItem
-          Tag = 7
-          Caption = 'List modulators and routes'
-          OnClick = MixModMenuClick
-        end
-        object mnuMixModClear: TMenuItem
-          Tag = 8
-          Caption = 'Remove all modulators'
-          OnClick = MixModMenuClick
-        end
-      end
-      object mnuMixTools: TMenuItem
-        Caption = 'Tools'
-        object mnuMixPreview: TMenuItem
-          Caption = 'Render preview mix'
-          OnClick = btnMixPreviewClick
-        end
-      end
-    end
-    object mnuMidi: TMenuItem
-      Caption = 'MIDI'
-      Visible = False
-      object mnuMidiClip: TMenuItem
-        Caption = 'Clip'
-        object mnuMidiAddClip: TMenuItem
-          Caption = 'Add clip'
-          OnClick = btnMidiAddClipClick
-        end
-        object mnuMidiAddTrack: TMenuItem
-          Caption = 'Add track'
-          OnClick = btnMidiAddTrackClick
-        end
-      end
-      object mnuMidiNote: TMenuItem
-        Caption = 'Note'
-        object mnuMidiAddNote: TMenuItem
-          Caption = 'Add note'
-          OnClick = btnMidiAddNoteClick
-        end
-        object mnuMidiDelNote: TMenuItem
-          Caption = 'Delete last note'
-          OnClick = btnMidiDelNoteClick
-        end
-      end
-      object mnuMidiGrid: TMenuItem
-        Caption = 'Grid'
-        object mnuMidiQuantize: TMenuItem
-          Caption = 'Quantize'
-          OnClick = btnMidiQuantizeClick
-        end
-        object mnuMidiHumanize: TMenuItem
-          Caption = 'Humanize'
-          OnClick = btnMidiHumanizeClick
-        end
-        object mnuMidiDemo: TMenuItem
-          Caption = 'Fill demo phrase'
-          OnClick = btnMidiDemoClick
-        end
-      end
-      object mnuMidiTransport: TMenuItem
-        Caption = 'Transport'
-        object mnuMidiPlay: TMenuItem
-          Caption = 'Play'
-          OnClick = btnMidiPlayClick
-        end
-        object mnuMidiStop: TMenuItem
-          Caption = 'Stop'
-          OnClick = btnMidiStopClick
-        end
-        object mnuMidiTransportSep: TMenuItem
-          Caption = '-'
-        end
-        object mnuMidiRecord: TMenuItem
-          Caption = 'Record from MIDI device'
-          OnClick = mnuMidiRecordClick
-        end
-        object mnuMidiPanic: TMenuItem
-          Caption = 'MIDI Panic (all notes off)'
-          OnClick = btnSetMidiPanicClick
-        end
-      end
-      object mnuMidiEdit: TMenuItem
-        Caption = 'Edit'
-        object mnuMidiUndo: TMenuItem
-          Caption = 'Undo'
-          OnClick = btnMidiUndoClick
-        end
-        object mnuMidiRedo: TMenuItem
-          Caption = 'Redo'
-          OnClick = btnMidiRedoClick
-        end
-      end
-      object mnuMidiImport: TMenuItem
-        Caption = 'Import .mid...'
-        OnClick = btnMidiImportSMFClick
-      end
-      object mnuMidiExport: TMenuItem
-        Caption = 'Export .mid...'
-        OnClick = btnMidiExportSMFClick
-      end
-    end
-    object mnuTimeline: TMenuItem
-      Caption = 'Timeline'
-      Visible = False
-      OnClick = mnuTimelineClick
-      object mnuTlFoley: TMenuItem
-        Caption = 'Foley Sampler...'
-        OnClick = ShowFoleyClick
-      end
-      object mnuTlMeters: TMenuItem
-        Caption = 'Loudness and Phase Meters...'
-        OnClick = ShowMetersClick
-      end
-      object mnuTlExport: TMenuItem
-        Caption = 'Export'
-        object mnuTlExportWav: TMenuItem
-          Caption = 'WAV...'
-          OnClick = pmTlExportWavClick
-        end
-        object mnuTlExportMp3: TMenuItem
-          Caption = 'MP3...'
-          OnClick = pmTlExportMp3Click
-        end
-        object mnuTlExportMp4: TMenuItem
-          Caption = 'MP4...'
-          OnClick = pmTlExportMp4Click
-        end
-        object mnuTlExportMkv: TMenuItem
-          Caption = 'MKV...'
-          OnClick = pmTlExportMkvClick
-        end
-        object mnuTlExportFlac: TMenuItem
-          Caption = 'FLAC...'
-          OnClick = pmTlExportFlacClick
-        end
-      end
-      object mnuTlExportSep: TMenuItem
+      object mnuProjectSepExit: TMenuItem
         Caption = '-'
       end
-      object mnuTlDock: TMenuItem
-        Caption = 'Show Editor'
-        object mnuTlDockMixer: TMenuItem
-          Caption = 'Mixer'
-          Tag = 0
-          OnClick = DockShowClick
-        end
-        object mnuTlDockPiano: TMenuItem
-          Caption = 'Piano roll'
-          Tag = 1
-          OnClick = DockShowClick
-        end
-        object mnuTlDockTracker: TMenuItem
-          Caption = 'Tracker'
-          Tag = 2
-          OnClick = DockShowClick
-        end
-        object mnuTlDockRecord: TMenuItem
-          Caption = 'Recording'
-          Tag = 3
-          OnClick = DockShowClick
-        end
-        object mnuTlDockSep: TMenuItem
-          Caption = '-'
-        end
-        object mnuTlDockHide: TMenuItem
-          Caption = 'Hide Editor'
-          Tag = 9
-          OnClick = DockShowClick
-        end
+      object mnuProjectExit: TMenuItem
+        Caption = 'Exit UDAW'
+        ShortCut = 32883
+        OnClick = mnuProjectExitClick
       end
-      object mnuTlBuild: TMenuItem
-        Caption = 'Build'
-        object mnuTlDemo: TMenuItem
-          Caption = 'Build demo arrangement'
-          OnClick = btnTlDemoClick
-        end
-        object mnuTlAddTrack: TMenuItem
-          Caption = 'Add audio track'
-          OnClick = btnTlAddTrackClick
-        end
-        object mnuTlRemoveTrack: TMenuItem
-          Caption = 'Remove Timeline'
-          OnClick = btnTlRemoveTrackClick
-        end
+    end
+    object mnuEdit: TMenuItem
+      Caption = 'Edit'
+      object mnuProjectUndo: TMenuItem
+        Caption = 'Undo'
+        OnClick = btnUndoClick
       end
-      object mnuTlClip: TMenuItem
-        Caption = 'Clip'
-        object mnuTlAddClip: TMenuItem
-          Caption = 'Add clip from WAV...'
-          OnClick = btnTlAddClipClick
-        end
-        object mnuTlSplit: TMenuItem
-          Caption = 'Split at playhead'
-          OnClick = btnTlSplitClick
-        end
-        object mnuTlDeleteClip: TMenuItem
-          Caption = 'Remove Element'
-          OnClick = btnTlDeleteClipClick
-        end
-      end
-      object mnuTlImport: TMenuItem
-        Caption = 'Import to Timeline'
-        object mnuTlImportWav: TMenuItem
-          Caption = 'WAV / PCM File...'
-          OnClick = mnuTlImportWavClick
-        end
-        object mnuTlImportMp3: TMenuItem
-          Caption = 'MP3 File...'
-          OnClick = btnMp3ToTimelineClick
-        end
-        object mnuTlImportMp4: TMenuItem
-          Caption = 'MP4 / M4A File...'
-          OnClick = btnMp4ToTimelineClick
-        end
-        object mnuTlImportFlac: TMenuItem
-          Caption = 'FLAC File...'
-          OnClick = mnuTlImportFlacClick
-        end
-        object mnuTlImportSep1: TMenuItem
-          Caption = '-'
-        end
-        object mnuTlImportMod: TMenuItem
-          Caption = 'Tracker Module (.mod)...'
-          OnClick = mnuTlImportModClick
-        end
-        object mnuTlImportXm: TMenuItem
-          Caption = 'FastTracker II (.xm)...'
-          OnClick = mnuTlImportXmClick
-        end
-        object mnuTlImportMptm: TMenuItem
-          Caption = 'IT / MPTM (.it/.mptm)...'
-          OnClick = mnuTlImportMptmClick
-        end
-        object mnuTlImportLegacy: TMenuItem
-          Caption = 'Other tracker formats (.s3m .stm .669 .okt .mtm .ult .amf .ptm .far .dsm)...'
-          OnClick = mnuTlImportLegacyClick
-        end
-        object mnuTlImportSep2: TMenuItem
-          Caption = '-'
-        end
-        object mnuTlImportAls: TMenuItem
-          Caption = 'Ableton Live Set (.als)...'
-          OnClick = mnuTlImportAlsClick
-        end
-        object mnuTlImportFlp: TMenuItem
-          Caption = 'FL Studio Project (.flp)...'
-          OnClick = mnuTlImportFlpClick
-        end
-      end
-      object mnuTlNavigation: TMenuItem
-        Caption = 'Navigation'
-        object mnuTlZoomIn: TMenuItem
-          Caption = 'Zoom In'
-          OnClick = btnTlZoomInClick
-        end
-        object mnuTlZoomOut: TMenuItem
-          Caption = 'Zoom Out'
-          OnClick = btnTlZoomOutClick
-        end
-        object mnuTlNavSep1: TMenuItem
-          Caption = '-'
-        end
-        object mnuTlJumpElementStart: TMenuItem
-          Caption = 'Start of Timeline'
-          OnClick = pmTlJumpElementStartClick
-        end
-        object mnuTlJumpElementEnd: TMenuItem
-          Caption = 'End of Timeline'
-          OnClick = pmTlJumpElementEndClick
-        end
-        object mnuTlNavSep2: TMenuItem
-          Caption = '-'
-        end
-        object mnuTlNavNext: TMenuItem
-          Caption = 'Next Grid Position'
-          OnClick = pmTlNavNextClick
-        end
-        object mnuTlNavPrev: TMenuItem
-          Caption = 'Previous Grid Position'
-          OnClick = pmTlNavPrevClick
-        end
-      end
-      object mnuTlTransport: TMenuItem
-        Caption = 'Transport'
-        object mnuTlPlay: TMenuItem
-          Caption = 'Play'
-          object mnuTlPlayFromBeginning: TMenuItem
-            Caption = 'Play from Beginning'
-            OnClick = TlPlayFromBeginningClick
-          end
-          object mnuTlPlayFromCurrent: TMenuItem
-            Caption = 'Play from Current'
-            OnClick = TlPlayFromCurrentClick
-          end
-          object mnuTlPlayReverse: TMenuItem
-            Caption = 'Play in Reverse'
-            OnClick = TlPlayReverseClick
-          end
-          object mnuTlPlayPingPong: TMenuItem
-            Caption = 'Play Ping Pong'
-            OnClick = TlPlayPingPongClick
-          end
-        end
-        object mnuTlStop: TMenuItem
-          Caption = 'Stop'
-          Enabled = False
-          OnClick = btnTlStopClick
-        end
+      object mnuProjectRedo: TMenuItem
+        Caption = 'Redo'
+        OnClick = btnRedoClick
       end
       object mnuTlEdit: TMenuItem
-        Caption = 'Edit'
+        Caption = 'Timeline'
+        Visible = False
         object mnuTlUndo: TMenuItem
           Caption = 'Undo'
           OnClick = btnTlUndoClick
@@ -8848,6 +8689,520 @@ object frmMain: TfrmMain
           OnClick = TlSaveSelectionClick
         end
       end
+      object mnuTrkEdit: TMenuItem
+        Caption = 'Tracker'
+        Visible = False
+        object mnuTrkUndo: TMenuItem
+          Caption = 'Undo'
+          OnClick = btnTrkUndoClick
+        end
+        object mnuTrkRedo: TMenuItem
+          Caption = 'Redo'
+          OnClick = btnTrkRedoClick
+        end
+      end
+      object mnuMixEdit: TMenuItem
+        Caption = 'Mixer'
+        Visible = False
+        object mnuMixUndo: TMenuItem
+          Caption = 'Undo'
+          OnClick = btnMixUndoClick
+        end
+        object mnuMixRedo: TMenuItem
+          Caption = 'Redo'
+          OnClick = btnMixRedoClick
+        end
+      end
+      object mnuMidiEdit: TMenuItem
+        Caption = 'MIDI'
+        Visible = False
+        object mnuMidiUndo: TMenuItem
+          Caption = 'Undo'
+          OnClick = btnMidiUndoClick
+        end
+        object mnuMidiRedo: TMenuItem
+          Caption = 'Redo'
+          OnClick = btnMidiRedoClick
+        end
+      end
+    end
+    object mnuTracker: TMenuItem
+      Caption = 'Tracker'
+      Visible = False
+      object mnuTrkNew: TMenuItem
+        Caption = 'New'
+        object mnuTrkNewTracker: TMenuItem
+          Caption = 'Tracker'
+          OnClick = mnuTrkNewTrackerClick
+        end
+      end
+      object mnuTrkPattern: TMenuItem
+        Caption = 'Pattern'
+        object mnuTrkAddPattern: TMenuItem
+          Caption = 'Add pattern'
+          OnClick = btnTrkAddPatternClick
+        end
+        object mnuTrkDelPattern: TMenuItem
+          Caption = 'Remove pattern'
+          OnClick = btnTrkDelPatternClick
+        end
+      end
+      object mnuTrkCell: TMenuItem
+        Caption = 'Cell'
+        object mnuTrkClearCell: TMenuItem
+          Caption = 'Clear cell'
+          OnClick = btnTrkClearCellClick
+        end
+        object mnuTrkFillDemo: TMenuItem
+          Caption = 'Fill demo (sine arpeggio)'
+          OnClick = btnTrkFillDemoClick
+        end
+      end
+      object mnuTrkTransport: TMenuItem
+        Caption = 'Transport'
+        object mnuTrkApplyXport: TMenuItem
+          Caption = 'Apply speed / BPM'
+          OnClick = btnTrkApplyXportClick
+        end
+        object mnuTrkPlay: TMenuItem
+          Caption = 'Play'
+          OnClick = btnTrkPlayClick
+        end
+        object mnuTrkStop: TMenuItem
+          Caption = 'Stop'
+          OnClick = btnTrkStopClick
+        end
+      end
+      object mnuTrkImport: TMenuItem
+        Caption = 'Import'
+        object mnuTrkImportMod: TMenuItem
+          Caption = 'ProTracker .mod...'
+          OnClick = btnTrkImportModClick
+        end
+        object mnuTrkImportXm: TMenuItem
+          Caption = 'FastTracker .xm...'
+          OnClick = btnTrkImportXmClick
+        end
+        object mnuTrkImportMptm: TMenuItem
+          Caption = 'OpenMPT .mptm / .it...'
+          OnClick = btnTrkImportMptmClick
+        end
+        object mnuTrkImportLegacy: TMenuItem
+          Caption = 'ScreamTracker 3 (.s3m)...'
+          OnClick = btnTrkImportLegacyClick
+        end
+      end
+      object mnuTrkExport: TMenuItem
+        Caption = 'Export'
+        OnClick = mnuTrkExportClick
+        object mnuTrkExportFiles: TMenuItem
+          Caption = 'Files'
+          object mnuTrkExportMod: TMenuItem
+            Caption = 'ProTracker .mod...'
+            OnClick = btnTrkExportModClick
+          end
+          object mnuTrkExportXm: TMenuItem
+            Caption = 'FastTracker .xm...'
+            OnClick = btnTrkExportXmClick
+          end
+          object mnuTrkExportMptm: TMenuItem
+            Caption = 'OpenMPT .mptm...'
+            OnClick = btnTrkExportMptmClick
+          end
+        end
+        object mnuTrkExportFilesSep: TMenuItem
+          Caption = '-'
+        end
+        object mnuTrkExportRegion: TMenuItem
+          Caption = 'Export Marked Region to Timeline'
+          Enabled = False
+          OnClick = pmTrkExportRegionToTimelineClick
+        end
+        object mnuTrkExportPattern: TMenuItem
+          Caption = 'Export Pattern to Timeline'
+          OnClick = pmTrkExportPatternToTimelineClick
+        end
+      end
+    end
+    object mnuMixer: TMenuItem
+      Caption = 'Mixer'
+      Visible = False
+      object mnuMixMeters: TMenuItem
+        Caption = 'Loudness and Phase Meters...'
+        OnClick = ShowMetersClick
+      end
+      object mnuMixStrip: TMenuItem
+        Caption = 'Strip'
+        object mnuMixAddTrack: TMenuItem
+          Caption = 'Add track'
+          OnClick = btnMixAddTrackClick
+        end
+        object mnuMixAddBus: TMenuItem
+          Caption = 'Add bus'
+          OnClick = btnMixAddBusClick
+        end
+        object mnuMixAddAux: TMenuItem
+          Caption = 'Add aux'
+          OnClick = btnMixAddAuxClick
+        end
+        object mnuMixAddVCA: TMenuItem
+          Caption = 'Add VCA'
+          OnClick = btnMixAddVCAClick
+        end
+        object mnuMixRemove: TMenuItem
+          Caption = 'Remove strip'
+          OnClick = btnMixRemoveClick
+        end
+        object mnuMixApply: TMenuItem
+          Caption = 'Apply strip'
+          OnClick = btnMixApplyClick
+        end
+      end
+      object mnuMixInsert: TMenuItem
+        Caption = 'Insert'
+        object mnuMixAddInsert: TMenuItem
+          Caption = 'Add insert'
+          OnClick = btnMixAddEQClick
+        end
+        object mnuMixLoadPlugin: TMenuItem
+          Caption = 'Load plug-in (VST3 / VST2 / CLAP)...'
+          OnClick = btnMixAddVSTClick
+        end
+        object mnuMixDelInsert: TMenuItem
+          Caption = 'Remove insert'
+          OnClick = btnMixDelInsertClick
+        end
+      end
+      object mnuMixModulation: TMenuItem
+        Caption = 'Modulation'
+        object mnuMixModLFO: TMenuItem
+          Tag = 1
+          Caption = 'Add LFO modulator...'
+          OnClick = MixModMenuClick
+        end
+        object mnuMixModRandom: TMenuItem
+          Tag = 2
+          Caption = 'Add smooth random modulator...'
+          OnClick = MixModMenuClick
+        end
+        object mnuMixModSteps: TMenuItem
+          Tag = 3
+          Caption = 'Add step modulator...'
+          OnClick = MixModMenuClick
+        end
+        object mnuMixModFollower: TMenuItem
+          Tag = 4
+          Caption = 'Add envelope follower (selected strip)'
+          OnClick = MixModMenuClick
+        end
+        object mnuMixModMacro: TMenuItem
+          Tag = 5
+          Caption = 'Add macro knob...'
+          OnClick = MixModMenuClick
+        end
+        object mnuMixModRoute: TMenuItem
+          Tag = 6
+          Caption = 'Route modulator to selected strip...'
+          OnClick = MixModMenuClick
+        end
+        object mnuMixModList: TMenuItem
+          Tag = 7
+          Caption = 'List modulators and routes'
+          OnClick = MixModMenuClick
+        end
+        object mnuMixModClear: TMenuItem
+          Tag = 8
+          Caption = 'Remove all modulators'
+          OnClick = MixModMenuClick
+        end
+      end
+      object mnuMixTools: TMenuItem
+        Caption = 'Tools'
+        object mnuMixPreview: TMenuItem
+          Caption = 'Render preview mix'
+          OnClick = btnMixPreviewClick
+        end
+      end
+    end
+    object mnuMidi: TMenuItem
+      Caption = 'MIDI'
+      Visible = False
+      object mnuMidiClip: TMenuItem
+        Caption = 'Clip'
+        object mnuMidiAddClip: TMenuItem
+          Caption = 'Add clip'
+          OnClick = btnMidiAddClipClick
+        end
+        object mnuMidiAddTrack: TMenuItem
+          Caption = 'Add track'
+          OnClick = btnMidiAddTrackClick
+        end
+      end
+      object mnuMidiNote: TMenuItem
+        Caption = 'Note'
+        object mnuMidiAddNote: TMenuItem
+          Caption = 'Add note'
+          OnClick = btnMidiAddNoteClick
+        end
+        object mnuMidiDelNote: TMenuItem
+          Caption = 'Delete last note'
+          OnClick = btnMidiDelNoteClick
+        end
+      end
+      object mnuMidiGrid: TMenuItem
+        Caption = 'Grid'
+        object mnuMidiQuantize: TMenuItem
+          Caption = 'Quantize'
+          OnClick = btnMidiQuantizeClick
+        end
+        object mnuMidiHumanize: TMenuItem
+          Caption = 'Humanize'
+          OnClick = btnMidiHumanizeClick
+        end
+        object mnuMidiDemo: TMenuItem
+          Caption = 'Fill demo phrase'
+          OnClick = btnMidiDemoClick
+        end
+      end
+      object mnuMidiTransport: TMenuItem
+        Caption = 'Transport'
+        object mnuMidiPlay: TMenuItem
+          Caption = 'Play'
+          OnClick = btnMidiPlayClick
+        end
+        object mnuMidiStop: TMenuItem
+          Caption = 'Stop'
+          OnClick = btnMidiStopClick
+        end
+        object mnuMidiTransportSep: TMenuItem
+          Caption = '-'
+        end
+        object mnuMidiRecord: TMenuItem
+          Caption = 'Record from MIDI device'
+          OnClick = mnuMidiRecordClick
+        end
+        object mnuMidiPanic: TMenuItem
+          Caption = 'MIDI Panic (all notes off)'
+          OnClick = btnSetMidiPanicClick
+        end
+      end
+      object mnuMidiImport: TMenuItem
+        Caption = 'Import .mid...'
+        OnClick = btnMidiImportSMFClick
+      end
+      object mnuMidiExport: TMenuItem
+        Caption = 'Export .mid...'
+        OnClick = btnMidiExportSMFClick
+      end
+    end
+    object mnuTimeline: TMenuItem
+      Caption = 'Timeline'
+      Visible = False
+      OnClick = mnuTimelineClick
+      object mnuTlFoley: TMenuItem
+        Caption = 'Foley Sampler...'
+        OnClick = ShowFoleyClick
+      end
+      object mnuTlMeters: TMenuItem
+        Caption = 'Loudness and Phase Meters...'
+        OnClick = ShowMetersClick
+      end
+      object mnuTlExport: TMenuItem
+        Caption = 'Export'
+        object mnuTlExportWav: TMenuItem
+          Caption = 'WAV...'
+          OnClick = pmTlExportWavClick
+        end
+        object mnuTlExportMp3: TMenuItem
+          Caption = 'MP3...'
+          OnClick = pmTlExportMp3Click
+        end
+        object mnuTlExportMp4: TMenuItem
+          Caption = 'MP4...'
+          OnClick = pmTlExportMp4Click
+        end
+        object mnuTlExportMkv: TMenuItem
+          Caption = 'MKV...'
+          OnClick = pmTlExportMkvClick
+        end
+        object mnuTlExportFlac: TMenuItem
+          Caption = 'FLAC...'
+          OnClick = pmTlExportFlacClick
+        end
+      end
+      object mnuTlExportSep: TMenuItem
+        Caption = '-'
+      end
+      object mnuTlDock: TMenuItem
+        Caption = 'Show Editor'
+        object mnuTlDockMixer: TMenuItem
+          Caption = 'Mixer'
+          Tag = 0
+          OnClick = DockShowClick
+        end
+        object mnuTlDockPiano: TMenuItem
+          Caption = 'Piano roll'
+          Tag = 1
+          OnClick = DockShowClick
+        end
+        object mnuTlDockTracker: TMenuItem
+          Caption = 'Tracker'
+          Tag = 2
+          OnClick = DockShowClick
+        end
+        object mnuTlDockRecord: TMenuItem
+          Caption = 'Recording'
+          Tag = 3
+          OnClick = DockShowClick
+        end
+        object mnuTlDockSep: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlDockHide: TMenuItem
+          Caption = 'Hide Editor'
+          Tag = 9
+          OnClick = DockShowClick
+        end
+      end
+      object mnuTlBuild: TMenuItem
+        Caption = 'Build'
+        object mnuTlDemo: TMenuItem
+          Caption = 'Build demo arrangement'
+          OnClick = btnTlDemoClick
+        end
+        object mnuTlAddTrack: TMenuItem
+          Caption = 'Add audio track'
+          OnClick = btnTlAddTrackClick
+        end
+        object mnuTlRemoveTrack: TMenuItem
+          Caption = 'Remove Timeline'
+          OnClick = btnTlRemoveTrackClick
+        end
+      end
+      object mnuTlClip: TMenuItem
+        Caption = 'Clip'
+        object mnuTlAddClip: TMenuItem
+          Caption = 'Add clip from WAV...'
+          OnClick = btnTlAddClipClick
+        end
+        object mnuTlSplit: TMenuItem
+          Caption = 'Split at playhead'
+          OnClick = btnTlSplitClick
+        end
+        object mnuTlDeleteClip: TMenuItem
+          Caption = 'Remove Element'
+          OnClick = btnTlDeleteClipClick
+        end
+      end
+      object mnuTlImport: TMenuItem
+        Caption = 'Import to Timeline'
+        object mnuTlImportWav: TMenuItem
+          Caption = 'WAV / PCM File...'
+          OnClick = mnuTlImportWavClick
+        end
+        object mnuTlImportMp3: TMenuItem
+          Caption = 'MP3 File...'
+          OnClick = btnMp3ToTimelineClick
+        end
+        object mnuTlImportMp4: TMenuItem
+          Caption = 'MP4 / M4A File...'
+          OnClick = btnMp4ToTimelineClick
+        end
+        object mnuTlImportFlac: TMenuItem
+          Caption = 'FLAC File...'
+          OnClick = mnuTlImportFlacClick
+        end
+        object mnuTlImportSep1: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlImportMod: TMenuItem
+          Caption = 'Tracker Module (.mod)...'
+          OnClick = mnuTlImportModClick
+        end
+        object mnuTlImportXm: TMenuItem
+          Caption = 'FastTracker II (.xm)...'
+          OnClick = mnuTlImportXmClick
+        end
+        object mnuTlImportMptm: TMenuItem
+          Caption = 'IT / MPTM (.it/.mptm)...'
+          OnClick = mnuTlImportMptmClick
+        end
+        object mnuTlImportLegacy: TMenuItem
+          Caption = 'ScreamTracker 3 (.s3m)...'
+          OnClick = mnuTlImportLegacyClick
+        end
+        object mnuTlImportSep2: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlImportAls: TMenuItem
+          Caption = 'Ableton Live Set (.als)...'
+          OnClick = mnuTlImportAlsClick
+        end
+        object mnuTlImportFlp: TMenuItem
+          Caption = 'FL Studio Project (.flp)...'
+          OnClick = mnuTlImportFlpClick
+        end
+      end
+      object mnuTlNavigation: TMenuItem
+        Caption = 'Navigation'
+        object mnuTlZoomIn: TMenuItem
+          Caption = 'Zoom In'
+          OnClick = btnTlZoomInClick
+        end
+        object mnuTlZoomOut: TMenuItem
+          Caption = 'Zoom Out'
+          OnClick = btnTlZoomOutClick
+        end
+        object mnuTlNavSep1: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlJumpElementStart: TMenuItem
+          Caption = 'Start of Timeline'
+          OnClick = pmTlJumpElementStartClick
+        end
+        object mnuTlJumpElementEnd: TMenuItem
+          Caption = 'End of Timeline'
+          OnClick = pmTlJumpElementEndClick
+        end
+        object mnuTlNavSep2: TMenuItem
+          Caption = '-'
+        end
+        object mnuTlNavNext: TMenuItem
+          Caption = 'Next Grid Position'
+          OnClick = pmTlNavNextClick
+        end
+        object mnuTlNavPrev: TMenuItem
+          Caption = 'Previous Grid Position'
+          OnClick = pmTlNavPrevClick
+        end
+      end
+      object mnuTlTransport: TMenuItem
+        Caption = 'Transport'
+        object mnuTlPlay: TMenuItem
+          Caption = 'Play'
+          object mnuTlPlayFromBeginning: TMenuItem
+            Caption = 'Play from Beginning'
+            OnClick = TlPlayFromBeginningClick
+          end
+          object mnuTlPlayFromCurrent: TMenuItem
+            Caption = 'Play from Current'
+            OnClick = TlPlayFromCurrentClick
+          end
+          object mnuTlPlayReverse: TMenuItem
+            Caption = 'Play in Reverse'
+            OnClick = TlPlayReverseClick
+          end
+          object mnuTlPlayPingPong: TMenuItem
+            Caption = 'Play Ping Pong'
+            OnClick = TlPlayPingPongClick
+          end
+        end
+        object mnuTlStop: TMenuItem
+          Caption = 'Stop'
+          Enabled = False
+          OnClick = btnTlStopClick
+        end
+      end
       object mnuTlTrack: TMenuItem
         Caption = 'Channel'
         object mnuTlTrackUp: TMenuItem
@@ -9142,7 +9497,7 @@ object frmMain: TfrmMain
       end
     end
     object mnuAi: TMenuItem
-      Caption = 'AI'
+      Caption = 'AI/SI'
       Visible = False
       object mnuAiCredentials: TMenuItem
         Caption = 'Credentials'
@@ -9252,11 +9607,53 @@ object frmMain: TfrmMain
         OnClick = mnuScriptFolderClick
       end
     end
+    object mnuPlugins: TMenuItem
+      Caption = 'Plugins'
+      OnClick = mnuPluginsClick
+      object mnuPlgSep1: TMenuItem
+        Caption = '-'
+      end
+      object mnuPlgLoadVst2: TMenuItem
+        Caption = 'Load VST 2 Plug-in...'
+        OnClick = mnuPlgLoadVst2Click
+      end
+      object mnuPlgLoadVst3: TMenuItem
+        Caption = 'Load VST 3 Plug-in...'
+        OnClick = mnuPlgLoadVst3Click
+      end
+      object mnuPySep: TMenuItem
+        Caption = '-'
+      end
+      object mnuPyEditor: TMenuItem
+        Caption = 'Open Python Editor...'
+        OnClick = mnuPyEditorClick
+      end
+      object mnuPyNew: TMenuItem
+        Caption = 'New Python Plug-in...'
+        OnClick = mnuPyNewClick
+      end
+      object mnuPyExample: TMenuItem
+        Caption = 'Open Example: Guitar Overdrive / Distortion'
+        OnClick = mnuPyExampleClick
+      end
+      object mnuPlgRescan: TMenuItem
+        Caption = 'Rescan Plug-ins'
+        OnClick = mnuPlgRescanClick
+      end
+      object mnuPyFolder: TMenuItem
+        Caption = 'Open Plug-ins Folder'
+        OnClick = mnuPyFolderClick
+      end
+    end
     object mnuHelp: TMenuItem
       Caption = 'Help'
       object mnuHelpAbout: TMenuItem
         Caption = 'UDAW Help Centre...'
         OnClick = btnHelpAboutClick
+      end
+      object mnuHelpLicense: TMenuItem
+        Caption = 'License and EULA (Read the Agreement)...'
+        OnClick = mnuHelpLicenseClick
       end
       object mnuHelpAboutUdawSep: TMenuItem
         Caption = '-'
@@ -11909,7 +12306,7 @@ object frmMain: TfrmMain
           OnClick = mnuTlImportMptmClick
         end
         object pmTlImportLegacy: TMenuItem
-          Caption = 'Other tracker formats (.s3m .stm .669 .okt .mtm .ult .amf .ptm .far .dsm)...'
+          Caption = 'ScreamTracker 3 (.s3m)...'
           OnClick = mnuTlImportLegacyClick
         end
         object pmTlImportMod: TMenuItem

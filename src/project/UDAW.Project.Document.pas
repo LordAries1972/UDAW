@@ -38,6 +38,7 @@ const
   PROJECT_DEFAULT_TSIG_DEN   = 4;
   PROJECT_DEFAULT_NAME       = 'Untitled Project';
 
+  EXPORT_VIDEO_PRESERVE = -1;   // VideoBitrateKbps: keep the original picture quality
   EXPORT_MIN_VIDEO_KBPS = 500;
   EXPORT_MAX_VIDEO_KBPS = 80000;
   EXPORT_MIN_AUDIO_KBPS = 64;
@@ -52,7 +53,7 @@ type
     and restored when it is loaded. Zero means "automatic": a bitrate derived
     from the picture size / the original picture width. }
   TExportSettings = record
-    VideoBitrateKbps: Integer;   // 0 = automatic
+    VideoBitrateKbps: Integer;   // 0 = automatic, EXPORT_VIDEO_PRESERVE = preserve original
     MaxWidth: Integer;           // 0 = keep the source picture size
     AudioBitrateKbps: Integer;   // 0 = automatic (MP3 / MP4 / M4A / MKV sound)
     procedure Normalize;
@@ -202,7 +203,8 @@ uses
 
 procedure TExportSettings.Normalize;
 begin
-  if VideoBitrateKbps <= 0 then VideoBitrateKbps := 0
+  if VideoBitrateKbps < 0 then VideoBitrateKbps := EXPORT_VIDEO_PRESERVE
+  else if VideoBitrateKbps = 0 then VideoBitrateKbps := 0
   else VideoBitrateKbps := EnsureRange(VideoBitrateKbps, EXPORT_MIN_VIDEO_KBPS, EXPORT_MAX_VIDEO_KBPS);
   if AudioBitrateKbps <= 0 then AudioBitrateKbps := 0
   else AudioBitrateKbps := EnsureRange(AudioBitrateKbps, EXPORT_MIN_AUDIO_KBPS, EXPORT_MAX_AUDIO_KBPS);

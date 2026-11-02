@@ -369,7 +369,7 @@ begin
   mid := h div 2;
   cv.Brush.Color := Mix(face, ink, 0.25);
   cv.FillRect(Rect(0, mid, w, mid + 1));
-  n := Length(FPeaks) div 2;
+  n := Length(FPeaks) shr 1;
   cv.Font.Size := 8;
   if n = 0 then
   begin
