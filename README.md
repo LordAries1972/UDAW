@@ -15,9 +15,10 @@
 3. [What UDAW can do today](#what-udaw-can-do-today)
 4. [What still needs work](#what-still-needs-work)
 5. [Platform support](#platform-support)
-6. [Installing and getting started](#installing-and-getting-started)
-7. [Help system](#help-system)
-8. [License, EULA and your responsibilities](#license-eula-and-your-responsibilities)
+6. [System Requirements](#system-requirements)
+7. [Installing and getting started](#installing-and-getting-started)
+8. [Help system](#help-system)
+9. [License, EULA and your responsibilities](#license-eula-and-your-responsibilities)
 
 ---
 
@@ -171,6 +172,78 @@ UDAW is a large, fast-moving project. Being upfront about its limits:
 | **Windows 10 / 11 (64-bit)** | Supported and tested |
 | **Linux** | **Coming soon** |
 | macOS | Planned after Linux |
+
+---
+
+## System Requirements
+
+> Only the Windows build is released today. The Linux and macOS requirements below are the **targets** for those versions and may change before release.
+
+### Windows (64-bit) – available now
+
+| | Minimum | Recommended |
+| --- | --- | --- |
+| **Operating system** | Windows 10 (64-bit), version 1809 or later | Windows 11 (64-bit), fully updated |
+| **Processor** | Dual-core, 2.0 GHz, 64-bit (x64) | Quad-core or better, 3.0 GHz+ |
+| **Memory** | 4 GB RAM | 8 GB RAM or more (16 GB for large projects and video) |
+| **Graphics** | Graphics adapter with a current driver that supports hardware-accelerated OpenGL | Dedicated GPU with an up-to-date driver |
+| **Display** | 1366 × 768 | 1920 × 1080 or higher |
+| **Storage** | 500 MB for the program, plus space for your projects and recordings | SSD with several GB free |
+| **Audio** | Any Windows audio device | A low-latency audio interface for recording |
+| **Internet** | Optional | Needed for the AI services, update checks and Help downloads |
+
+### Linux (64-bit) – coming soon
+
+| | Target |
+| --- | --- |
+| **Operating system** | A current 64-bit desktop distribution (for example Ubuntu 22.04 LTS or newer, Fedora, Debian 12) |
+| **Processor / memory** | Same as Windows |
+| **Graphics** | Hardware-accelerated OpenGL with a current driver |
+| **Audio** | PipeWire or PulseAudio (ALSA supported) |
+| **Display server** | X11 or Wayland |
+
+### macOS – planned after Linux
+
+| | Target |
+| --- | --- |
+| **Operating system** | A current, supported macOS release |
+| **Processor** | Apple silicon or Intel (64-bit) |
+| **Memory** | Same as Windows |
+| **Audio** | Core Audio devices |
+
+### Optional extras (all platforms)
+
+- **Plug-ins:** VST2, VST3 and CLAP plug-ins you install yourself. Use the 64-bit plug-ins for the 64-bit program.
+- **MIDI:** any class-compliant MIDI keyboard or controller.
+- **AI features:** your own accounts / API keys for the services you want to use, and an internet connection.
+- **Python plug-ins:** Python 3.14 or newer on your machine, if you want to run or write Python plug-ins. See [Installing Python](#installing-python) below.
+
+### Installing Python
+
+Python is only needed for Python plug-ins and scripting. **UDAW requires Python 3.14 or newer.** Install a 64-bit release of that version (or later) for your platform, then restart UDAW so it can find it.
+
+**Windows**
+
+1. Go to [python.org/downloads](https://www.python.org/downloads/) and download the latest **Windows installer (64-bit)**.
+2. Run the installer and tick **Add python.exe to PATH** on the first page, then choose **Install Now**.
+3. Open a new Command Prompt and check it with `python --version`.
+
+Alternatively, from a Command Prompt: `winget install Python.Python.3.14`
+
+**Linux**
+
+Many distributions ship an older Python 3, so check with `python3 --version`. If it is older than 3.14, install a newer one with your package manager (or from [python.org/downloads/source](https://www.python.org/downloads/source/) or a tool such as `pyenv` if your distribution does not package 3.14 yet):
+
+- Debian / Ubuntu: `sudo apt update && sudo apt install python3.14` (may need the deadsnakes PPA on Ubuntu)
+- Fedora: `sudo dnf install python3.14`
+- Arch: `sudo pacman -S python`
+
+**macOS**
+
+1. Go to [python.org/downloads/macos](https://www.python.org/downloads/macos/) and download the latest **macOS 64-bit universal2 installer**, then open the `.pkg` and follow the prompts.
+2. Check it in Terminal with `python3 --version`.
+
+Alternatively, with [Homebrew](https://brew.sh/): `brew install python@3.14`
 
 ---
 

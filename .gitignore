@@ -12,8 +12,12 @@
 /.udaw-home/UDAW
 /.udaw-home/UDAW/Temp
 /.udaw-home/UDAW/Temp/phase5-tests
+/bin
 /build/dcu
 /buildbin-debug
+/releases
 .mcp.json
 
 *.dcu
+*.exe
+*.zip

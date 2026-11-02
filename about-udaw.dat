@@ -2698,6 +2698,47 @@ class Plugin(up.Plugin):
                 <a href="#ai-mcp">Model Context Protocol</a>) is likewise Windows-only today - the
                 MCP client (consuming external servers) works the same everywhere the app runs.
             </p>
+            <h3 id="system-requirements">System Requirements</h3>
+            <p>Only the Windows version is released today. The Linux and macOS entries are targets and may change before those versions are released.</p>
+            <table class="udaw-table">
+                <tr><th>&nbsp;</th><th>Windows (64-bit) &ndash; available now</th><th>Linux (64-bit) &ndash; coming soon</th><th>macOS &ndash; planned after Linux</th></tr>
+                <tr><td>Operating system</td><td>Windows 10 (version 1809 or later) or Windows 11; Windows 11 recommended</td><td>A current 64-bit desktop distribution (for example Ubuntu 22.04 LTS or newer, Fedora, Debian 12)</td><td>A current, supported macOS release</td></tr>
+                <tr><td>Processor</td><td>Dual-core 2.0 GHz 64-bit minimum; quad-core 3.0 GHz or better recommended</td><td>Same as Windows</td><td>Apple silicon or Intel (64-bit)</td></tr>
+                <tr><td>Memory</td><td>4 GB minimum; 8 GB or more recommended (16 GB for large projects and video)</td><td>Same as Windows</td><td>Same as Windows</td></tr>
+                <tr><td>Graphics</td><td>Graphics adapter with a current driver that supports hardware acceleration; a dedicated GPU is recommended</td><td>Hardware-accelerated graphics with a current driver</td><td>Supported graphics hardware</td></tr>
+                <tr><td>Display</td><td>1366 &times; 768 minimum; 1920 &times; 1080 or higher recommended</td><td>Same as Windows</td><td>Same as Windows</td></tr>
+                <tr><td>Storage</td><td>500 MB for the program plus space for your projects and recordings; an SSD with several GB free is recommended</td><td>Same as Windows</td><td>Same as Windows</td></tr>
+                <tr><td>Audio</td><td>Any Windows audio device; a low-latency audio interface is recommended for recording</td><td>PipeWire or PulseAudio (ALSA supported)</td><td>Core Audio devices</td></tr>
+                <tr><td>Internet</td><td colspan="3">Optional. Needed for the AI services, update checks and Help.</td></tr>
+            </table>
+            <p>
+                <b>Optional extras (all platforms):</b> VST2, VST3 and CLAP plug-ins you install yourself (use 64-bit plug-ins); any class-compliant MIDI keyboard or controller; your own accounts / API keys for the AI services you want to use; and <b>Python 3.14 or newer</b> if you want to use or write Python plug-ins.
+            </p>
+
+            <h3 id="installing-python">Installing Python</h3>
+            <p>
+                Python is only needed for Python plug-ins and scripts. <b>UDAW requires Python 3.14 or newer.</b> Install a 64-bit release of that version (or later) for your platform, then restart UDAW so it can find it.
+            </p>
+            <h4>Windows</h4>
+            <ol>
+                <li>Go to <b>python.org/downloads</b> and download the latest <b>Windows installer (64-bit)</b>.</li>
+                <li>Run the installer and tick <b>Add python.exe to PATH</b> on the first page, then choose <b>Install Now</b>.</li>
+                <li>Open a new Command Prompt and check it with <code>python --version</code>.</li>
+            </ol>
+            <p>Alternatively, from a Command Prompt: <code>winget install Python.Python.3.14</code></p>
+            <h4>Linux</h4>
+            <p>Many distributions ship an older Python 3, so check with <code>python3 --version</code>. If it is older than 3.14, install a newer one with your package manager (or from python.org/downloads/source, or a tool such as pyenv, if your distribution does not package 3.14 yet):</p>
+            <ul>
+                <li>Debian / Ubuntu: <code>sudo apt update &amp;&amp; sudo apt install python3.14</code> (Ubuntu may need the deadsnakes PPA)</li>
+                <li>Fedora: <code>sudo dnf install python3.14</code></li>
+                <li>Arch: <code>sudo pacman -S python</code></li>
+            </ul>
+            <h4>macOS</h4>
+            <ol>
+                <li>Go to <b>python.org/downloads/macos</b>, download the latest <b>macOS 64-bit universal2 installer</b>, then open the <code>.pkg</code> and follow the prompts.</li>
+                <li>Check it in Terminal with <code>python3 --version</code>.</li>
+            </ol>
+            <p>Alternatively, with Homebrew: <code>brew install python@3.14</code></p>
         </section>
 
         <!-- ============================================================ -->

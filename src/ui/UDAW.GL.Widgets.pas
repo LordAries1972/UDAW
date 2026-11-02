@@ -1262,7 +1262,13 @@ type
     FCombo: TGLCombo;
     FHot: Integer;
     FTop: Integer;
+    FGlowRow: Integer;     // the row the animated highlight is on
+    FGlow: Double;         // 0..1 fade of that highlight
+    FPhase: Double;        // drives the pulse and the sweeping band
+    FAnim: TTimer;
     function RowAt(Y: Integer): Integer;
+    procedure AnimTick(Sender: TObject);
+    procedure DrawRowGlow(cv: TGLCanvas; const R: TRect; AAccent: TColor);
   protected
     procedure CreateParams(var Params: TCreateParams); override;
     procedure PaintGL; override;
@@ -8409,7 +8415,61 @@ begin
   SharedSurface := True;
   FCombo := ACombo;
   FHot := -1;
+  FGlowRow := -1;
   ControlStyle := ControlStyle + [csOpaque];
+  FAnim := TTimer.Create(Self);
+  FAnim.Interval := 20;
+  FAnim.OnTimer := AnimTick;
+end;
+
+{ fades the highlight in on the row under the pointer and keeps its pulse and sweep moving }
+procedure TGLComboList.AnimTick(Sender: TObject);
+begin
+  if FHot <> FGlowRow then
+  begin
+    FGlowRow := FHot;
+    FGlow := 0;
+  end;
+  if FGlowRow >= 0 then FGlow := System.Math.Min(1.0, FGlow + 0.18);
+  FPhase := FPhase + 0.11;
+  if HandleAllocated and Visible then Invalidate;
+end;
+
+{ the same look as a hovered button: a breathing halo, a deep accent body, a gloss and a slanted
+  band of light sweeping across the row }
+procedure TGLComboList.DrawRowGlow(cv: TGLCanvas; const R: TRect; AAccent: TColor);
+var
+  deep: TColor;
+  pulse, sweep: Double;
+  sx, k: Integer;
+begin
+  deep := Blend(AAccent, clBlack, 0.35);
+  pulse := 0.5 + 0.5 * FastSin(FPhase);
+  cv.Pen.Style := psClear;
+  cv.Brush.Style := bsSolid;
+  cv.Brush.Color := AAccent;
+  cv.Alpha := (0.10 + 0.16 * pulse) * FGlow;
+  cv.RoundRect(R.Left - 1, R.Top - 1, R.Right + 1, R.Bottom + 1, 6, 6);
+  cv.Alpha := FGlow;
+  cv.Brush.Color := deep;
+  cv.RoundRect(R.Left, R.Top, R.Right, R.Bottom, 4, 4);
+  cv.Brush.Color := Blend(AAccent, clWhite, 0.06 + 0.14 * pulse);
+  cv.RoundRect(R.Left, R.Top, R.Right, R.Bottom - 2, 4, 4);
+  cv.Brush.Color := clWhite;
+  cv.Alpha := 0.14 * FGlow;
+  cv.RoundRect(R.Left + 2, R.Top + 1, R.Right - 2, R.Top + (R.Bottom - R.Top) div 2, 2, 2);
+  cv.PushClip(Rect(R.Left + 1, R.Top + 1, R.Right - 1, R.Bottom - 1));
+  sweep := Frac(FPhase / 8.0);
+  sx := R.Left - 40 + Round(sweep * (R.Right - R.Left + 80));
+  cv.Brush.Color := clWhite;
+  for k := 0 to 3 do
+  begin
+    cv.Alpha := (0.05 + 0.05 * k) * FGlow;
+    cv.Polygon([Point(sx + k * 5 + 8, R.Top), Point(sx + 30 - k * 5 + 8, R.Top),
+      Point(sx + 30 - k * 5 - 4, R.Bottom), Point(sx + k * 5 - 4, R.Bottom)]);
+  end;
+  cv.PopClip;
+  cv.Alpha := 1;
 end;
 
 procedure TGLComboList.CreateParams(var Params: TCreateParams);
@@ -8499,9 +8559,12 @@ begin
   begin
     if y >= Height then Break;
     if i = FHot then cv.Brush.Color := Blend(face, FCombo.AccentColor, 0.6)
-    else if i = FCombo.ItemIndex then cv.Brush.Color := Blend(face, FCombo.AccentColor, 0.25)
+    else if i = FCombo.ItemIndex then
+      cv.Brush.Color := Blend(face, FCombo.AccentColor, 0.25 + 0.10 * (0.5 + 0.5 * FastSin(FPhase)))
     else cv.Brush.Color := face;
     cv.FillRect(Rect(0, y, Width, y + 22));
+    if (i = FHot) and (i = FGlowRow) then
+      DrawRowGlow(cv, Rect(2, y + 1, Width - 2, y + 21), FCombo.AccentColor);
     cv.Font.Color := FCombo.InkColor;
     cv.TextOut(8, y + (22 - cv.TextHeight('Ag')) div 2, FCombo.Items[i]);
     Inc(y, 22);
