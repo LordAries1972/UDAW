@@ -442,7 +442,7 @@
             <h1>UDAW Help Centre</h1>
             <p>Recording &middot; Timeline &middot; Mixing &middot; DSP &middot; Tracker &middot; MIDI &middot; AI/SI Composition</p>
             <p class="udaw-build-info">
-                Version <!--UDAW_VERSION-->1.0.682<!--/UDAW_VERSION--> &middot;
+                Version <!--UDAW_VERSION-->1.0.683<!--/UDAW_VERSION--> &middot;
                 Built <!--UDAW_BUILDDATE-->06/11/2026<!--/UDAW_BUILDDATE-->
             </p>
         </header>

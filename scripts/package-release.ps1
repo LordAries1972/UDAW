@@ -15,6 +15,10 @@
                    checksum every running copy of this exact build is
                    compared against at startup)
 
+  A copy of the ZIP is also kept in the repository's releases\ folder as
+  udaw-update-win64-<version>.zip (one file per version, never overwritten by
+  a different version).
+
   The package also carries the repository's Plugins\ and scripts\ folders
   (Python caches, Plugins\prof and this script - it holds the signing key - are
   left out).
@@ -138,6 +142,11 @@ $manifest = [ordered]@{
     sig        = $sig
 } | ConvertTo-Json -Compress
 
+$releasesDir = Join-Path $root 'releases'
+New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
+$releaseCopy = Join-Path $releasesDir ("udaw-update-win64-$version.zip")
+Copy-Item $zipPath $releaseCopy -Force
+
 New-Item -ItemType Directory -Force -Path (Join-Path $WebRoot 'cgi-bin') | Out-Null
 Move-Item $zipPath (Join-Path $WebRoot "cgi-bin\$zipName") -Force
 [IO.File]::WriteAllText((Join-Path $WebRoot 'udaw-version-win64.json'), $manifest, (New-Object Text.UTF8Encoding($false)))
@@ -145,4 +154,5 @@ Move-Item $zipPath (Join-Path $WebRoot "cgi-bin\$zipName") -Force
 Write-Host "==> Packaged UDAW $version"
 Write-Host "    exe sha256 : $exeSha"
 Write-Host "    zip sha256 : $zipSha"
+Write-Host "    release    : $releaseCopy"
 Write-Host "    upload     : cgi-bin\$zipName  and  udaw-version-win64.json"
