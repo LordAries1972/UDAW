@@ -1,6 +1,5 @@
 *.dcu
 *.exe
-*.zip
 .workspace
 .workspace.bak
 /.udaw-home
@@ -14,6 +13,5 @@
 /bin
 /build/dcu
 /buildbin-debug
-/releases
 .mcp.json
 
