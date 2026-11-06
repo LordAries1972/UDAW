@@ -89,13 +89,19 @@ type
     property OnExit;
   end;
 
+  { a picture drawn on a button in place of its caption }
+  TGLButtonIcon = (biNone, biSave, biDelete);
+
   TGLButton = class(TGLWidget)
   private
     FToggle: Boolean;
     FDown: Boolean;
     FDefault: Boolean;
+    FIcon: TGLButtonIcon;
     FOnChange: TNotifyEvent;
     procedure SetDown(AValue: Boolean);
+    procedure SetIcon(AValue: TGLButtonIcon);
+    procedure DrawIcon(cv: TGLCanvas; const R: TRect);
     procedure CMDialogKey(var Msg: TCMDialogKey); message CM_DIALOGKEY;
   protected
     procedure PaintGL; override;
@@ -110,6 +116,8 @@ type
     property Default: Boolean read FDefault write FDefault default False;
     property Toggle: Boolean read FToggle write FToggle default False;
     property Down: Boolean read FDown write SetDown default False;
+    { drawn centred on the face instead of the caption (a disk to save, a bin to delete) }
+    property Icon: TGLButtonIcon read FIcon write SetIcon default biNone;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
   end;
 
@@ -2019,11 +2027,66 @@ begin
   end;
   cv.Brush.Style := bsSolid;
   cv.Font.Color := InkColor;
-  tw := cv.TextWidth(ShownCaption);
-  th := cv.TextHeight(ShownCaption);
-  cv.TextOut((w - tw) div 2,
-    faceRect.Top + (faceRect.Bottom - faceRect.Top - th) div 2, ShownCaption);
+  if FIcon <> biNone then
+    DrawIcon(cv, faceRect)
+  else
+  begin
+    tw := cv.TextWidth(ShownCaption);
+    th := cv.TextHeight(ShownCaption);
+    cv.TextOut((w - tw) div 2,
+      faceRect.Top + (faceRect.Bottom - faceRect.Top - th) div 2, ShownCaption);
+  end;
   DrawFocus(cv);
+end;
+
+procedure TGLButton.SetIcon(AValue: TGLButtonIcon);
+begin
+  if FIcon = AValue then Exit;
+  FIcon := AValue;
+  Invalidate;
+end;
+
+{ the glyphs are drawn with lines and polygons so they stay sharp at any size and take the
+  theme's ink colour }
+procedure TGLButton.DrawIcon(cv: TGLCanvas; const R: TRect);
+var
+  cx, cy, s: Integer;   // s: half the glyph's size
+begin
+  cx := (R.Left + R.Right) div 2;
+  cy := (R.Top + R.Bottom) div 2;
+  s := System.Math.Min(R.Right - R.Left, R.Bottom - R.Top) div 2 - 5;
+  if s < 4 then s := 4;
+  cv.Pen.Style := psSolid;
+  cv.Pen.Color := InkColor;
+  cv.Pen.Width := 1;
+  cv.Brush.Style := bsClear;
+  case FIcon of
+    biSave:
+      begin
+        { a floppy disk: a body with a cut corner, the metal shutter at the top, the label below }
+        cv.Polygon([Point(cx - s, cy - s), Point(cx + s - 3, cy - s), Point(cx + s, cy - s + 3),
+          Point(cx + s, cy + s), Point(cx - s, cy + s)]);
+        cv.Rectangle(cx - s + 3, cy - s, cx + s - 3, cy - s + 5);
+        cv.Rectangle(cx - s + 3, cy + 1, cx + s - 3, cy + s);
+      end;
+    biDelete:
+      begin
+        { a bin: a lid with a handle over a tapering body with two slots }
+        cv.MoveTo(cx - s, cy - s + 3);
+        cv.LineTo(cx + s + 1, cy - s + 3);
+        cv.MoveTo(cx - 2, cy - s + 3);
+        cv.LineTo(cx - 2, cy - s);
+        cv.LineTo(cx + 3, cy - s);
+        cv.LineTo(cx + 3, cy - s + 3);
+        cv.Polygon([Point(cx - s + 2, cy - s + 5), Point(cx + s - 1, cy - s + 5),
+          Point(cx + s - 3, cy + s), Point(cx - s + 4, cy + s)]);
+        cv.MoveTo(cx - 2, cy - s + 8);
+        cv.LineTo(cx - 2, cy + s - 3);
+        cv.MoveTo(cx + 2, cy - s + 8);
+        cv.LineTo(cx + 2, cy + s - 3);
+      end;
+  end;
+  cv.Brush.Style := bsSolid;
 end;
 
 { TGLCheck }

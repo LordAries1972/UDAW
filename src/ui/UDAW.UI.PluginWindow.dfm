@@ -120,7 +120,7 @@ object frmPyPlugin: TfrmPyPlugin
     Left = 0
     Top = 40
     Width = 560
-    Height = 34
+    Height = 68
     Align = alTop
     BevelOuter = bvNone
     ShowCaption = False
@@ -161,16 +161,53 @@ object frmPyPlugin: TfrmPyPlugin
     object cboSource: TGLCombo
       Left = 220
       Top = 4
-      Width = 230
+      Width = 214
       Height = 26
-      Hint = 'What to play through the plug-in: a built-in guitar phrase, or the range you highlighted on the Timeline.'
+      Hint = 'What to play through the plug-in: the built-in test sample (a guitar phrase), the range you highlighted on the Timeline, or live audio from your input device (guitar or microphone).'
       ShowHint = True
       Items.Strings = (
-        'Built-in guitar phrase'
-        'Highlighted Timeline range')
+        'Test sample: guitar phrase'
+        'Highlighted Timeline range'
+        'Live input (guitar / mic)')
       ItemIndex = 0
       TabOrder = 2
       OnChange = cboSourceChange
+    end
+    object cboMidi: TGLCombo
+      Left = 440
+      Top = 4
+      Width = 112
+      Height = 26
+      Anchors = [akLeft, akTop, akRight]
+      Hint = 'Send a MIDI keyboard or controller to the plug-in (its on_midi hook), whatever is being played through it.'
+      ShowHint = True
+      Items.Strings = (
+        'MIDI input: none')
+      ItemIndex = 0
+      TabOrder = 3
+      OnChange = cboMidiChange
+    end
+    object lblMidiOut: TGLLabel
+      Transparent = True
+      Left = 12
+      Top = 43
+      Width = 50
+      Height = 15
+      Caption = 'MIDI out:'
+    end
+    object cboMidiOut: TGLCombo
+      Left = 66
+      Top = 38
+      Width = 486
+      Height = 26
+      Anchors = [akLeft, akTop, akRight]
+      Hint = 'Send the MIDI the plug-in produces (its send_midi calls) to a MIDI output device - a hardware synth, or a virtual MIDI cable into another program.'
+      ShowHint = True
+      Items.Strings = (
+        'MIDI output: none')
+      ItemIndex = 0
+      TabOrder = 4
+      OnChange = cboMidiOutChange
     end
   end
   object pnlStatus: TGLPanel

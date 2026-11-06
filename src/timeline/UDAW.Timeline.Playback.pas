@@ -42,7 +42,8 @@ uses {$IFDEF FPC}UDAW.Compat,{$ENDIF}
   UDAW.DSP.Interpolation, UDAW.DSP.Math, UDAW.DSP.TimeStretch,
   UDAW.Codec.WAV, UDAW.Codec.MP3, UDAW.Codec.MP4, UDAW.Codec.FLAC,
   UDAW.Jobs, UDAW.Timeline.Time, UDAW.Timeline.Model, UDAW.Timeline.TrackerSource, UDAW.Mixer.Model, UDAW.Mixer.Engine,
-  UDAW.MIDI.Sequence, UDAW.MIDI.Serialization, UDAW.MIDI.Engine;
+  UDAW.MIDI.Sequence, UDAW.MIDI.Serialization, UDAW.MIDI.Engine,
+  UDAW.Mixer.PluginHost, UDAW.Mixer.PluginMidi;
 
 var
   { Settings > "Conform clip tempo by resampling": every new TTimelinePlayer
@@ -156,6 +157,7 @@ type
       ATimeSeconds: Double; AApplyTrackGainPan: Boolean; out AL, AR: Single): Boolean;
     procedure RefreshLinkedTracks;
     procedure RenderMidiBlock(AFrameCount: Integer; AAnySoloed, AMixerActive: Boolean);
+    procedure PublishPluginTransport;
     function CopyMidiDry(ATrackId: Integer; ABuffer: TAudioBuffer): Boolean;
   public
     constructor Create(ATimeline: TTimeline);
@@ -1295,6 +1297,30 @@ begin
     end;
 end;
 
+{ tells tempo-synced plug-ins where the project is: tempo, beat position, time signature }
+procedure TTimelinePlayer.PublishPluginTransport;
+var
+  tp: TPluginTransport;
+  t: Double;
+begin
+  t := FTimeline.PlayheadSeconds;
+  tp := TPluginTransport.Make(True, 120, 0);
+  tp.SamplePos := Round(t * FOutSampleRate);
+  if FMidiMapped and (FMidiCtx.Tempo > 0) then
+  begin
+    tp.Tempo := FMidiCtx.TempoAt(t);
+    tp.PpqPos := SecondsToBeats(FMidiCtx, t);
+    tp.TimeSigNum := FMidiCtx.TSigNum;
+    tp.TimeSigDen := FMidiCtx.TSigDen;
+  end
+  else
+  begin
+    if FBaseTempoBPM > 0 then tp.Tempo := FBaseTempoBPM;
+    tp.PpqPos := t * tp.Tempo / 60.0;
+  end;
+  PluginMidi.SetTransport(tp);
+end;
+
 procedure TTimelinePlayer.RenderMidiBlock(AFrameCount: Integer; AAnySoloed, AMixerActive: Boolean);
 var
   ti, i, activeClipId, midiClipId: Integer;
@@ -1309,6 +1335,8 @@ var
   strip: TMixStrip;
   k: Integer;
   pk: Single;
+  prevClip: Integer;
+  useHub: Boolean;
 begin
   for k := 0 to 127 do
   begin
@@ -1352,6 +1380,10 @@ begin
 
     if activeClipId = 0 then
     begin
+      { the clip ended: let go of the notes a plug-in instrument on this lane was holding }
+      if FMidiActiveClip.TryGetValue(trk.Id, prevClip) and (prevClip <> 0) and
+         PluginMidi.LaneHasInstrument(trk.Id) then
+        PluginMidi.PostAllNotesOff(trk.Id);
       FMidiActiveClip.AddOrSetValue(trk.Id, 0);
       Continue;
     end;
@@ -1392,8 +1424,14 @@ begin
     wantSeek := (not eng.Playing) or (not FMidiActiveClip.ContainsKey(trk.Id)) or
       (FMidiActiveClip[trk.Id] <> activeClipId) or
       (Abs(eng.PositionSeconds - localSeconds) > 0.25);
+    { a lane whose strip holds a plug-in instrument plays through the plug-in, not the built-in synth }
+    useHub := AMixerActive and (ti < 128) and FLinkedTrackIds.ContainsKey(trk.Id) and
+              PluginMidi.LaneHasInstrument(trk.Id);
+    if useHub then eng.TapLane := trk.Id else eng.TapLane := 0;
+    eng.MuteSynth := useHub;
     if wantSeek then
     begin
+      if useHub then PluginMidi.PostAllNotesOff(trk.Id);
       eng.SeekSeconds(Max(0.0, localSeconds));
       eng.Play;
     end;
@@ -1558,6 +1596,7 @@ begin
     FMixScratch.SetActiveFrames(n);
     FMixScratch.Clear;
     FMixer.SetPlayheadSeconds(FTimeline.PlayheadSeconds);
+    PublishPluginTransport;
     FMixer.ProcessBlock(FMixScratch);
     mL := PSingle(FMixScratch.ChannelPtr(0));
     if FMixScratch.ChannelCount >= 2 then mR := PSingle(FMixScratch.ChannelPtr(1)) else mR := mL;

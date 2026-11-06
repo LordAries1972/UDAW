@@ -259,4 +259,11 @@ object frmInstrumentEditor: TfrmInstrumentEditor
     CellWidth = 48
     OnButtonClick = DialogClick
   end
+  object tmrPlay: TTimer
+    Enabled = False
+    Interval = 25
+    OnTimer = tmrPlayTimer
+    Left = 840
+    Top = 8
+  end
 end

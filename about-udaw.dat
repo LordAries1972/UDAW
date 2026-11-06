@@ -362,6 +362,7 @@
             <li><a href="#mixer">7. Mixer &amp; Routing</a>
                 <ul class="udaw-nav-sub">
                     <li><a href="#mixer-plugins">VST2 Plugin Hosting</a></li>
+                    <li><a href="#mixer-vst-instruments">VST Instruments, MIDI and the Highlighted Range</a></li>
                     <li><a href="#mixer-plugin-scan">Scanning for Plug-ins</a></li>
                     <li><a href="#python-plugins">Python Plug-ins (write your own)</a></li>
                     <li><a href="#mixer-automation">Automation Lanes</a></li>
@@ -441,8 +442,8 @@
             <h1>UDAW Help Centre</h1>
             <p>Recording &middot; Timeline &middot; Mixing &middot; DSP &middot; Tracker &middot; MIDI &middot; AI/SI Composition</p>
             <p class="udaw-build-info">
-                Version <!--UDAW_VERSION-->1.0.659<!--/UDAW_VERSION--> &middot;
-                Built <!--UDAW_BUILDDATE-->01/11/2026<!--/UDAW_BUILDDATE-->
+                Version <!--UDAW_VERSION-->1.0.682<!--/UDAW_VERSION--> &middot;
+                Built <!--UDAW_BUILDDATE-->06/11/2026<!--/UDAW_BUILDDATE-->
             </p>
         </header>
 
@@ -1274,7 +1275,7 @@
                 <tr><td>Vinyl Crackle / Comb Filter</td><td>Vinyl Crackle rolls off the top end and adds clicks and surface hiss. Comb Filter adds a very short repeat that creates a hollow, ringing, pitched tone.</td></tr>
                 <tr><td>Peak Normalize</td><td><b>Audio Effects &gt; Volume &amp; Fades</b>. Raises or lowers the selection so its loudest peak sits at -1 dBFS.</td></tr>
                 <tr><td>Split Stems</td><td>Select a clip, then choose <b>Audio Effects &gt; Tools &gt; Split Stems (Drums/Bass/Vocals/Other)</b>. Four new tracks are added, one per stem. This is classical signal processing (percussive/harmonic separation, a bass crossover and a centre-channel mask for vocals), not a neural network: the four stems always add back to the original, but separation is less clean than dedicated AI/SI tools on dense mixes.</td></tr>
-                <tr><td>Audio to MIDI</td><td>Select a clip, then <b>Audio Effects &gt; Tools &gt; Audio to MIDI...</b> and type <b>mono</b> (a melody or bass line) or <b>poly</b> (chords). The notes are written to a new Piano Roll clip using the project tempo, with velocity taken from the audio level.</td></tr>
+                <tr><td>Scan Loop Segments</td><td>Select a lane or a clip on it (or mark a range), then choose <b>Audio Effects &gt; Tools &gt; Stem Splitting - Scan Loop Segments...</b> and enter how deep a dip must be, in dB below the music around it, to count as a quiet point (0 to 80, default 12; a smaller number gives more cuts). The lane is scanned from one quiet point to the next, each cut placed on a zero crossing at the quietest spot so the segment starts and ends silent and loops without a click, and every segment that is a whole <b>1/4, 1/8, 1/16, 1/32, 1/64, 2/4 or 4/4</b> long at the project tempo is captured as a clip on a new track named <b>&lt;lane&gt; - Loops &lt;length&gt;</b>, one track per length found. Nothing is rendered, the clips play the original audio, and Undo removes them. Clips with a Clip Tempo (Source BPM) are measured against their own tempo and the captured clips keep it; reversed and MIDI clips are skipped. The Timeline log reports how many segments were captured and how many did not fit a note length.</td></tr><tr><td>Audio to MIDI</td><td>Select a clip, then <b>Audio Effects &gt; Tools &gt; Audio to MIDI...</b> and type <b>mono</b> (a melody or bass line) or <b>poly</b> (chords). The notes are written to a new Piano Roll clip using the project tempo, with velocity taken from the audio level.</td></tr>
                 <tr><td>Warp markers</td><td>Select an audio clip. <b>Warp: Add Marker at Playhead</b> pins a point; <b>Warp: Snap Marker to Nearest Beat</b> moves the marker nearest the playhead onto the beat grid; <b>Warp: Auto-Detect Beats to Grid</b> finds the drum hits or note starts and pins each one that is close to a beat. <b>Warp: Apply Markers</b> time-stretches the audio between markers (pitch preserved) into a new file and swaps it into the clip, keeping the clip's length. Undo restores the original audio; <b>Warp: Clear Markers</b> discards pending markers.</td></tr>
                 <tr><td>Metronome</td><td>Tick <b>Metronome</b> beside the tempo field on the Timeline tab. An accented click plays on every beat during playback and follows loops and seeks. It is a monitoring aid and is never included in exports.</td></tr>
             </table>
@@ -1482,13 +1483,14 @@
             </div>
             <p>
                 UDAW hosts VST2-ABI effect plugins directly - the classic 32-/64-bit Windows VST2 "shell
-                DLL" format many DAWs and hardware-modelled effects still ship in. Only audio effect
-                plugins are supported (audio in, audio out); VST instruments are not hosted. CLAP and
-                VST3 effect plug-ins are hosted as well - see below.
+                DLL" format many DAWs and hardware-modelled effects still ship in. Audio effects and
+                instruments are both hosted, VST2 and VST3 alike - see
+                <a href="#mixer-vst-instruments">VST Instruments, MIDI and the Highlighted Range</a>.
+                CLAP effect plug-ins are hosted as well - see below.
             </p>
             <table class="udaw-table udaw-col-22">
                 <tr><th>Action</th><th>How</th></tr>
-                <tr><td>Load a plugin</td><td>Select a strip, click <b>Add VST...</b> on the Mixer tab and choose the .dll. UDAW probes the file first and refuses anything that isn't a usable VST2 audio effect, with the reason shown if it's rejected.</td></tr>
+                <tr><td>Load a plugin</td><td>Select a strip, click <b>Add VST...</b> on the Mixer tab and choose the .dll. UDAW probes the file first and refuses anything that isn't a usable plug-in, with the reason shown if it's rejected. A .vst3 file is added the same way.</td></tr>
                 <tr><td>Drag-and-drop</td><td>Drag a .dll from the Browser tab straight onto a mixer strip to add it as an insert, the same way a sample is dragged onto the Timeline.</td></tr>
                 <tr><td>Edit parameters / open its GUI</td><td>Double-click the insert's dot on the strip, or select it and click <b>Edit VST...</b>, to open the plugin's own parameter list or native editor window.</td></tr>
                 <tr><td>Automate a parameter</td><td>A VST2 insert's parameters appear alongside built-in effect parameters in the strip's automation parameter list - see <a href="#mixer-automation">Automation Lanes</a>.</td></tr>
@@ -1504,6 +1506,27 @@
             <h3 id="mixer-clap-vst3">CLAP and VST3 Plug-in Hosting</h3>
             <p>
                 <b>Add VST...</b> also accepts <strong>.clap</strong> and <strong>.vst3</strong> files (plain files or VST3 bundle folders). UDAW loads the module, checks it exposes an audio effect, and inserts it like any other effect: bypass, reorder and remove work the same way, and the plug-in's saved state travels with the project. If a plug-in ever faults while processing, that insert falls back to dry pass-through instead of taking the audio engine down. Not yet available for CLAP and VST3: the plug-in's own editor window and parameter automation (VST2 keeps both), and instrument plug-ins.
+            </p>
+
+            <h3 id="mixer-vst-instruments">VST Instruments, MIDI and the Highlighted Range</h3>
+            <div class="udaw-purpose">
+                <p><b>Purpose</b> Play VST2 and VST3 instruments from your MIDI, run any plug-in over the part of the Timeline you highlighted, and give a plug-in audio and MIDI at the same time.</p>
+                <p><b>Why</b> A plug-in is rarely just an effect: synths and samplers need notes, vocoders and some samplers want notes <i>and</i> a sound to listen to, and tempo-synced effects need to know where the song is. VST2 and VST3 plug-ins get all of that here.</p>
+            </div>
+            <table class="udaw-table udaw-col-22">
+                <tr><th>What</th><th>How</th></tr>
+                <tr><td>Play an instrument from a MIDI lane</td><td>Put the instrument on the mixer strip that is fed from a MIDI or Instrument lane (<b>Add VST...</b>, or drag it from the Browser). That lane's notes, controllers and pitch bend play the plug-in, sample-accurately, instead of the built-in synth; notes are released when a clip ends or you jump somewhere else.</td></tr>
+                <tr><td>Play it from a keyboard</td><td>The MIDI keyboard chosen in Settings plays every instrument that has <b>Live MIDI keyboard</b> ticked in its window (on by default). Effects that take MIDI hear it too.</td></tr>
+                <tr><td>Highlight a range and run a plug-in over it</td><td>Mark a time range, select the lanes, then choose <b>Effects &gt; Plug-in...</b>. An <b>effect</b> is applied to the audio lanes, as with any effect. An <b>instrument</b> (or an effect on a MIDI lane) is <b>rendered</b> over the range: the MIDI / Instrument lanes under the range play it, the audio lanes under the range, mixed, are its <b>sample input</b>, and the result lands on a new audio track at the start of the range. The lanes it was made from are left as they were, and it can be undone.</td></tr>
+                <tr><td>Hear it in the plug-in window</td><td>Double-click the insert (or <b>Edit VST...</b>). <b>Listen</b> plays the plug-in through the speakers with the built-in phrase, the range you highlighted (its sample input), nothing at all (an instrument played only from MIDI) or the live input. <b>Note</b> sounds a test note, <b>Panic</b> stops hanging notes, <b>Bypass</b> uses the plug-in's own bypass.</td></tr>
+                <tr><td>Programs and parameters</td><td>The window lists the plug-in's programs (presets). A plug-in with no window of its own gets a full parameter list, with a slider and a box where you can type a value the way the plug-in shows it (for example <code>440 Hz</code>). VST2 and VST3 parameters can both be automated and modulated in the Mixer.</td></tr>
+                <tr><td>Tempo and position</td><td>Tempo-synced plug-ins (delays, arpeggiators, sequencers) follow the project's tempo, beat, bar and time signature while the Timeline plays.</td></tr>
+                <tr><td>Side-chain and several outputs</td><td>A plug-in with a side-chain input is fed from the strip's side-chain source. Multi-output instruments are supported.</td></tr>
+                <tr><td>MIDI out</td><td>MIDI that a plug-in sends out (an arpeggiator, a MIDI effect) goes to the MIDI output device chosen in Settings.</td></tr>
+                <tr><td>Saved with the project</td><td>The plug-in's full state (including a VST3 plug-in's controller state) and the Live MIDI setting are saved with the project.</td></tr>
+            </table>
+            <p>
+                The plug-in scan lists instruments too, marked <b>instrument</b>. Run <b>Rescan Plug-ins</b> once after updating so existing plug-ins are checked for MIDI.
             </p>
 
             <h3 id="mixer-plugin-scan">Scanning for Plug-ins</h3>
@@ -1531,7 +1554,7 @@
             </ul>
             <h4>What you need</h4>
             <p>
-                <b>Python 3.14 or newer</b> from python.org (tick <i>Add python.exe to PATH</i> in the installer). Plug-ins use only what Python ships with; if you also have <code>numpy</code> installed (<code>pip install numpy</code>) a plug-in may use it for heavy maths such as vocoding or reverb; <code>up.HAS_NUMPY</code> tells a script whether it is there. UDAW finds Python by itself and tells you plainly if it is missing or too old. A faulty script can never stop or crash UDAW: at worst the plug-in passes the sound through untouched and says why.
+                <b>Python 3.14 or newer</b> from python.org (tick <i>Add python.exe to PATH</i> in the installer). A plug-in you write needs nothing beyond what Python ships with, but five of the six bundled plug-ins (<b>Vocoder, Reverberator &amp; Chorus, Virtual Guitar Rig, Stutter Edit and Tuner</b>, which also take MIDI in and send MIDI out) need the <code>numpy</code> package: without it they pass the sound through and say so in their log. See <a href="#installing-numpy">Installing numpy</a>. Your own plug-ins can use it too for heavy maths such as vocoding or reverb; <code>up.HAS_NUMPY</code> tells a script whether it is there. UDAW finds Python by itself and tells you plainly if it is missing or too old. A faulty script can never stop or crash UDAW: at worst the plug-in passes the sound through untouched and says why.
             </p>
             <h4>The Plugins menu</h4>
             <p>
@@ -1542,15 +1565,15 @@
                 <tr><td>Python Plug-ins</td><td>Your scripts; choosing one opens its window. A script in a sub-folder of the plug-ins folder is listed under a sub-menu named after that folder, so you can keep <i>Dynamics</i>, <i>Creative</i>, <i>Utilities</i> apart.</td></tr>
                 <tr><td>VST 3 Plug-ins / VST 2 Plug-ins</td><td>Effects found by the plug-in scan. A long list is sorted into sub-menus by maker when there are several makers, otherwise into alphabetical groups such as <i>A - D</i>, <i>E - K</i>, so no menu ever grows taller than the screen.</td></tr>
                 <tr><td>Load VST 2 Plug-in... / Load VST 3 Plug-in...</td><td>Pick a plug-in file yourself (for one that lives outside the standard folders) and put it on the selected strip.</td></tr>
-                <tr><td>Open Python Editor...</td><td>The plug-in editor described below.</td></tr>
+                <tr><td>Open &gt; Python Editor...</td><td>The plug-in editor described below.</td></tr>
                 <tr><td>New Python Plug-in...</td><td>Opens the editor with a small working template.</td></tr>
-                <tr><td>Open Example: Guitar Overdrive / Distortion</td><td>Opens the bundled example in the editor.</td></tr>
+                <tr><td>Open &gt; Example: Guitar Overdrive / Distortion</td><td>Opens the bundled example in the editor.</td></tr>
                 <tr><td>Rescan Plug-ins</td><td>Searches the VST folders again (with progress on the status bar) and refreshes the menu.</td></tr>
-                <tr><td>Open Plug-ins Folder</td><td>Opens the folder your Python plug-ins live in (choose it under <b>Settings &gt; Working Directories &gt; Python plug-ins folder</b>; the choice is remembered). UDAW keeps its helper module and the bundled plug-ins there. Projects point at the script files, so if you change the folder, move your plug-ins with it.</td></tr>
+                <tr><td>Open &gt; Plug-ins Folder</td><td>Opens the folder your Python plug-ins live in (choose it under <b>Settings &gt; Working Directories &gt; Python plug-ins folder</b>; the choice is remembered). UDAW keeps its helper module and the bundled plug-ins there. Projects point at the script files, so if you change the folder, move your plug-ins with it.</td></tr>
             </table>
             <h4>The editor</h4>
             <p>
-                <b>Plugins &gt; Open Python Editor...</b> opens the plug-in editor: your script on top, <b>Problems</b> and <b>Output</b> below. The toolbar:
+                <b>Plugins &gt; Open &gt; Python Editor...</b> opens the plug-in editor: your script on top, <b>Problems</b> and <b>Output</b> below. The toolbar:
             </p>
             <table class="udaw-table udaw-col-22">
                 <tr><th>Button</th><th>What it does</th></tr>
@@ -1558,7 +1581,7 @@
                 <tr><td>Validate (F6)</td><td>Checks the script without needing any audio: the file is read for syntax errors, loaded, its parameters and window are checked (duplicate names, controls bound to a parameter that does not exist, controls hanging off the window, <b>controls that overlap - the warning names both controls and their lines</b>, a missing <code>author</code>), and a test signal is run through <code>process()</code> to catch crashes, silence, non-finite numbers and code too slow for real time. Results are listed under <b>Problems</b> as errors, warnings and notes; click a line to jump to it.</td></tr>
                 <tr><td>Run (F5)</td><td>Validates, then starts the plug-in, opens its window and starts <b>Listen</b> so you hear it straight away (see below).</td></tr>
                 <tr><td>Stop</td><td>Stops the running plug-in.</td></tr>
-                <tr><td>Add to lane + Add to Mixer</td><td>Choose a Timeline lane or bus, or a Tracker channel, then press <b>Add to Mixer</b>: the plug-in goes on that strip with <b>the settings currently shown in its window</b>.</td></tr>
+                <tr><td>Add to lane + Add to Mixer</td><td>Press <b>Add to Mixer</b> in a plug-in window and pick any strip from the list that drops down (Timeline and Tracker lanes, buses and Master): the plug-in goes on that strip with <b>the settings currently shown in its window</b>.</td></tr>
             </table>
             <p>
                 Anything the script prints appears under <b>Output</b>, together with load errors - the first place to look when something does not behave.
@@ -1570,7 +1593,12 @@
             <table class="udaw-table udaw-col-22">
                 <tr><th>Control</th><th>What it does</th></tr>
                 <tr><td>Listen</td><td>Starts and stops the audition (it starts by itself when the window opens from the menu or from Run). The audition takes the speakers, so it stops Timeline playback first, and Timeline playback in turn ends the audition.</td></tr>
-                <tr><td>Source</td><td><b>Built-in guitar phrase</b>: a clean plucked-string riff that needs no files, the fallback that is always available. <b>Highlighted Timeline range</b>: the area you selected on the Timeline (up to 30 seconds, the lanes summed without their effects), played in a loop through the plug-in. With nothing highlighted UDAW says so and uses the guitar phrase.</td></tr>
+                <tr><td>Source</td><td><b>Test sample: guitar phrase</b>: a clean plucked-string riff that needs no files, the fallback that is always available. <b>Highlighted Timeline range</b>: the area you selected on the Timeline (up to 30 seconds, the lanes summed without their effects), played in a loop through the plug-in. With nothing highlighted UDAW says so and uses the guitar phrase.</td></tr>
+                <tr><td>Live input</td><td>Choose <b>Live input (guitar / mic)</b> to play your own guitar or microphone through the plug-in in real time. It needs an input device chosen in Settings with audio input enabled; the first input channel feeds the plug-in. Use headphones to avoid feedback.</td></tr>
+                <tr><td>MIDI input</td><td>Pick a MIDI keyboard or controller in the <b>MIDI input</b> list. Its notes, pitch bend and controllers are sent to the plug-in, whatever audio is playing through it. A plug-in reacts to them by defining <code>on_midi(kind, channel, data1, data2)</code> (kind is note_on, note_off, cc, pitch_bend, program, aftertouch or channel_pressure).</td></tr>
+                <tr><td>MIDI output</td><td>Pick a MIDI output device (a hardware synth, or a virtual MIDI cable into another program) in the <b>MIDI out</b> list. A plug-in sends MIDI to it by calling <code>self.send_midi(kind, channel, data1, data2)</code> with the same kinds as <code>on_midi</code>, or the shortcuts <code>note_on</code>, <code>note_off</code> and <code>all_notes_off</code>. Closing the window or changing device silences any held notes. A plug-in running on a mixer strip with no window open sends to the MIDI output device chosen in Settings, and hears the MIDI input chosen in Settings.</td></tr>
+                <tr><td>MIDI page</td><td>Every bundled plug-in has a <b>MIDI</b> tab: <b>MIDI control</b> lets controllers move its knobs (the tab lists which controller does what), <b>MIDI feedback</b> sends a controller message out whenever you move one of those knobs so a controller with motor faders or lights follows, <b>MIDI thru</b> passes the incoming MIDI on to the output, and <b>Channel</b> picks Omni or one of 16 channels. Program change loads the plug-in's presets in list order.</td></tr>
+                <tr><td>Presets</td><td>Every plug-in has a preset box at the top right. Pick a preset and it loads at once: the built-in ones first, then your own, marked <b>User:</b>. To keep your own sound, type a name in the box beside it and press the <b>disk</b> button; it is saved in the presets folder chosen under Settings (or in a Presets folder inside the plug-ins folder), in a folder of its own for each plug-in. Loading a preset fills the name box in, so the disk button overwrites it. The <b>bin</b> button deletes the selected user preset. Presets hold the settings of the sound, not the MIDI options.</td></tr>
                 <tr><td>Bypass</td><td>Plays the same material without the plug-in, to compare before and after while you turn the knobs.</td></tr>
                 <tr><td>Add to Mixer</td><td>When you like it, puts the plug-in with the settings you chose on the strip selected in the Mixer tab. The insert points at the script file, so the file must be saved (the editor offers to save it first).</td></tr>
             </table>
@@ -1686,7 +1714,7 @@ class Plugin(up.Plugin):
             </p>
             <h4>The bundled example: Guitar Overdrive &amp; Distortion</h4>
             <p>
-                <b>Plugins &gt; Open Example</b> opens a complete plug-in made for guitar recordings, and it exercises every part of the system: parameters of all kinds, per-sample audio, a tabbed window with knobs, a combo box, check boxes, level meters and a memo, a custom-drawn transfer curve with a live waveform, presets that move many settings at once, and saved extra state. Signal flow: noise gate, tight (high-pass before the clipper), drive, one of six voicings through one to three cascaded clipping stages, tone low-pass, bass / mid / presence, a cabinet filter, DC block, dry/wet mix, output level and a soft output limiter.
+                <b>Plugins &gt; Open &gt; Example</b> opens a complete plug-in made for guitar recordings, and it exercises every part of the system: parameters of all kinds, per-sample audio, a tabbed window with knobs, a combo box, check boxes, level meters and a memo, a custom-drawn transfer curve with a live waveform, presets that move many settings at once, and saved extra state. Signal flow: noise gate, tight (high-pass before the clipper), drive, one of six voicings through one to three cascaded clipping stages, tone low-pass, bass / mid / presence, a cabinet filter, DC block, dry/wet mix, output level and a soft output limiter.
             </p>
             <table class="udaw-table udaw-col-22">
                 <tr><th>Voicing</th><th>Character</th></tr>
@@ -1712,13 +1740,16 @@ class Plugin(up.Plugin):
             </table>
             <h4>The bundled plug-ins</h4>
             <p>
-                Three finished plug-ins ship with UDAW, all written by <b>Daniel J. Hobson, Australia</b>. They appear in the Plugins menu by themselves, open in the editor to be read and changed, and between them show most of what the system can do. The Vocoder and Reverberator &amp; Chorus use numpy (<code>pip install numpy</code>) so they stay light on the processor; without it they pass the sound through and say so in their Log.
+                Six finished plug-ins ship with UDAW, all written by <b>Daniel J. Hobson, Australia</b>. They appear in the Plugins menu by themselves, open in the editor to be read and changed, and between them show most of what the system can do. The Vocoder, Reverberator &amp; Chorus, Virtual Guitar Rig, Stutter Edit and Tuner use numpy (<code>pip install numpy</code>) so they stay light on the processor; without it they pass the sound through and say so in their Log.
             </p>
             <table class="udaw-table udaw-col-22">
                 <tr><th>Plug-in</th><th>What it is for</th></tr>
                 <tr><td>Guitar Overdrive &amp; Distortion</td><td>Re-amp a clean guitar: six voicings from a clean boost to a metal wall, cascaded stages, gate, tone stack, cabinet filter.</td></tr>
                 <tr><td>Vocoder</td><td>Make a voice talk through a built-in synthesiser. Choose a sawtooth, pulse, detuned choir or noise carrier, a note and a chord; 8 to 32 bands, attack and release, formant shift, brightness and a sibilance control so consonants stay clear. Presets include Classic Robot, Choir Pad, Deep Giant and Whisper. It needs no side-chain: put it straight on the vocal lane. Latency is about 21 ms.</td></tr>
                 <tr><td>Reverberator &amp; Chorus</td><td>A stereo chorus (one to four modulated voices, rate, depth, delay, mix) feeding an algorithmic reverb (eight combs and four all-pass filters with damping, pre-delay and stereo width). Room, Hall, Plate and Cathedral types set sensible starting points. Use it to thicken a thin part and place it in a room in one step.</td></tr>
+                <tr><td>Virtual Guitar Rig</td><td>A virtual guitar rig for a recorded guitar: noise gate, transpose (&plusmn;2 octaves with fine tuning), four amp voicings with full tone controls, four cabinets and microphones with position, distance and room, and a doubler for width. Presets run from clean sparkle to heavy rhythm and atmospheric lead.</td></tr>
+                <tr><td>Stutter Edit</td><td>A performance effect that turns ordinary audio into rhythmic glitches. It keeps the last few seconds of the sound, and when you press <b>STUTTER</b> (or play a MIDI key) it grabs a piece and repeats it. Long repeats are chopped phrases, such as the last word of a vocal turned into a fill before the chorus; repeats of a millisecond or two fuse into a buzzing pitch. Choose the repeat length by note value or in milliseconds, how much to grab, how far back, and which part to play; reverse, pitch, gate, filter, crush and ping-pong each repeat. <b>Gestures</b> are the presets: each sets the controls and then moves them for you over a number of beats (accelerating rolls, pitch stairs, filter sweeps, tape drags and more), and can hold, loop or release at the end. Quantize starts it on the beat. It can send a MIDI note for each repeat to play a synth in time.</td></tr>
+                <tr><td>Tuner</td><td>A tuner for guitar, bass, violin, viola, cello, ukulele and voice. Pick the instrument and tuning (standard, drop, open, DADGAD, 5-, 6- and 7-string and more), or use <b>Low string to</b> to move the whole tuning to a key. For voice and chromatic use, choose a key and scale and it shows the nearest note in key. A needle shows how many cents sharp or flat you are, the string is found automatically or locked with a click, and the A4 reference runs from 400 to 480 Hz. A reference tone (sine, triangle or organ) plays the target note, and the instrument can be muted while you tune. MIDI in: keys pick the string or note and sound the tone, program change picks the instrument, controllers move the main settings. MIDI out: the note you play or sing can be sent as a MIDI note with pitch bend.</td></tr>
             </table>
             <p>
                 <b>Free for every user.</b> These three plug-ins are included for all UDAW users as working demonstrations of how to program your own plug-ins. Use them, open them in the editor, study them and adapt them to learn the system - at no extra cost. You may share your own plug-ins, and changed versions of these, with other users free of charge, but they may not be sold or distributed for commercial gain. <b>Want to contribute?</b> If you would like to contribute plug-ins, ideas or other work to UDAW, please contact <b>udaw2026@gmail.com</b>. Please write properly: say who you are, give a verifiable name and contact details, and explain clearly what you would like to contribute. Spam, unsolicited offers and anything irrelevant to UDAW will be ignored without reply.
@@ -1737,6 +1768,7 @@ class Plugin(up.Plugin):
             <h4>If something goes wrong</h4>
             <table class="udaw-table udaw-col-22">
                 <tr><th>What you see</th><th>What to do</th></tr>
+                <tr><td>A bundled plug-in passes the sound through and says "numpy" is missing</td><td>Install numpy for the same Python UDAW uses: <code>python -m pip install numpy</code> (<code>python3 -m pip install numpy</code> on Linux and macOS), then restart UDAW. See <a href="#installing-numpy">Installing numpy</a>.</td></tr>
                 <tr><td>"Python 3.14 or newer was not found"</td><td>Install the current Python from python.org with <i>Add python.exe to PATH</i> ticked, then try again.</td></tr>
                 <tr><td>The insert passes sound through unchanged</td><td>The script did not load or stopped. Open the editor, press <b>Validate</b>, and read <b>Problems</b> and <b>Output</b>.</td></tr>
                 <tr><td>Status line says some blocks are "late"</td><td>The script is too heavy for real time. Simplify the per-sample loop, set <code>buffered = True</code>, or use numpy.</td></tr>
@@ -2712,12 +2744,12 @@ class Plugin(up.Plugin):
                 <tr><td>Internet</td><td colspan="3">Optional. Needed for the AI services, update checks and Help.</td></tr>
             </table>
             <p>
-                <b>Optional extras (all platforms):</b> VST2, VST3 and CLAP plug-ins you install yourself (use 64-bit plug-ins); any class-compliant MIDI keyboard or controller; your own accounts / API keys for the AI services you want to use; and <b>Python 3.14 or newer</b> if you want to use or write Python plug-ins.
+                <b>Optional extras (all platforms):</b> VST2, VST3 and CLAP plug-ins you install yourself (use 64-bit plug-ins); any class-compliant MIDI keyboard or controller; your own accounts / API keys for the AI services you want to use; and <b>Python 3.14 or newer</b> if you want to use or write Python plug-ins (plus the <b>numpy</b> package for the bundled ones - see <a href="#installing-numpy">Installing numpy</a>).
             </p>
 
             <h3 id="installing-python">Installing Python</h3>
             <p>
-                Python is only needed for Python plug-ins and scripts. <b>UDAW requires Python 3.14 or newer.</b> Install a 64-bit release of that version (or later) for your platform, then restart UDAW so it can find it.
+                Python is only needed for Python plug-ins and scripts. UDAW's own MIDI sequencing, Piano Roll, MIDI device input and output, and MIDI file import and export are built in and need no Python at all. <b>UDAW requires Python 3.14 or newer.</b> Install a 64-bit release of that version (or later) for your platform, then restart UDAW so it can find it.
             </p>
             <h4>Windows</h4>
             <ol>
@@ -2739,6 +2771,24 @@ class Plugin(up.Plugin):
                 <li>Check it in Terminal with <code>python3 --version</code>.</li>
             </ol>
             <p>Alternatively, with Homebrew: <code>brew install python@3.14</code></p>
+
+            <h3 id="installing-numpy">Installing numpy</h3>
+            <p>
+                <b>numpy</b> is a free Python package for fast maths. The <b>Vocoder, Reverberator &amp; Chorus, Virtual Guitar Rig, Stutter Edit and Tuner</b> plug-ins use it, so install it before using them. Guitar Overdrive Distortion and your own plug-ins do not need it unless they ask for it. Install numpy for the <b>same Python that UDAW finds</b>, then restart UDAW.
+            </p>
+            <p><b>Windows</b></p>
+            <ol>
+                <li>Open a new Command Prompt.</li>
+                <li>Run <code>python -m pip install numpy</code>.</li>
+                <li>Check it with <code>python -c "import numpy; print(numpy.__version__)"</code>. A version number means it worked.</li>
+            </ol>
+            <p><b>Linux and macOS</b></p>
+            <ol>
+                <li>Run <code>python3 -m pip install numpy</code>.</li>
+                <li>Check it with <code>python3 -c "import numpy; print(numpy.__version__)"</code>.</li>
+                <li>If pip refuses with an "externally-managed-environment" message, install it with your package manager instead: <code>sudo apt install python3-numpy</code> (Debian / Ubuntu), <code>sudo dnf install python3-numpy</code> (Fedora), <code>sudo pacman -S python-numpy</code> (Arch) or <code>brew install numpy</code> (Homebrew). Make sure it is installed for the Python 3.14 that UDAW uses.</li>
+            </ol>
+            <p>A plug-in that needs numpy and cannot find it says so in its log and in its window, and passes the sound through until it is installed.</p>
         </section>
 
         <!-- ============================================================ -->
@@ -2796,8 +2846,19 @@ class Plugin(up.Plugin):
                 <p><b>Purpose</b> Get a problem in front of us - and in front of other UDAW users - so it can be fixed.</p>
                 <p><b>Why</b> If you do not tell us about a problem, there is no way we can fix it for you.</p>
             </div>
+            <div class="udaw-warn">
+                <strong>Our website is temporarily down while we relocate the server.</strong> Until it is back, the
+                Forum Boards, account registration and chat server described below are not available. In the
+                meantime, please report problems on our
+                <a href="https://discord.gg/ESFenhtz4K" target="_blank" rel="noopener">Discord channel</a>
+                or in our
+                <a href="https://github.com/LordAries1972/UDAW/discussions" target="_blank" rel="noopener">GitHub Discussions</a>
+                area. Everything asked for under <em>Tell us exactly what you did, step by step</em> below applies
+                just the same.
+            </div>
             <p>
-                Found a bug, or something that is not working the way it should? Please report it on our
+                Found a bug, or something that is not working the way it should? Once our website is back, please
+                report it on our
                 <strong>Forum Boards</strong>. Every product has its own discussion forum, and the
                 <strong>UDAW</strong> forum is where UDAW bugs should be reported &ndash; that way other users can
                 see the problem as well, add anything they have found, and follow it through to the fix.

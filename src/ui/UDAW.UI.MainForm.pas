@@ -59,10 +59,10 @@ uses
   UDAW.Media.Attribution,
   UDAW.Mixer.Model, UDAW.Mixer.Serialization, UDAW.Mixer.Engine, UDAW.Mixer.Commands,
   UDAW.Mixer.Automation, UDAW.Mixer.VST2, UDAW.Mixer.CLAP, UDAW.Mixer.VST3,
-  UDAW.Mixer.Modulation, UDAW.Timeline.SpectralFx, UDAW.Timeline.ExtraFx, UDAW.DSP.AudioToMidi,
+  UDAW.Mixer.Modulation, UDAW.Timeline.SpectralFx, UDAW.Timeline.LoopScan, UDAW.Timeline.ExtraFx, UDAW.DSP.AudioToMidi,
   UDAW.Sequencer.Patterns, UDAW.Timeline.Warp, UDAW.Timeline.VideoPlayer, UDAW.UI.VST2Editor,
   UDAW.Timeline.VideoExport, UDAW.Video.Effects, UDAW.Timeline.VideoFxCache,
-  System.IOUtils, UDAW.UI.MixInsertParams, UDAW.UI.VideoForm, UDAW.UI.CapsuleProgress, UDAW.UI.MixerStrip, UDAW.UI.TimelineHeader, UDAW.UI.Score, UDAW.Drum.Machine, UDAW.Drum.KitModel, UDAW.UI.DrumInstrument, UDAW.UI.InstrumentEditor, UDAW.UI.EffectEditor, UDAW.UI.TrkFxPick, UDAW.Timeline.FxPresets, UDAW.Pattern.Model, UDAW.Pattern.Commands, UDAW.Mixer.PluginScan, UDAW.Scripting.Python, UDAW.Scripting.PyPlugin, UDAW.Scripting.PyAudition, UDAW.UI.PluginEditor, UDAW.UI.PluginWindow, System.JSON, System.NetEncoding,
+  System.IOUtils, UDAW.UI.MixInsertParams, UDAW.UI.VideoForm, UDAW.UI.CapsuleProgress, UDAW.UI.MixerStrip, UDAW.UI.TimelineHeader, UDAW.UI.Score, UDAW.Drum.Machine, UDAW.Drum.KitModel, UDAW.UI.DrumInstrument, UDAW.UI.InstrumentEditor, UDAW.UI.EffectEditor, UDAW.UI.TrkFxPick, UDAW.Timeline.FxPresets, UDAW.Pattern.Model, UDAW.Pattern.Commands, UDAW.Mixer.PluginScan, UDAW.Mixer.PluginHost, UDAW.Mixer.PluginMidi, UDAW.Mixer.PluginRender, UDAW.Scripting.Python, UDAW.Scripting.PyPlugin, UDAW.Scripting.PyAudition, UDAW.UI.PluginEditor, UDAW.UI.PluginWindow, System.JSON, System.NetEncoding,
   UDAW.Tracker.Types, UDAW.Tracker.Instrument, UDAW.Tracker.Pattern,
   UDAW.CrashTrace, UDAW.SystemInfo, UDAW.GL.InfoView, UDAW.UI.Display, UDAW.Tracker.Player, UDAW.Tracker.Commands, UDAW.Tracker.ScoreNotes, UDAW.Codec.TrackerLegacy, UDAW.UI.ScorePdf,
   UDAW.Recording.Types, UDAW.Recording.Engine, UDAW.Recording.Takes,
@@ -207,7 +207,7 @@ type
     lblAudioState: TGLLabel;
     pbOutL: TGLProgress;
     pbOutR: TGLProgress;
-    memAudio: TLogSink;
+    memAudio: TGLMemo;
     tabDSP: TGLPage;
     pnlDspTop: TGLPanel;
     lblDspSignal: TGLLabel;
@@ -218,7 +218,7 @@ type
     cboDspWindow: TGLCombo;
     chkDspLive: TGLCheck;
     pnlDspReadout: TGLPanel;
-    memDspReadout: TLogSink;
+    memDspReadout: TGLMemo;
     pbSpectrum: TGLView;
     tabGraph: TGLPage;
     pnlGraphTop: TGLPanel;
@@ -226,7 +226,7 @@ type
     cboGraphPreset: TGLCombo;
     chkGraphLive: TGLCheck;
     pnlGraphReadout: TGLPanel;
-    memGraph: TLogSink;
+    memGraph: TGLMemo;
     pbGraph: TGLView;
     mnuSystem: TMenuItem;
     mnuSystemRefresh: TMenuItem;
@@ -338,7 +338,7 @@ type
     lblWavFormat: TGLLabel;
     chkWavLoop: TGLCheck;
     cboWavFormat: TGLCombo;
-    memWav: TLogSink;
+    memWav: TGLMemo;
     mnuWav: TMenuItem;
     mnuWavImport: TMenuItem;
     mnuWavPlay: TMenuItem;
@@ -357,7 +357,7 @@ type
     pnlMp3Top: TGLPanel;
     lblMp3Bitrate: TGLLabel;
     cboMp3Bitrate: TGLCombo;
-    memMp3: TLogSink;
+    memMp3: TGLMemo;
     mnuMp3: TMenuItem;
     mnuMp3Import: TMenuItem;
     mnuMp3ReadTags: TMenuItem;
@@ -384,7 +384,7 @@ type
     pnlMp4Top: TGLPanel;
     lblMp4Fmt: TGLLabel;
     cboMp4Fmt: TGLCombo;
-    memMp4: TLogSink;
+    memMp4: TGLMemo;
     mnuMp4: TMenuItem;
     mnuMp4Probe: TMenuItem;
     mnuMp4Import: TMenuItem;
@@ -398,6 +398,8 @@ type
     mnuHelpAboutUdawSep: TMenuItem;
     mnuScripts: TMenuItem;
     mnuPySep: TMenuItem;
+    mnuPlgOpen: TMenuItem;
+    mnuPlgOpenSep: TMenuItem;
     mnuPyEditor: TMenuItem;
     mnuPyNew: TMenuItem;
     mnuPyExample: TMenuItem;
@@ -788,8 +790,8 @@ type
     mnuTlFxGrpToneFilters, pmTlFxGrpToneFilters: TMenuItem;
     mnuTlFxLoudnessReport, pmTlFxLoudnessReport: TMenuItem;
     mnuMixMeters, mnuTlMeters, pmMixMeters, mnuTlFoley: TMenuItem;
-    mnuTlFxVoiceIsolation, mnuTlFxMusicSeparator, mnuTlFxSplitSpeechMusic: TMenuItem;
-    pmTlFxVoiceIsolation, pmTlFxMusicSeparator, pmTlFxSplitSpeechMusic: TMenuItem;
+    mnuTlFxVoiceIsolation, mnuTlFxMusicSeparator, mnuTlFxSplitSpeechMusic, mnuTlFxScanLoops: TMenuItem;
+    pmTlFxVoiceIsolation, pmTlFxMusicSeparator, pmTlFxSplitSpeechMusic, pmTlFxScanLoops: TMenuItem;
     mnuTlFxDePopper, mnuTlFxAdaptiveNoiseReduction, mnuTlFxLevelRider, mnuTlFxDialogRider, mnuTlFxTruePeakLimiter, mnuTlFxOversampledSaturation, mnuTlFxFadeInSCurve, mnuTlFxFadeInEqualPower, mnuTlFxFadeInExponential, mnuTlFxFadeInLogarithmic, mnuTlFxFadeOutSCurve, mnuTlFxFadeOutEqualPower, mnuTlFxFadeOutExponential, mnuTlFxFadeOutLogarithmic: TMenuItem;
     pmTlFxDePopper, pmTlFxAdaptiveNoiseReduction, pmTlFxLevelRider, pmTlFxDialogRider, pmTlFxTruePeakLimiter, pmTlFxOversampledSaturation, pmTlFxFadeInSCurve, pmTlFxFadeInEqualPower, pmTlFxFadeInExponential, pmTlFxFadeInLogarithmic, pmTlFxFadeOutSCurve, pmTlFxFadeOutEqualPower, pmTlFxFadeOutExponential, pmTlFxFadeOutLogarithmic: TMenuItem;
     mnuTlFxGrpCreative, mnuTlFxGrpStereoBass, pmTlFxGrpCreative, pmTlFxGrpStereoBass: TMenuItem;
@@ -825,6 +827,7 @@ type
     mnuTlLoopToggle: TMenuItem;
     mnuTlLoopSep2: TMenuItem;
     mnuTlLoopToRange: TMenuItem;
+    mnuTlLoopClear: TMenuItem;
     mnuTlNavNext: TMenuItem;
     mnuTlNavPrev: TMenuItem;
     mnuTlJumpElementStart: TMenuItem;
@@ -1001,6 +1004,9 @@ type
     pmTlLoopToggle: TMenuItem;
     pmTlLoopSep1: TMenuItem;
     pmTlLoopToRange: TMenuItem;
+    pmTlLoopClear: TMenuItem;
+    pmTlrLoopClear: TMenuItem;
+    pmTlrClearLoop: TMenuItem;
     pmTlSep7: TMenuItem;
     pmTlNavNext: TMenuItem;
     pmTlNavPrev: TMenuItem;
@@ -1102,7 +1108,7 @@ type
     edtKey: TGLEdit;
     lblValue: TGLLabel;
     edtValue: TGLEdit;
-    memSecure: TLogSink;
+    memSecure: TGLMemo;
     btnSecStore: TGLButton;
     btnSecRead: TGLButton;
     btnSecDelete: TGLButton;
@@ -1354,7 +1360,7 @@ type
     cboScopeMode: TGLCombo;
     chkScopeLive: TGLCheck;
     pnlScopeReadout: TGLPanel;
-    memScopeReadout: TLogSink;
+    memScopeReadout: TGLMemo;
     pbScope: TGLView;
     tabAdvDsp: TGLPage;
     pnlAdvDspTop: TGLPanel;
@@ -1364,7 +1370,7 @@ type
     cboAdvDspSignal: TGLCombo;
     cboAdvDspProcess: TGLCombo;
     edtAdvDspParam: TGLEdit;
-    memAdvDspReadout: TLogSink;
+    memAdvDspReadout: TGLMemo;
     tabAI: TGLPage;
     tabDockAi: TGLPage;
     tabFoley: TGLPage;
@@ -1683,6 +1689,7 @@ type
     procedure btnTlFadeInRangeClick(Sender: TObject);
     procedure btnTlFadeOutRangeClick(Sender: TObject);
     procedure btnTlLoopToRangeClick(Sender: TObject);
+    procedure btnTlLoopClearClick(Sender: TObject);
     procedure btnTlNormalizeRangeClick(Sender: TObject);
     procedure btnTlReverseRangeClick(Sender: TObject);
     procedure TlClipTempoClick(Sender: TObject);
@@ -1766,6 +1773,8 @@ type
     procedure PyEditorAddToMixer(const ATarget: TPyTarget; const AFilePath, APluginName,
       AValuesJson, AStateJson, ANames: string);
     procedure PyEditorRefreshTargets(Sender: TObject);
+    procedure PyCollectTargets(out AList: TArray<TPyTarget>; out ASel: Integer);
+    procedure PyAddMenuItemClick(Sender: TObject);
     procedure PyEditorClosed(Sender: TObject);
     procedure OpenPythonInsertWindow(ATracker: Boolean; AStripId, AIndex: Integer);
     function OpenPythonInsertWindowByIid(ATracker: Boolean; AStripId: Integer; const AIid: string): Boolean;
@@ -1773,6 +1782,7 @@ type
     procedure PyRestoreInsertsOnLoad;
     procedure PyWindowAddToMixer(Sender: TObject);
     procedure InstallPyAuditionHooks;
+    procedure PyLiveDetach;
     function PyRenderTimelineRange(ARate: Integer; out APlanar: TPyPlanar): Boolean;
     procedure PySaveInsertState(ATracker: Boolean; AStripId: Integer; const AIid, AState: string);
     procedure DrumSaveKit;
@@ -2464,6 +2474,10 @@ type
     FPlgLast: UInt64;
     FOpenPyWindows: TList<TfrmPyPlugin>;   // Python plug-in windows opened from mixer inserts (remembered per project)
     FPyEditor: TfrmPyEditor;        // the Python plug-in editor, one at a time (frees itself on close)
+    FPyLiveRingOn: Boolean;        // the engine's capture ring is feeding a plug-in window's live input
+    FPyAddMenu: TPopupMenu;         // the strip list an Add to Mixer press drops (items rebuilt each time)
+    FPyAddTargets: TArray<TPyTarget>;
+    FPyAddFile, FPyAddName, FPyAddVals, FPyAddState, FPyAddNames: string;
     FPluginScan: TPluginScanner;   // created on first use, cached in Config\plugins.cache
     FRightFilled: Boolean;
     FDrum: TDrumMachine;                  // the kit (kept alive by FDrumIntf)
@@ -2677,7 +2691,7 @@ type
       simply stays False (its pre-existing, unguarded behaviour). }
     FFxName: string;
     FFxItem, FFxItems, FFxPer, FFxDone, FFxTotal: Integer;
-    FFxLog: TLogSink;
+    FFxLog: TStrings;
     FMixStripRects: array of TRect;    // last-painted strip hit-boxes, index-parallel to strip order
     FMixStripIds: array of Integer;
     FTlHdrSig: string;                 // what TlHeaderSync last built the header widgets for
@@ -2794,6 +2808,7 @@ type
       the "MIDI panic" button. }
     FMidiInDevice: TMidiInputDevice;
     FMidiOutDevice: TMidiOutputDevice;
+    FPyMidiOutBuf: TList<TPyMidiOut>;   // MIDI sent by mixer-strip Python plug-ins, on its way to FMidiOutDevice
     FMidiInDeviceIds: TArray<string>;   // cboSetMidiInDevice.Items[i] <-> device name, '' = none
     FMidiOutDeviceIds: TArray<string>;  // cboSetMidiOutDevice.Items[i] <-> device name, '' = none
     FMidiMonitorSynth: TMidiSynth;
@@ -2970,6 +2985,7 @@ type
     procedure TlApplyEffectToRange(const AKind, AParams, AEffectName: string);
     procedure TlSplitStemsSelected;
     procedure TlSplitSpeechMusicSelected;
+    procedure TlScanLoopSegments;
     procedure TlMeasureRangeReport;
     procedure TlAudioToMidiSelected;
     procedure TlApplySilenceToRange;
@@ -2994,8 +3010,12 @@ type
     function ImportBrowserFileToTimeline(const APath: string; ATrackId: Integer;
       AStartSeconds: Double): Boolean;
     function GetAiBrowserRoots: TArray<string>;
-    function ProbeVst2File(const APath: string; out AParamCount: Integer;
-      out AError: string): Boolean;
+    function ProbePluginFile(const AFileName: string; out AKind, AName: string; out AParamCount: Integer;
+      out AInstrument, AWantsMidi: Boolean; out AError: string): Boolean;
+    procedure TlRenderPluginToRange(const AKind, AParams, AName: string; AInstrument: Boolean);
+    procedure TlDropPlugin(const APath: string; AX, AY: Integer);
+    function TlRightSelectedPlugin: string;
+    function TlRangeHasMidiLane: Boolean;
     function MixStripHasVst2Insert(AStrip: TMixStrip; const APathB64: string): Boolean;
     procedure BuildDemoArrangement;
     function TlFirstAudioTrackId: Integer;
@@ -3027,7 +3047,7 @@ type
       FxItem(no) / FxStage / FxStageDone, finally FxEnd. Status bar shows
       "effect - item i/n - stage k/m: what (pct)  [overall d/t stages]" and each
       completed stage is logged to the given memo. }
-    procedure FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TLogSink);
+    procedure FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TStrings);
     procedure FxItem(ANo: Integer);
     procedure FxStage(AStageNo: Integer; const AWhat: string; APct: Integer);
     procedure FxStageDone(AStageNo: Integer; const AWhat: string);
@@ -3062,6 +3082,8 @@ type
     procedure RefreshMidiDeviceCombos(const ASelectedInName, ASelectedOutName: string);
     procedure OpenMidiDevicesFromConfig;
     procedure HandleLiveMidiInput(Sender: TObject; const AMsg: TMidiMessage; ATimestampMs: Cardinal);
+    procedure PumpPyMidiOut;
+    function PyPresetsDir: string;
     procedure LoadColorsTab;
     procedure LoadKeyHooksTab;
     procedure SaveSettingsTab;
@@ -3605,6 +3627,7 @@ begin
   FMidiCapture.Monitor := FMidiMonitorSynth;
   FMidiInDevice := TMidiInputDevice.Create;
   FMidiOutDevice := TMidiOutputDevice.Create;
+  FPyMidiOutBuf := TList<TPyMidiOut>.Create;
   OpenMidiDevicesFromConfig;
   LoadSettingsTab;
   InstallControlHints;
@@ -4303,6 +4326,7 @@ begin
   FMidiEngineRef := nil;
   FreeAndNil(FMidiInDevice);    // closes the device (Destroy calls Close)
   FreeAndNil(FMidiOutDevice);
+  FreeAndNil(FPyMidiOutBuf);
   FreeAndNil(FMidiCapture);
   TMidiSynth.SharedDrum := nil;
   DrumAudioDetach;
@@ -5374,6 +5398,7 @@ begin
   {$ENDIF}
   if (FMidiInDevice <> nil) and FMidiInDevice.IsOpen then
     FMidiInDevice.Poll(HandleLiveMidiInput, Self);
+  PumpPyMidiOut;
   if FRecWriter <> nil then
   begin
     RefreshRecordingTab;
@@ -5639,12 +5664,8 @@ begin
 
   { same full-text-replace-every-tick flicker as RefreshAudio's memAudio -
     see that method's comment. }
-  memDspReadout.Lines.BeginUpdate;
-  try
-    memDspReadout.Lines.Text := FDspReadout;
-  finally
-    memDspReadout.Lines.EndUpdate;
-  end;
+  if FDspReadout <> memDspReadout.Text then
+    memDspReadout.Text := FDspReadout;
   pbSpectrum.Invalidate;
 end;
 
@@ -5901,7 +5922,7 @@ begin
     res := RenderSourceOffline(src, SR, 2, SR, 512);
   end;
 
-  FxBegin('Advanced DSP: ' + cboAdvDspProcess.Text, 1, 4, memAdvDspReadout);
+  FxBegin('Advanced DSP: ' + cboAdvDspProcess.Text, 1, 4, memAdvDspReadout.Lines);
   try
   FxItem(1);
   FxStageDone(1, 'render ' + cboAdvDspSignal.Text);
@@ -8393,6 +8414,7 @@ procedure TfrmMain.RefreshAudio;
 var
   eng: TAudioEngine;
   pk: Single;
+  desc: string;
 begin
   if (App = nil) or (App.Audio = nil) then
   begin
@@ -8409,12 +8431,11 @@ begin
     update (both VCL's TMemoStrings and LCL's TMemo.Lines implement it that
     way), so the memo only actually repaints once, after the new text is
     already in place. }
-  memAudio.Lines.BeginUpdate;
-  try
-    memAudio.Lines.Text := eng.Describe;
-  finally
-    memAudio.Lines.EndUpdate;
-  end;
+  { GL memo: a changed text relayouts and drops the user's selection, so an
+    unchanged readout is left alone }
+  desc := eng.Describe;
+  if desc <> memAudio.Text then
+    memAudio.Text := desc;
 
   pk := eng.OutputPeak(0);
   if pk > 1 then pk := 1;
@@ -10450,6 +10471,8 @@ begin
   addTrack := TAddTimelineTrackCommand.Create(FProject, tkAudio, Format('Audio %d', [count + 1]));
   FCmds.Perform(addTrack);
   Result := addTrack.CreatedId;
+  { the new lane gets its mixer strip, linked to it, right now - so a clip dropped on it already has a fader }
+  EnsureMixerStripsForTimelineTracks;
 end;
 
 function TfrmMain.TlTrackIndexById(ATrackId: Integer): Integer;
@@ -10475,10 +10498,10 @@ function TfrmMain.TlDropTargetTrackId(AX, AY: Integer): Integer;
 var
   ti: Integer;
 begin
+  { over an audio lane: that lane.  Over empty space below the lanes (the add-lane area), or over a lane
+    that cannot hold audio (MIDI, video...): a NEW audio lane, with its mixer strip created and linked }
   if TlTrackAtY(AY, ti) and (FProject.Timeline.GetTrack(ti).Kind = tkAudio) then
     Result := FProject.Timeline.GetTrack(ti).Id
-  else if TlSelectedAudioTrackId >= 0 then
-    Result := TlSelectedAudioTrackId
   else
     Result := TlNewAudioTrackId;
 end;
@@ -10488,7 +10511,7 @@ end;
   of stbMain (anchored bottom/right in the .dfm/.lfm so it tracks the bar
   across resizes); ProcessMessages keeps the UI paint pump alive across the
   synchronous work these imports do without pulling in a worker thread. }
-procedure TfrmMain.FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TLogSink);
+procedure TfrmMain.FxBegin(const AName: string; AItems, AStagesPerItem: Integer; ALog: TStrings);
 begin
   FFxName := AName;
   FFxItems := AItems;
@@ -10499,7 +10522,7 @@ begin
   FFxLog := ALog;
   ShowStatusProgress(AName + ' - starting...', Max(1, FFxTotal) * 100);
   if FFxLog <> nil then
-    FFxLog.Lines.Insert(0, Format('%s: %d item(s) x %d stage(s) = %d stages total',
+    FFxLog.Insert(0, Format('%s: %d item(s) x %d stage(s) = %d stages total',
       [AName, AItems, AStagesPerItem, FFxTotal]));
   Application.ProcessMessages;
 end;
@@ -10522,7 +10545,7 @@ begin
   Inc(FFxDone);
   FxStage(AStageNo, AWhat + ' done', 100);
   if FFxLog <> nil then
-    FFxLog.Lines.Insert(0, Format('  %s  item %d/%d  stage %d/%d  %s - done',
+    FFxLog.Insert(0, Format('  %s  item %d/%d  stage %d/%d  %s - done',
       [FFxName, FFxItem, FFxItems, AStageNo, FFxPer, AWhat]));
   Application.ProcessMessages;
 end;
@@ -11887,6 +11910,11 @@ begin
   mnuTlLoopToRange.Enabled := FTlRangeActive;
   pmTlLoopToRange.Enabled := FTlRangeActive;
   pmTlrLoopToRange.Enabled := FTlRangeActive;
+  { Clear Loop only when a loop area is marked }
+  mnuTlLoopClear.Enabled := tl.LoopLengthSeconds > 0;
+  pmTlLoopClear.Enabled := tl.LoopLengthSeconds > 0;
+  pmTlrLoopClear.Enabled := tl.LoopLengthSeconds > 0;
+  pmTlrClearLoop.Enabled := tl.LoopLengthSeconds > 0;
 
   { Normalize / Reverse / Effects: all operate on the active ruler-drag time
     range (FTlRangeActive), same as Split/Delete/Fade Range above - so they
@@ -12713,6 +12741,7 @@ begin
     FTlVideo.Prepare(FProject.Timeline, FProject.Timeline.PlayheadSeconds);
   end;
   TlStagePushToPlayer;   // a launch made while stopped starts with the transport
+  PyLiveDetach;
   PyAuditionReleaseAll;   // a Python plug-in window that was listening is told the output moved on
   App.Audio.SetSource(FTlPlayer.AsSource);
   if (FTlMixerProc.LastError <> '') and not FTlMixerProc.IsPrepared then
@@ -15596,8 +15625,9 @@ begin
           TlRightAddItem(grp, 'Plug-in file (VST2 / VST3)...', RK_FXVST, 0, '');
           for i := 0 to PluginScanner.Count - 1 do
             if Match(PluginScanner.Item(i).Name) then
-              TlRightAddItem(grp, Format('%s  [%s]', [PluginScanner.Item(i).Name,
-                IfThen(PluginScanner.Item(i).Format = pfVST3, 'VST3', 'VST2')]),
+              TlRightAddItem(grp, Format('%s  [%s%s]', [PluginScanner.Item(i).Name,
+                IfThen(PluginScanner.Item(i).Format = pfVST3, 'VST3', 'VST2'),
+                IfThen(PluginScanner.Item(i).Instrument, ' instrument', '')]),
                 RK_FXPLUG, 0, PluginScanner.Item(i).Path);
           grp.Expand;
         end;
@@ -15726,6 +15756,7 @@ begin
       begin
         FCmds.Perform(TAddTimelineTrackCommand.Create(FProject, TTrackKind(it.Index),
           Format('%s %d', [TrackKindDisplay(TTrackKind(it.Index)), FProject.Timeline.TrackCount + 1])));
+        EnsureMixerStripsForTimelineTracks;     // audio / MIDI / instrument lanes get a linked strip
         RefreshTimelineTab;
         RefreshMixerTab;
       end;
@@ -16743,14 +16774,30 @@ var
   newSrc: TMediaSource;
   addCmd: TAddTimelineClipCommand;
   ids: TArray<Integer>;
-  i, laneRate: Integer;
-  startSec, endSec, newDur: Double;
+  i, laneRate, pass: Integer;
+  startSec, endSec, newDur, rangeEdge: Double;
   cacheDir, cacheWav, newPath, laneName: string;
   undoMark: Integer;
+  segmentOnly: Boolean;
+  rangeTids, pieceIds: TArray<Integer>;
+  pieceId, tid: Integer;
 begin
   if FProject = nil then Exit;
   tl := FProject.Timeline;
-  trk := TlNavTargetTrack;
+  { With a range marked, the lane is the one the range sits on and only that segment is edited;
+    with none, the whole selected lane is. }
+  segmentOnly := FTlRangeActive and
+    (Abs(FTlRangeEndSec - FTlRangeStartSec) >= TIMELINE_MIN_CLIP_SECONDS);
+  trk := nil;
+  if segmentOnly then
+  begin
+    rangeTids := TlRangeTrackIds;
+    for tid in rangeTids do
+      if tid = FTlCtxTrackId then trk := tl.TrackById(tid);
+    if (trk = nil) and (Length(rangeTids) > 0) then trk := tl.TrackById(rangeTids[0]);
+  end;
+  if trk = nil then trk := TlNavTargetTrack;
+  if trk = nil then trk := TlContextTrack;
   if (trk = nil) or (trk.Kind <> tkAudio) then
   begin
     memTimeline.Lines.Insert(0, 'Edit Lane: select an audio lane first.');
@@ -16765,17 +16812,34 @@ begin
   startSec := 0;
   endSec := 0;
   ids := nil;
-  for i := 0 to trk.ClipCount - 1 do
+  if segmentOnly then
   begin
-    c := trk.GetClip(i);
-    if c.IsMidiClip or c.Muted then Continue;
-    if ids = nil then startSec := c.StartSeconds else startSec := Min(startSec, c.StartSeconds);
-    endSec := Max(endSec, c.EndSeconds);
-    ids := ids + [c.Id];
-  end;
+    startSec := Min(FTlRangeStartSec, FTlRangeEndSec);
+    endSec := Max(FTlRangeStartSec, FTlRangeEndSec);
+    for i := 0 to trk.ClipCount - 1 do
+    begin
+      c := trk.GetClip(i);
+      if c.IsMidiClip or c.Muted then Continue;
+      if (c.EndSeconds > startSec + TIMELINE_MIN_CLIP_SECONDS) and
+         (c.StartSeconds < endSec - TIMELINE_MIN_CLIP_SECONDS) then
+        ids := ids + [c.Id];
+    end;
+  end
+  else
+    for i := 0 to trk.ClipCount - 1 do
+    begin
+      c := trk.GetClip(i);
+      if c.IsMidiClip or c.Muted then Continue;
+      if ids = nil then startSec := c.StartSeconds else startSec := Min(startSec, c.StartSeconds);
+      endSec := Max(endSec, c.EndSeconds);
+      ids := ids + [c.Id];
+    end;
   if (Length(ids) = 0) or (endSec - startSec < TIMELINE_MIN_CLIP_SECONDS) then
   begin
-    memTimeline.Lines.Insert(0, 'Edit Lane: the lane has no audio.');
+    if segmentOnly then
+      memTimeline.Lines.Insert(0, 'Edit Lane: the selected segment of "' + laneName + '" has no audio.')
+    else
+      memTimeline.Lines.Insert(0, 'Edit Lane: the lane has no audio.');
     Exit;
   end;
 
@@ -16811,7 +16875,8 @@ begin
     planar := nil;
 
     { 2. the WAV editor }
-    if not TfrmInstrumentEditor.EditFile(Self, laneName + '  (lane render)', cacheWav,
+    if not TfrmInstrumentEditor.EditFile(Self,
+         IfThen(segmentOnly, laneName + '  (selected segment)', laneName + '  (lane render)'), cacheWav,
          TlTrackAccent(trk, tl.IndexOfTrack(trk.Id)), IncludeTrailingPathDelimiter(RecordingRootPath), newPath) then
     begin
       { Cancel, or nothing edited: nothing changes and the render is thrown away }
@@ -16831,8 +16896,37 @@ begin
     undoMark := FCmds.UndoCount;
     try
       newSrc := tl.AddSource(newPath, info.SampleRate, info.Channels, info.FrameCount);
-      for i := 0 to High(ids) do
-        FCmds.Perform(TRemoveTimelineClipCommand.Create(FProject, ids[i]));
+      if segmentOnly then
+      begin
+        { cut the segment out of the lane (clips straddling an edge keep their outside parts) }
+        for pass := 0 to 1 do
+        begin
+          if pass = 0 then rangeEdge := startSec else rangeEdge := endSec;
+          pieceIds := nil;
+          for i := 0 to trk.ClipCount - 1 do pieceIds := pieceIds + [trk.GetClip(i).Id];
+          for pieceId in pieceIds do
+          begin
+            c := tl.ClipById(pieceId);
+            if (c <> nil) and not c.IsMidiClip and
+               (rangeEdge > c.StartSeconds + TIMELINE_MIN_CLIP_SECONDS) and
+               (rangeEdge < c.EndSeconds - TIMELINE_MIN_CLIP_SECONDS) then
+              FCmds.Perform(TSplitTimelineClipCommand.Create(FProject, pieceId, rangeEdge));
+          end;
+        end;
+        pieceIds := nil;
+        for i := 0 to trk.ClipCount - 1 do
+        begin
+          c := trk.GetClip(i);
+          if (not c.IsMidiClip) and (c.StartSeconds >= startSec - TIMELINE_MIN_CLIP_SECONDS) and
+             (c.EndSeconds <= endSec + TIMELINE_MIN_CLIP_SECONDS) then
+            pieceIds := pieceIds + [c.Id];
+        end;
+        for pieceId in pieceIds do
+          FCmds.Perform(TRemoveTimelineClipCommand.Create(FProject, pieceId));
+      end
+      else
+        for i := 0 to High(ids) do
+          FCmds.Perform(TRemoveTimelineClipCommand.Create(FProject, ids[i]));
       addCmd := TAddTimelineClipCommand.Create(FProject, trk.Id, newSrc.Id,
         laneName + ' (edited)', startSec, 0, newDur);
       FCmds.Perform(addCmd);
@@ -16888,6 +16982,11 @@ var
   newDur: Double;
   convertedFile: string;
   loopFlag: Boolean;
+  windowed: Boolean;
+  winStart, winLen, srcDur, conform, srcScale: Double;
+  winPlanar: TAudioPlanar;
+  winFrom, winFrames, wi, wj: Integer;
+  winTmp: Single;
 begin
   if (FProject = nil) or (AClip = nil) or AClip.IsMidiClip then Exit;
   tl := FProject.Timeline;
@@ -16906,9 +17005,69 @@ begin
   outDir := IncludeTrailingPathDelimiter(RecordingRootPath);
   wavPath := srcPath;
   convertedFile := '';
+  { the clip plays only a window of its file (a loop segment, a trimmed or split clip): that
+    window - exactly what the clip plays - is what opens, not the whole file }
+  srcScale := 1.0;
+  if (AClip.SourceBPM > 0) and (FProject.TempoBPM > 0) then
+  begin
+    conform := AClip.SourceBPM / FProject.TempoBPM;
+    if (Abs(conform - 1.0) >= 0.001) and (conform >= 0.25) and (conform <= 4.0) then srcScale := 1.0 / conform;
+  end;
+  winStart := AClip.SourceOffsetSeconds;
+  winLen := AClip.LengthSeconds * srcScale;
+  srcDur := 0;
+  if src.SampleRate > 0 then srcDur := src.FrameCount / src.SampleRate;
+  windowed := (winStart > 0.001) or ((srcDur > 0) and (winStart + winLen < srcDur - 0.02));
   try
     isWav := SameText(ExtractFileExt(srcPath), '.wav') and FileLooksLikeWav(srcPath);
-    if not isWav then
+    if windowed then
+    begin
+      ShowStatusProgress('Audio editor - reading "' + AClip.Name + '"...', 100);
+      try
+        player := TTimelinePlayer.Create(tl);
+        try
+          player.EnsureSourcesLoaded;
+          dec := player.GetDecodedSource(oldSrcId);
+          if (dec = nil) or dec.Failed or (dec.FrameCount = 0) then
+          begin
+            HideStatusProgress;
+            MessageDlg('This audio could not be decoded for editing.', mtWarning, [mbOK], 0);
+            Exit;
+          end;
+          winFrom := EnsureRange(Round(winStart * dec.SampleRate), 0, dec.FrameCount - 1);
+          winFrames := Min(Round(winLen * dec.SampleRate), dec.FrameCount - winFrom);
+          if winFrames < 2 then
+          begin
+            HideStatusProgress;
+            MessageDlg('This clip has no audio to edit.', mtInformation, [mbOK], 0);
+            Exit;
+          end;
+          EnsurePlanar(winPlanar, dec.Channels, winFrames);
+          for wi := 0 to dec.Channels - 1 do
+            Move(dec.Data[wi][winFrom], winPlanar[wi][0], winFrames * SizeOf(Single));
+          { a reversed clip is edited as it sounds; the copy is then played forwards }
+          if AClip.Reversed then
+            for wi := 0 to dec.Channels - 1 do
+              for wj := 0 to winFrames div 2 - 1 do
+              begin
+                winTmp := winPlanar[wi][wj];
+                winPlanar[wi][wj] := winPlanar[wi][winFrames - 1 - wj];
+                winPlanar[wi][winFrames - 1 - wj] := winTmp;
+              end;
+          UpdateStatusProgress(60, 'Audio editor - writing the clip to WAV...');
+          ForceDirectories(outDir);
+          convertedFile := outDir + Format('clip%d-%s.wav', [AClip.Id, FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
+          SaveWavFile(convertedFile, winPlanar, dec.Channels, dec.SampleRate, winFrames, wsfPCM24);
+          JobNoteFile(convertedFile);
+          wavPath := convertedFile;
+        finally
+          player.Free;
+        end;
+      finally
+        HideStatusProgress;
+      end;
+    end
+    else if not isWav then
     begin
       { MP3 / MP4 / MKV / M4A / FLAC ...: decode it and write a WAV to edit }
       ShowStatusProgress('Audio editor - converting ' + ExtractFileName(srcPath) + ' to WAV...', 100);
@@ -16939,7 +17098,8 @@ begin
       end;
     end;
 
-    title := ExtractFileName(srcPath) + '  (' + trk.Name + ')';
+    if windowed then title := AClip.Name + '  (' + trk.Name + ')'
+    else title := ExtractFileName(srcPath) + '  (' + trk.Name + ')';
     loopFlag := AClip.Loop;
     if not TfrmInstrumentEditor.EditFileLoop(Self, title, wavPath, TlTrackAccent(trk, tl.IndexOfTrack(trk.Id)),
          outDir, loopFlag, newPath) then
@@ -16970,10 +17130,23 @@ begin
     { every clip is its own element: copies and pastes share the original file until one is
       edited, so the edit goes to a new file used by this clip alone - the others keep theirs }
     c := AClip;
-    FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, c.SourceOffsetSeconds));
-    { an edit that made the audio shorter must not leave the clip longer than its audio }
-    if (newDur > 0) and (c.SourceOffsetSeconds + c.LengthSeconds > newDur + 0.001) then
-      c.LengthSeconds := Max(TIMELINE_MIN_CLIP_SECONDS, newDur - c.SourceOffsetSeconds);
+    if windowed then
+    begin
+      { the edited file IS the clip's window: it now plays from its start (and forwards, as it
+        was edited) }
+      FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, 0));
+      if c.Reversed then
+        FCmds.Perform(TSetTimelineClipReversedCommand.Create(FProject, c.Id, False));
+      if (newDur > 0) and (newDur < winLen - 0.001) then
+        c.LengthSeconds := Max(TIMELINE_MIN_CLIP_SECONDS, newDur / srcScale);
+    end
+    else
+    begin
+      FCmds.Perform(TSetTimelineClipSourceCommand.Create(FProject, c.Id, newSrc.Id, c.SourceOffsetSeconds));
+      { an edit that made the audio shorter must not leave the clip longer than its audio }
+      if (newDur > 0) and (c.SourceOffsetSeconds + c.LengthSeconds > newDur + 0.001) then
+        c.LengthSeconds := Max(TIMELINE_MIN_CLIP_SECONDS, newDur - c.SourceOffsetSeconds);
+    end;
     if convertedFile <> '' then DeleteFile(convertedFile);   // the edited WAV is the new base file
     ShowStatusProgress('Audio editor - preparing the waveform...', 100);
     try
@@ -20550,6 +20723,19 @@ begin
   end;
 end;
 
+{ Clear Loop: removes the marked loop area from the ruler and switches looping off.  The range
+  selection and the playhead are left alone. }
+procedure TfrmMain.btnTlLoopClearClick(Sender: TObject);
+begin
+  if FProject = nil then Exit;
+  if FProject.Timeline.LoopLengthSeconds <= 0 then Exit;
+  FProject.Timeline.LoopLengthSeconds := 0;
+  FProject.Timeline.LoopEnabled := False;
+  FProject.Touch;
+  RefreshTimelineTab;
+  pbTimeline.Invalidate;
+end;
+
 procedure TfrmMain.btnTlLoopToRangeClick(Sender: TObject);
 begin
   if (FProject = nil) or not FTlRangeActive then Exit;
@@ -20598,7 +20784,7 @@ begin
             Inc(clipTotal);
         end;
       end;
-      if clipTotal > 0 then FxBegin('Normalize', clipTotal, 2, memTimeline);   // scan peak / apply gain
+      if clipTotal > 0 then FxBegin('Normalize', clipTotal, 2, memTimeline.Lines);   // scan peak / apply gain
       for tid in TlRangeTrackIds do
       begin
       trk := tl.TrackById(tid);
@@ -20836,7 +21022,7 @@ begin
           Inc(clipTotal);
       end;
     end;
-    if clipTotal > 0 then FxBegin('Reverse', clipTotal, 1, memTimeline);
+    if clipTotal > 0 then FxBegin('Reverse', clipTotal, 1, memTimeline.Lines);
     for tid in TlRangeTrackIds do
     begin
     trk := tl.TrackById(tid);
@@ -21196,7 +21382,7 @@ begin
              > TIMELINE_MIN_CLIP_SECONDS) then
           Inc(clipTotal);
       end;
-      if clipTotal > 0 then FxBegin('Silence', clipTotal, 4, memTimeline);   // read / silence / write / commit
+      if clipTotal > 0 then FxBegin('Silence', clipTotal, 4, memTimeline.Lines);   // read / silence / write / commit
       for id in ids do
       begin
         c := tl.ClipById(id);
@@ -21999,6 +22185,215 @@ begin
     begin
       HideStatusProgress;
       memTimeline.Lines.Insert(0, 'Split Speech / Music FAILED: ' + E.Message);
+    end;
+  end;
+end;
+
+{ Stem Splitting - Scan Loop Segments: walks the selected lane(s) - inside the
+  marked range when there is one, otherwise the whole lane - and cuts the audio
+  from one near-silent point to the next (UDAW.Timeline.LoopScan). Every segment
+  whose length is a whole 1/4, 1/8, 1/16, 1/32, 1/64, 2/4 or 4/4 at the project
+  tempo becomes a clip on a new "<lane> - Loops <division>" track: the clips
+  point into the original source, so nothing is rendered and Undo removes them. }
+procedure TfrmMain.TlScanLoopSegments;
+type
+  THit = record
+    Div_: TLoopDivision;
+    SourceId: Integer;
+    StartSec, OffsetSec, LengthSec: Double;   // length in source seconds
+    SourceBpm: Double;                        // > 0 when the clip plays tempo-conformed
+    Name: string;
+  end;
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  c: TTimelineClip;
+  src: TMediaSource;
+  player: TTimelinePlayer;
+  dec: TDecodedSource;
+  tids, clipIds: TArray<Integer>;
+  cuts: TArray<Integer>;
+  hits: array[TLoopDivision] of TArray<THit>;
+  h: THit;
+  d: TLoopDivision;
+  tid, id, j, k, sr, startFrame, frameCount, clipNo, skippedClips, unmatched, total, added: Integer;
+  ovStart, ovEnd, segStart, segLen, regionStart, factor, srcQuarter, segSrcStart: Double;
+  stretched: Boolean;
+  addClipCmd: TAddTimelineClipCommand;
+  segs: TArray<TLoopSegment>;
+  totalCuts, skippedCuts, regionRate: Integer;
+  dbText: string;
+  silenceDb: Double;
+  trackCmd: TAddTimelineTrackCommand;
+  summary: string;
+
+  function ClipSelected(AClipId: Integer): Boolean;
+  var
+    n: Integer;
+  begin
+    Result := AClipId = FTlSelClipId;
+    for n := 0 to High(FTlSelClipIds) do
+      if FTlSelClipIds[n] = AClipId then Exit(True);
+  end;
+
+begin
+  if FProject = nil then Exit;
+  tl := FProject.Timeline;
+  if FTlRangeActive then
+    tids := TlRangeTrackIds
+  else if FTlSelectedTrackId >= 0 then
+    tids := [FTlSelectedTrackId];
+  { no lane picked: the lane this menu acts on (right-clicked, else the selected clip's) }
+  if (Length(tids) = 0) and (TlContextTrack <> nil) then
+    tids := [TlContextTrack.Id];
+  { still none: the lane(s) holding the selected clip(s) }
+  if Length(tids) = 0 then
+    for j := 0 to tl.TrackCount - 1 do
+    begin
+      trk := tl.GetTrack(j);
+      for k := 0 to trk.ClipCount - 1 do
+        if ClipSelected(trk.GetClip(k).Id) then
+        begin
+          tids := tids + [trk.Id];
+          Break;
+        end;
+    end;
+  if Length(tids) = 0 then
+  begin
+    memTimeline.Lines.Insert(0, 'Scan Loop Segments: select a lane or a clip first.');
+    Exit;
+  end;
+  dbText := FormatFloat('0', LOOP_DEFAULT_SILENCE_DB);
+  if not PromptValueBelow('Scan Loop Segments',
+    'Quiet-point depth - how many dB a dip must lie below the music around it to be a loop cut (0 to 80, smaller = more cuts):', dbText) then Exit;
+  silenceDb := EnsureRange(StrToFloatDef(Trim(dbText), LOOP_DEFAULT_SILENCE_DB), 0, 80);
+  try
+    ShowStatusProgress('Scan Loop Segments - reading source...', 100);
+    player := TTimelinePlayer.Create(tl);
+    try
+      player.EnsureSourcesLoaded;
+      for tid in tids do
+      begin
+        trk := tl.TrackById(tid);
+        if (trk = nil) or (trk.Kind <> tkAudio) then Continue;
+        for d := Low(TLoopDivision) to High(TLoopDivision) do hits[d] := nil;
+        clipIds := nil;
+        for j := 0 to trk.ClipCount - 1 do clipIds := clipIds + [trk.GetClip(j).Id];
+        clipNo := 0;
+        skippedClips := 0;
+        unmatched := 0;
+        totalCuts := 0;
+        for id in clipIds do
+        begin
+          Inc(clipNo);
+          UpdateStatusProgress(Round(100 * clipNo / (Length(clipIds) + 1)),
+            Format('Scan Loop Segments - %s - clip %d/%d', [trk.Name, clipNo, Length(clipIds)]));
+          Application.ProcessMessages;
+          c := tl.ClipById(id);
+          if c = nil then Continue;
+          { reversed clips don't map onto their source, and MIDI clips have no audio }
+          if c.IsMidiClip or c.Reversed then begin Inc(skippedClips); Continue; end;
+          { a clip with a Source BPM plays tempo-conformed: timeline time d after the clip start is
+            source time d / factor, and the source's own notes are one 60 / SourceBPM apart }
+          factor := c.ConformFactor(FProject.TempoBPM);
+          if factor <= 0 then factor := 1.0;
+          stretched := Abs(factor - 1.0) > 0.001;
+          srcQuarter := 0;
+          if stretched then srcQuarter := 60.0 / c.SourceBPM;
+          ovStart := c.StartSeconds;
+          ovEnd := c.EndSeconds;
+          if FTlRangeActive then
+          begin
+            ovStart := Max(ovStart, Min(FTlRangeStartSec, FTlRangeEndSec));
+            ovEnd := Min(ovEnd, Max(FTlRangeStartSec, FTlRangeEndSec));
+          end;
+          if ovEnd - ovStart <= TIMELINE_MIN_CLIP_SECONDS then Continue;
+          src := tl.SourceById(c.SourceId);
+          if src = nil then Continue;
+          dec := player.GetDecodedSource(src.Id);
+          if (dec = nil) or dec.Failed or (dec.FrameCount = 0) then begin Inc(skippedClips); Continue; end;
+          sr := dec.SampleRate;
+          if (sr <= 0) or (dec.Channels <= 0) then Continue;
+          startFrame := Max(Round((c.SourceOffsetSeconds + (ovStart - c.StartSeconds) / factor) * sr), 0);
+          frameCount := Min(Round((ovEnd - ovStart) / factor * sr), dec.FrameCount - startFrame);
+          if frameCount <= 0 then Continue;
+          cuts := FindLoopCuts(dec.Data, dec.Channels, startFrame, frameCount, sr, silenceDb);
+          Inc(totalCuts, Length(cuts));
+          regionStart := ovStart;
+          regionRate := sr;
+          segs := MatchLoopSegments(cuts, sr,
+            function(AFrame: Integer): Double
+            var
+              t: Double;
+            begin
+              if srcQuarter > 0 then Exit(srcQuarter);
+              t := regionStart + AFrame / regionRate;
+              Result := 60.0 / Max(FProject.GridContext.TempoAt(t), 1.0);
+            end, skippedCuts);
+          Inc(unmatched, skippedCuts);
+          for k := 0 to High(segs) do
+          begin
+            d := segs[k].Division;
+            { source seconds of the cut, then where that lands on the timeline }
+            segSrcStart := startFrame / sr + segs[k].StartFrame / sr;
+            segLen := (segs[k].EndFrame - segs[k].StartFrame) / sr;   // source seconds
+            segStart := c.StartSeconds + (segSrcStart - c.SourceOffsetSeconds) * factor;
+            h.Div_ := d;
+            h.SourceId := c.SourceId;
+            h.StartSec := segStart;
+            h.OffsetSec := segSrcStart;
+            h.LengthSec := segLen;
+            h.SourceBpm := 0;
+            if stretched then h.SourceBpm := c.SourceBPM;
+            h.Name := Format('%s %s #%d', [trk.Name, LoopDivisionName(d), Length(hits[d]) + 1]);
+            hits[d] := hits[d] + [h];
+          end;
+        end;
+        total := 0;
+        summary := '';
+        for d := Low(TLoopDivision) to High(TLoopDivision) do
+        begin
+          if Length(hits[d]) = 0 then Continue;
+          Inc(total, Length(hits[d]));
+          summary := summary + Format(' %s x%d', [LoopDivisionName(d), Length(hits[d])]);
+          trackCmd := TAddTimelineTrackCommand.Create(FProject, tkAudio,
+            Format('%s - Loops %s', [trk.Name, LoopDivisionName(d)]));
+          FCmds.Perform(trackCmd);
+          for added := 0 to High(hits[d]) do
+          begin
+            addClipCmd := TAddTimelineClipCommand.Create(FProject, trackCmd.CreatedId,
+              hits[d][added].SourceId, hits[d][added].Name, hits[d][added].StartSec,
+              hits[d][added].OffsetSec, hits[d][added].LengthSec);
+            FCmds.Perform(addClipCmd);
+            { the segment plays tempo-conformed like its parent: setting the Source BPM rescales the
+              source-seconds length given above to timeline seconds }
+            if hits[d][added].SourceBpm > 0 then
+              FCmds.Perform(TSetTimelineClipSourceBpmCommand.Create(FProject, addClipCmd.CreatedId,
+                hits[d][added].SourceBpm));
+          end;
+        end;
+        if total = 0 then
+          memTimeline.Lines.Insert(0, Format(
+            'Scan Loop Segments - %s: no loop segments found - %d near-silent point(s) located, %d did not start a note-length segment%s. ' +
+            IfThen(totalCuts < 2, 'No quiet gaps at this threshold: try a smaller dB value.',
+              'Gaps were found but their spacing is not a whole 1/4..4/4 at the project tempo: check the project BPM.'),
+            [trk.Name, totalCuts, unmatched, IfThen(skippedClips > 0, Format(', %d clip(s) skipped', [skippedClips]), '')]))
+        else
+          memTimeline.Lines.Insert(0, Format('Scan Loop Segments - %s: %d segment(s) captured:%s; %d did not fit a note length%s.',
+            [trk.Name, total, summary, unmatched,
+             IfThen(skippedClips > 0, Format(', %d reversed/MIDI/undecodable clip(s) skipped', [skippedClips]), '')]));
+      end;
+    finally
+      player.Free;
+    end;
+    EnsureMixerStripsForTimelineTracks;
+    RefreshTimelineTab;
+    HideStatusProgress;
+  except
+    on E: Exception do
+    begin
+      HideStatusProgress;
+      memTimeline.Lines.Insert(0, 'Scan Loop Segments FAILED: ' + E.Message);
     end;
   end;
 end;
@@ -22856,15 +23251,34 @@ begin
     memTimeline.Lines.Insert(0, 'Loudness & Phase Report: no clips with audio in the selected range.');
 end;
 
-{ Effects > Plug-in...: loads a VST3 (or VST2 / CLAP) plug-in from a file and applies it to the
+{ True when one of the lanes the range effect would touch is a MIDI / Instrument lane }
+function TfrmMain.TlRangeHasMidiLane: Boolean;
+var
+  tid: Integer;
+  trk: TTimelineTrack;
+begin
+  Result := False;
+  if FProject = nil then Exit;
+  for tid in TlRangeTrackIds do
+  begin
+    trk := FProject.Timeline.TrackById(tid);
+    if (trk <> nil) and (trk.Kind in [tkMidi, tkInstrument]) then Exit(True);
+  end;
+end;
+
+{ Effects > Plug-in...: loads a VST2 / VST3 (or CLAP) plug-in from a file and applies it to the
   marked range of the selected lane(s), like any built-in effect (offline render, undoable,
-  Esc cancels). The plug-in runs with its own saved settings. }
+  Esc cancels). The plug-in runs with its own saved settings.
+
+  An effect works on the audio lanes it is applied to.  A plug-in that takes MIDI (an instrument, or an
+  effect on a MIDI lane) is rendered over the range instead: the MIDI lanes under the range play it, the
+  audio lanes under the range are its sample input, and the result lands on a new audio track. }
 procedure TfrmMain.TlFxPluginClick(Sender: TObject);
 var
   fn, ext, pathB64, plugName, loadError, kind, params: string;
   paramCount: Integer;
-  vst3Probe: TVST3Host;
   clapProbe: TCLAPHost;
+  isInst, wantsMidi: Boolean;
 begin
   if FProject = nil then Exit;
   if not FTlRangeActive then
@@ -22877,21 +23291,11 @@ begin
   ext := LowerCase(ExtractFileExt(fn));
   plugName := '';
   params := '';
+  isInst := False;
+  wantsMidi := False;
   pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(fn));
   try
-    if ext = '.vst3' then
-    begin
-      vst3Probe := TVST3Host.Create;
-      try
-        vst3Probe.LoadOnly(fn);
-        plugName := vst3Probe.EffectName;
-      finally
-        vst3Probe.Free;
-      end;
-      kind := 'vst3';
-      params := Format('path=%s;state=', [pathB64]);
-    end
-    else if ext = '.clap' then
+    if ext = '.clap' then
     begin
       clapProbe := TCLAPHost.Create;
       try
@@ -22905,12 +23309,11 @@ begin
     end
     else
     begin
-      if not ProbeVst2File(fn, paramCount, loadError) then
+      if not ProbePluginFile(fn, kind, plugName, paramCount, isInst, wantsMidi, loadError) then
       begin
-        MessageDlg('Not a usable VST2 plugin:'#13#10 + fn + #13#10#13#10 + loadError, mtError, [mbOK], 0);
+        MessageDlg('Not a usable plugin:'#13#10 + fn + #13#10#13#10 + loadError, mtError, [mbOK], 0);
         Exit;
       end;
-      kind := 'vst2';
       params := Format('path=%s;state=;paramcount=%d', [pathB64, paramCount]);
     end;
   except
@@ -22921,7 +23324,157 @@ begin
     end;
   end;
   if plugName = '' then plugName := ChangeFileExt(ExtractFileName(fn), '');
-  TlApplyEffectToRange(kind, params, plugName);
+  if isInst or (wantsMidi and TlRangeHasMidiLane) then
+    TlRenderPluginToRange(kind, params, plugName, isInst)
+  else
+    TlApplyEffectToRange(kind, params, plugName);
+end;
+
+{ Renders a plug-in that takes MIDI over the marked range, offline:
+    MIDI         - the notes and controllers of the MIDI / Instrument lanes selected under the range
+    sample input - the audio lanes selected under the range, mixed, are the plug-in's audio input
+  The result becomes a new clip on a new audio track at the start of the range (undoable); the lanes it
+  was made from are left untouched.  Progress is shown in the status bar. }
+procedure TfrmMain.TlRenderPluginToRange(const AKind, AParams, AName: string; AInstrument: Boolean);
+var
+  tl: TTimeline;
+  trk: TTimelineTrack;
+  c: TTimelineClip;
+  src, newSrc: TMediaSource;
+  player: TTimelinePlayer;
+  dec: TDecodedSource;
+  midiTids, audTids: TArray<Integer>;
+  midi: TTimedMidiArray;
+  input, rendered: TAudioPlanar;
+  req: TPluginRenderRequest;
+  addCmd: TAddTimelineClipCommand;
+  tid, j, i, k, sr, ch, frames, outFrames, srcStart, dstStart, cnt, trackId, used: Integer;
+  st, en, ovS, ovE: Double;
+  dir, fileName: string;
+begin
+  if (FProject = nil) or not FTlRangeActive then Exit;
+  tl := FProject.Timeline;
+  st := Min(FTlRangeStartSec, FTlRangeEndSec);
+  en := Max(FTlRangeStartSec, FTlRangeEndSec);
+  if en - st < 0.01 then Exit;
+  sr := FProject.SampleRate;
+  if sr <= 0 then sr := UDAW_DEFAULT_SAMPLE_RATE;
+  ch := 2;
+  frames := Round((en - st) * sr);
+
+  midiTids := nil;
+  audTids := nil;
+  for tid in TlRangeTrackIds do
+  begin
+    trk := tl.TrackById(tid);
+    if trk = nil then Continue;
+    if trk.Kind in [tkMidi, tkInstrument] then midiTids := midiTids + [tid]
+    else if trk.Kind = tkAudio then audTids := audTids + [tid];
+  end;
+  midi := CollectRangeMidi(tl, FProject.Midi, midiTids, st, en, sr);
+  if AInstrument and (Length(midi) = 0) then
+  begin
+    memTimeline.Lines.Insert(0, AName + ' is an instrument: select a MIDI or Instrument lane with notes under ' +
+      'the marked range (add an audio lane too if it should hear it).');
+    Exit;
+  end;
+
+  ShowStatusProgress(AName + ' - preparing...', 100);
+  try
+    try
+      { the audio lanes under the range, mixed, are the plug-in's sample input }
+      SetLength(input, 0);
+      if Length(audTids) > 0 then
+      begin
+        player := TTimelinePlayer.Create(tl);
+        try
+          player.EnsureSourcesLoaded;
+          EnsurePlanar(input, ch, frames);
+          for i := 0 to ch - 1 do FillChar(input[i][0], frames * SizeOf(Single), 0);
+          used := 0;
+          for tid in audTids do
+          begin
+            trk := tl.TrackById(tid);
+            if trk = nil then Continue;
+            for j := 0 to trk.ClipCount - 1 do
+            begin
+              c := trk.GetClip(j);
+              ovS := Max(c.StartSeconds, st);
+              ovE := Min(c.EndSeconds, en);
+              if (c.Muted) or (ovE - ovS <= TIMELINE_MIN_CLIP_SECONDS) then Continue;
+              src := tl.SourceById(c.SourceId);
+              if src = nil then Continue;
+              dec := player.GetDecodedSource(src.Id);
+              if (dec = nil) or dec.Failed or (dec.FrameCount = 0) or (dec.Channels <= 0) then Continue;
+              if dec.SampleRate <> sr then
+              begin
+                memTimeline.Lines.Insert(0, Format('%s: clip %d runs at %d Hz, not the project''s %d Hz - left out of the input.',
+                  [AName, c.Id, dec.SampleRate, sr]));
+                Continue;
+              end;
+              srcStart := Round((c.SourceOffsetSeconds + (ovS - c.StartSeconds)) * sr);
+              dstStart := Round((ovS - st) * sr);
+              cnt := Min(Round((ovE - ovS) * sr), Min(dec.FrameCount - srcStart, frames - dstStart));
+              if (cnt <= 0) or (srcStart < 0) or (dstStart < 0) then Continue;
+              for i := 0 to ch - 1 do
+                for k := 0 to cnt - 1 do
+                  input[i][dstStart + k] := input[i][dstStart + k] +
+                    dec.Data[Min(i, dec.Channels - 1)][srcStart + k];
+              Inc(used);
+            end;
+          end;
+          if used = 0 then SetLength(input, 0);
+        finally
+          player.Free;
+        end;
+      end;
+      if (Length(midi) = 0) and (Length(input) = 0) then
+      begin
+        memTimeline.Lines.Insert(0, AName + ': nothing to play it with - select a MIDI / Instrument lane or an ' +
+          'audio lane that has something under the marked range.');
+        Exit;
+      end;
+
+      req := TPluginRenderRequest.Make(AKind, AParams, AName, sr, ch, frames);
+      req.Tempo := FProject.TempoBPM;
+      if req.Tempo < 1 then req.Tempo := 120;
+      req.StartPpq := st * req.Tempo / 60.0;
+      memTimeline.Lines.Insert(0, Format('%s: rendering %.2f s%s%s through the plug-in...',
+        [AName, en - st, IfThen(Length(midi) > 0, Format(' with %d MIDI messages', [Length(midi)]), ''),
+         IfThen(Length(input) > 0, ' and the highlighted audio as its input', '')]));
+      rendered := RenderPluginToPlanar(req, input, midi,
+        procedure(APct: Integer)
+        begin
+          UpdateStatusProgress(APct, Format('%s - rendering the range (%d%%)', [AName, APct]));
+          Application.ProcessMessages;
+        end, outFrames);
+      if outFrames <= 0 then
+      begin
+        memTimeline.Lines.Insert(0, AName + ': the plug-in produced no audio.');
+        Exit;
+      end;
+
+      UpdateStatusProgress(95, AName + ' - writing the audio file...');
+      dir := IncludeTrailingPathDelimiter(RecordingRootPath);
+      ForceDirectories(dir);
+      fileName := dir + Format('fx-%s-render-%s.wav',
+        [SafeSunoFileName(AName), FormatDateTime('yyyymmdd-hhnnsszzz', Now)]);
+      SaveWavFile(fileName, rendered, ch, sr, outFrames, wsfPCM24);
+      JobNoteFile(fileName);
+      newSrc := tl.AddSource(fileName, sr, ch, outFrames);
+      trackId := TlNewAudioTrackId;
+      addCmd := TAddTimelineClipCommand.Create(FProject, trackId, newSrc.Id, AName, st, 0, outFrames / sr);
+      FCmds.Perform(addCmd);
+      FTlSelClipId := addCmd.CreatedId;
+      memTimeline.Lines.Insert(0, Format('%s rendered to a new audio clip (%.2f s).', [AName, outFrames / sr]));
+      RefreshTimelineTab;
+    except
+      on E: Exception do
+        memTimeline.Lines.Insert(0, AName + ' FAILED: ' + E.Message);
+    end;
+  finally
+    HideStatusProgress;
+  end;
 end;
 
 procedure TfrmMain.TlFxMenuClick(Sender: TObject);
@@ -22999,6 +23552,7 @@ begin
     38: begin TlSplitStemsSelected; Exit; end;
     39: begin TlAudioToMidiSelected; Exit; end;
     114: begin TlSplitSpeechMusicSelected; Exit; end;
+    218: begin TlScanLoopSegments; Exit; end;
     113: begin TlMeasureRangeReport; Exit; end;
   else
     if not TlFxPreset(TMenuItem(Sender).Tag, kind, params, name) then Exit;
@@ -23939,8 +24493,17 @@ begin
     if (c <> nil) and (TlClipKind(c) = ckAudio) then
     begin
       FTlDblPress := False;
-      TlSetSingleSelection(c.Id);
-      TlEditClipAudio(c);
+      { inside a marked range, the range is the selected section: that segment opens }
+      sec := FTlView.XToSeconds(X);
+      if FTlRangeActive and (sec >= Min(FTlRangeStartSec, FTlRangeEndSec)) and
+         (sec <= Max(FTlRangeStartSec, FTlRangeEndSec)) and (FTlCtxTrackId >= 0) and
+         ((FTlCtxTrackId = FTlSelectedTrackId) or (TlExtraTrackIndex(FTlCtxTrackId) >= 0)) then
+        TlEditLaneClick(nil)
+      else
+      begin
+        TlSetSingleSelection(c.Id);
+        TlEditClipAudio(c);
+      end;
       RefreshTimelineTab;
       Exit;
     end;
@@ -24645,7 +25208,11 @@ var
   barIdx: Integer;
   cols: TWavePeakArray;
   midY, halfH, px, colFirstSec, spc, srcScale: Double;
-  ch, colX: Integer;
+  ch, colX, nWaveCh: Integer;
+  colSample: Int64;
+  waveHalf, colMin, colMax: Double;
+  waveMid: array[0..1] of Double;
+  stereoWave, haveCol: Boolean;
   pk: TWavePeak;
   isSel: Boolean;
   trackHasEffects: Boolean;
@@ -25207,7 +25774,6 @@ begin
         if spc < 1 then spc := 1;
         colFirstSec := clip.SourceOffsetSeconds +
           ((x - FTlView.SecondsToX(clip.StartSeconds)) / FTlView.PixelsPerSecond) * srcScale;
-        ch := 0;
         { waveform: the effect's colour only inside the effect region }
         var regs := TlClipRegions(clip);
         { the region's own tint behind the wave, selected or not }
@@ -25227,6 +25793,19 @@ begin
           end;
         var baseCol := Mix(trkColor, clWhite, 0.4);
         if isSel then baseCol := Mix(baseCol, clWhite, 0.3);
+        { stereo audio shows both channels, left above right, in every clip of the lane; a lane
+          too short for two traces shows the combined peaks of the channels instead }
+        nWaveCh := Min(src.Waveform.Channels, 2);
+        stereoWave := (nWaveCh >= 2) and (top + laneH - 2 - bodyTop >= 36);
+        waveHalf := (top + laneH - 2 - bodyTop - 7) / 4;
+        waveMid[0] := bodyTop + 2 + waveHalf;
+        waveMid[1] := waveMid[0] + 2 * waveHalf + 3;
+        if stereoWave then
+        begin
+          cv.Pen.Color := Mix(clipBackground, trkColor, 0.25);
+          cv.MoveTo(x + 2, Round(waveMid[0] + waveHalf + 1));
+          cv.LineTo(x2 - 2, Round(waveMid[0] + waveHalf + 1));
+        end;
         for colX := 0 to cw - 1 do
         begin
           cv.Pen.Color := baseCol;
@@ -25243,19 +25822,38 @@ begin
             end;
           px := colFirstSec + colX / FTlView.PixelsPerSecond * srcScale;
           if clip.Reversed then
-            src.Waveform.GetColumns(ch,
-              Round((clip.SourceOffsetSeconds + clip.LengthSeconds * srcScale -
-                     (px - clip.SourceOffsetSeconds)) * src.SampleRate),
-              Round(spc), 1, cols)
+            colSample := Round((clip.SourceOffsetSeconds + clip.LengthSeconds * srcScale -
+              (px - clip.SourceOffsetSeconds)) * src.SampleRate)
           else
-            src.Waveform.GetColumns(ch, Round(px * src.SampleRate), Round(spc), 1, cols);
-          if Length(cols) = 0 then Continue;
-          pk := cols[0];
-          { A source can genuinely exceed +-1.0 (e.g. an unnormalized tracker
-            bounce) - clamp the drawn line to the clip's own body rect rather
-            than letting it paint into the lane above/below. }
-          cv.MoveTo(x + colX, EnsureRange(Round(midY - pk.MaxV * halfH), bodyTop, top + laneH - 2));
-          cv.LineTo(x + colX, EnsureRange(Round(midY - pk.MinV * halfH), bodyTop, top + laneH - 2));
+            colSample := Round(px * src.SampleRate);
+          haveCol := False;
+          colMin := 0;
+          colMax := 0;
+          for ch := 0 to nWaveCh - 1 do
+          begin
+            src.Waveform.GetColumns(ch, colSample, Round(spc), 1, cols);
+            if Length(cols) = 0 then Continue;
+            pk := cols[0];
+            { A source can genuinely exceed +-1.0 (e.g. an unnormalized tracker
+              bounce) - clamp the drawn line to the clip's own body rect rather
+              than letting it paint into the lane above/below. }
+            if stereoWave then
+            begin
+              cv.MoveTo(x + colX, EnsureRange(Round(waveMid[ch] - pk.MaxV * waveHalf), bodyTop, top + laneH - 2));
+              cv.LineTo(x + colX, EnsureRange(Round(waveMid[ch] - pk.MinV * waveHalf), bodyTop, top + laneH - 2));
+            end
+            else
+            begin
+              if not haveCol then begin colMin := pk.MinV; colMax := pk.MaxV; end
+              else begin colMin := Min(colMin, Double(pk.MinV)); colMax := Max(colMax, Double(pk.MaxV)); end;
+              haveCol := True;
+            end;
+          end;
+          if haveCol then
+          begin
+            cv.MoveTo(x + colX, EnsureRange(Round(midY - colMax * halfH), bodyTop, top + laneH - 2));
+            cv.LineTo(x + colX, EnsureRange(Round(midY - colMin * halfH), bodyTop, top + laneH - 2));
+          end;
         end;
       end
       else if not clip.IsMidiClip then
@@ -26607,7 +27205,7 @@ begin
               AddParam(Format('Python %d: %s', [i + 1, pyNames[j]]), apInsertParam, i, j);
           Continue;
         end;
-        if not SameText(ins.Kind, 'vst2') then Continue;
+        if not (SameText(ins.Kind, 'vst2') or SameText(ins.Kind, 'vst3')) then Continue;
         n := InsertInt(ins.Params, 'paramcount', 0);
         if n < 0 then n := 0 else if n > 16384 then n := 16384;
         for j := 0 to n - 1 do
@@ -27836,7 +28434,7 @@ begin
     mi.Caption := '-';
     FMixPickMenu.Items.Add(mi);
     mi := TMenuItem.Create(FMixPickMenu);
-    mi.Caption := 'VST2 plugin file...';
+    mi.Caption := 'VST2 / VST3 plugin file...';
     mi.Tag := -1;
     mi.OnClick := MixPickClick;
     FMixPickMenu.Items.Add(mi);
@@ -27915,10 +28513,10 @@ begin
     OpenPythonInsertWindow(FMixViewTracker, s.Id, AIndex);
     Exit;
   end;
-  if SameText(ins.Kind, 'vst2') then
+  if SameText(ins.Kind, 'vst2') or SameText(ins.Kind, 'vst3') then
   begin
-    MessageDlg('This is a VST plugin insert - use "Edit VST..." to open its ' +
-      'parameter/editor window.', mtInformation, [mbOK], 0);
+    { double-clicking a VST2 / VST3 insert opens that plug-in's own window (on any strip, the master too) }
+    OpenVST2EditorForInsert(s.Id, AIndex);
     Exit;
   end;
   disp := MixInsertKindDisplay(ins.Kind, ins.Params);
@@ -28200,34 +28798,46 @@ begin
   Result := False;
   if AStrip = nil then Exit;
   for i := 0 to AStrip.InsertCount - 1 do
-    if SameText(AStrip.GetInsert(i).Kind, 'vst2') and
+    if (SameText(AStrip.GetInsert(i).Kind, 'vst2') or SameText(AStrip.GetInsert(i).Kind, 'vst3')) and
        SameText(MixInsertKV(AStrip.GetInsert(i).Params, 'path'), APathB64) then
       Exit(True);
 end;
 
-function TfrmMain.ProbeVst2File(const APath: string; out AParamCount: Integer;
-  out AError: string): Boolean;
+{ Loads a VST2 / VST3 file just far enough to describe it, through the common host interface:
+  its kind ('vst2' / 'vst3'), name, parameter count, whether it is an instrument and whether it takes
+  MIDI.  A file that is not a usable plug-in is refused with the reason. }
+function TfrmMain.ProbePluginFile(const AFileName: string; out AKind, AName: string;
+  out AParamCount: Integer; out AInstrument, AWantsMidi: Boolean; out AError: string): Boolean;
 var
-  host: TVST2Host;
+  host: TPluginHostBase;
 begin
-  { scan-only: confirm this DLL is really a VST2 effect before it becomes an
-    insert - a bad/incompatible DLL is rejected here, not silently accepted.
-    Shared by btnMixAddVSTClick (file-dialog path) and pbMixerDragDrop
-    (Browser-tab drag path) so the same safety check guards both. }
-  Result := True;
+  Result := False;
+  AName := '';
   AParamCount := 0;
+  AInstrument := False;
+  AWantsMidi := False;
   AError := '';
-  host := TVST2Host.Create;
+  if SameText(ExtractFileExt(AFileName), '.vst3') then
+  begin
+    AKind := 'vst3';
+    host := TVST3Host.Create;
+  end
+  else
+  begin
+    AKind := 'vst2';
+    host := TVST2Host.Create;
+  end;
   try
     try
-      host.LoadOnly(APath);
+      host.RequireEffect := False;
+      host.LoadOnly(AFileName);
+      AName := host.EffectName;
       AParamCount := host.ParamCount;
+      AInstrument := host.IsSynth;
+      AWantsMidi := host.WantsMidi;
+      Result := True;
     except
-      on E: Exception do
-      begin
-        Result := False;
-        AError := E.Message;
-      end;
+      on E: Exception do AError := E.Message;
     end;
   finally
     host.Free;
@@ -28486,10 +29096,23 @@ begin
     Result := ExcludeTrailingPathDelimiter(Result);
 end;
 
+{ the presets folder from Settings, or a Presets folder inside the plug-ins folder }
+function TfrmMain.PyPresetsDir: string;
+begin
+  Result := '';
+  if App = nil then Exit;
+  Result := Trim(App.Config.GetString(CFG_SEC_PATHS, CFG_PATH_PRESETS, ''));
+  if Result = '' then
+    Result := IncludeTrailingPathDelimiter(PluginsDir) + 'Presets'
+  else
+    Result := ExcludeTrailingPathDelimiter(Result);
+end;
+
 procedure TfrmMain.PyPluginSetup;
 begin
   if (App = nil) or (PyPluginsFolder <> '') then Exit;
   PyPluginsFolder := PluginsDir;
+  PyPresetsFolder := PyPresetsDir;
   PyScratchFolder := IncludeTrailingPathDelimiter(App.Paths.Cache) + 'PythonPlugins';
   ForceDirectories(PyScratchFolder);
   PyEnsureSdk(PyPluginsFolder);
@@ -28558,6 +29181,17 @@ end;
 procedure TfrmMain.PyEditorRefreshTargets(Sender: TObject);
 var
   list: TArray<TPyTarget>;
+  sel: Integer;
+begin
+  if (FPyEditor = nil) or (FProject = nil) then Exit;
+  PyCollectTargets(list, sel);
+  FPyEditor.SetTargets(list, sel);
+end;
+
+{ every strip an effect can sit on - Master strips included - for both the Timeline and the Tracker mixer }
+procedure TfrmMain.PyCollectTargets(out AList: TArray<TPyTarget>; out ASel: Integer);
+var
+  list: TArray<TPyTarget>;
   sel, selId, k: Integer;
 
   procedure AddAll(AModel: TMixerModel; ATracker: Boolean; const APrefix: string);
@@ -28581,13 +29215,28 @@ var
   end;
 
 begin
-  if (FPyEditor = nil) or (FProject = nil) then Exit;
   SetLength(list, 0);
   sel := -1;
   selId := SelectedMixStripId;
-  AddAll(FProject.Mixer, False, 'Timeline: ');
-  AddAll(FProject.TrackerMixer, True, 'Tracker: ');
-  FPyEditor.SetTargets(list, sel);
+  if FProject <> nil then
+  begin
+    AddAll(FProject.Mixer, False, 'Timeline: ');
+    AddAll(FProject.TrackerMixer, True, 'Tracker: ');
+  end;
+  AList := list;
+  ASel := sel;
+end;
+
+{ a strip chosen from the Add to Mixer list }
+procedure TfrmMain.PyAddMenuItemClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  i := TMenuItem(Sender).Tag;
+  if (i < 0) or (i > High(FPyAddTargets)) then Exit;
+  PyEditorAddToMixer(FPyAddTargets[i], FPyAddFile, FPyAddName, FPyAddVals, FPyAddState, FPyAddNames);
+  stbMain.SimpleText := 'Added "' + FPyAddName + '" to ' + FPyAddTargets[i].Caption +
+    ' - double-click it in the strip to open its window.';
 end;
 
 procedure TfrmMain.PyEditorAddToMixer(const ATarget: TPyTarget; const AFilePath, APluginName,
@@ -29067,14 +29716,15 @@ var
   st, vals, custom: string;
   v: TJSONValue;
   o: TJSONObject;
-  target: TPyTarget;
-  strip: TMixStrip;
+  sel, i: Integer;
+  mi: TMenuItem;
+  pt: TPoint;
+  lastTracker: Boolean;
 begin
   frm := TfrmPyPlugin(Sender);
-  if (FProject = nil) or (SelectedMixStripId = 0) then
+  if FProject = nil then
   begin
-    MessageDlg('Choose where the plug-in goes: open the Mixer tab and select a strip (a lane, bus or ' +
-      'Tracker channel), then press Add to Mixer again.', mtInformation, [mbOK], 0);
+    MessageDlg('Open or create a project first.', mtInformation, [mbOK], 0);
     Exit;
   end;
   st := frm.Host.CaptureState;
@@ -29092,13 +29742,50 @@ begin
   finally
     v.Free;
   end;
-  target.Tracker := FMixViewTracker;
-  target.StripId := SelectedMixStripId;
-  strip := MixCur.StripById(target.StripId);
-  if strip <> nil then target.Caption := strip.Name else target.Caption := 'the selected strip';
-  PyEditorAddToMixer(target, frm.SourceFile, frm.Host.Name, vals, custom, frm.Host.ParamNames);
-  stbMain.SimpleText := 'Added "' + frm.Host.Name + '" to ' + target.Caption +
-    ' - double-click it in the strip to open its window.';
+  PyCollectTargets(FPyAddTargets, sel);
+  FPyAddFile := frm.SourceFile;
+  FPyAddName := frm.Host.Name;
+  FPyAddVals := vals;
+  FPyAddState := custom;
+  FPyAddNames := frm.Host.ParamNames;
+  if FPyAddMenu = nil then FPyAddMenu := TPopupMenu.Create(Self);
+  FPyAddMenu.Items.Clear;
+  lastTracker := False;
+  for i := 0 to High(FPyAddTargets) do
+  begin
+    if (i > 0) and (FPyAddTargets[i].Tracker <> lastTracker) then
+    begin
+      mi := TMenuItem.Create(FPyAddMenu);
+      mi.Caption := '-';
+      FPyAddMenu.Items.Add(mi);
+    end;
+    lastTracker := FPyAddTargets[i].Tracker;
+    mi := TMenuItem.Create(FPyAddMenu);
+    mi.Caption := FPyAddTargets[i].Caption;
+    mi.Tag := i;
+    mi.Default := i = sel;
+    mi.OnClick := PyAddMenuItemClick;
+    FPyAddMenu.Items.Add(mi);
+  end;
+  if FPyAddMenu.Items.Count = 0 then
+  begin
+    MessageDlg('There are no mixer strips to add the plug-in to.', mtInformation, [mbOK], 0);
+    Exit;
+  end;
+  { the press came from the button, so the pointer is on it }
+  GetCursorPos(pt);
+  FPyAddMenu.Popup(pt.X, pt.Y);
+end;
+
+{ the engine stops writing into a plug-in window's live-input ring (before that ring can be freed) }
+procedure TfrmMain.PyLiveDetach;
+begin
+  if not FPyLiveRingOn then Exit;
+  FPyLiveRingOn := False;
+  if (App = nil) or (App.Audio = nil) then Exit;
+  App.Audio.Stop;
+  App.Audio.SetCaptureRing(nil);
+  App.Audio.Start;
 end;
 
 { the plug-in windows listen through the application's audio engine }
@@ -29117,6 +29804,7 @@ begin
     begin
       Result := False;
       if (App = nil) or (App.Audio = nil) then Exit;
+      PyLiveDetach;
       if ASource = nil then
       begin
         App.Audio.ClearSource;
@@ -29127,6 +29815,53 @@ begin
       else if App.Audio.State <> aesRunning then App.Audio.Start;
       App.Audio.SetSource(ASource);
       Result := True;
+    end;
+  PyLiveInfo :=
+    function(out AChannels, ARate: Integer; out AMsg: string): Boolean
+    begin
+      Result := False;
+      AChannels := 0;
+      ARate := 0;
+      AMsg := '';
+      if (App = nil) or (App.Audio = nil) then Exit;
+      if App.Audio.State in [aesIdle, aesFailed] then App.Audio.Open(True);
+      if (App.Audio.Granted.CaptureChannels <= 0) or
+         (Pos('software', LowerCase(App.Audio.BackendName)) > 0) then
+      begin
+        AMsg := 'Live input needs an input device. Choose one in Settings, enable audio input, then reopen ' +
+          'the audio device.';
+        Exit;
+      end;
+      AChannels := App.Audio.Granted.CaptureChannels;
+      ARate := App.Audio.Granted.SampleRate;
+      Result := True;
+    end;
+  PyAuditionAttachLive :=
+    function(const ASource: IAudioSource; ARing: TAudioRing; out AMsg: string): Boolean
+    begin
+      Result := False;
+      AMsg := '';
+      if (App = nil) or (App.Audio = nil) then Exit;
+      if FRecWriter <> nil then
+      begin
+        AMsg := 'A recording is in progress. Stop it before listening to the live input.';
+        Exit;
+      end;
+      if FTlPlaying then StopTimelinePlayback;
+      PyLiveDetach;
+      if App.Audio.State in [aesIdle, aesFailed] then App.Audio.Open(True);
+      App.Audio.Stop;
+      App.Audio.SetCaptureRing(ARing);
+      App.Audio.SetInputMonitoring(False);
+      App.Audio.SetSource(ASource);
+      FPyLiveRingOn := True;
+      App.Audio.Start;
+      Result := App.Audio.State = aesRunning;
+      if not Result then
+      begin
+        PyLiveDetach;
+        AMsg := 'Could not start the input device.';
+      end;
     end;
   PyAuditionRange :=
     function(ARate: Integer; out APlanar: TPyPlanar): Boolean
@@ -29431,36 +30166,24 @@ end;
   VST2 .dll, VST3 and CLAP; shared by the file dialog and the scanned list. }
 procedure TfrmMain.MixAddPluginFile(const AFileName: string);
 var
-  pathB64, loadError, ext, plugName: string;
+  pathB64, loadError, ext, plugName, kind: string;
   paramCount: Integer;
   clapProbe: TCLAPHost;
-  vst3Probe: TVST3Host;
+  isInst, wantsMidi: Boolean;
 begin
   if (FProject = nil) or (SelectedMixStripId = 0) then Exit;
   ext := LowerCase(ExtractFileExt(AFileName));
-  if (ext = '.clap') or (ext = '.vst3') then
+  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(AFileName));
+  if ext = '.clap' then
   begin
-    { CLAP / VST3: probe by really loading the module, then insert by kind }
+    { CLAP: probe by really loading the module, then insert by kind }
     try
-      if ext = '.clap' then
-      begin
-        clapProbe := TCLAPHost.Create;
-        try
-          clapProbe.LoadOnly(AFileName);
-          plugName := clapProbe.EffectName;
-        finally
-          clapProbe.Free;
-        end;
-      end
-      else
-      begin
-        vst3Probe := TVST3Host.Create;
-        try
-          vst3Probe.LoadOnly(AFileName);
-          plugName := vst3Probe.EffectName;
-        finally
-          vst3Probe.Free;
-        end;
+      clapProbe := TCLAPHost.Create;
+      try
+        clapProbe.LoadOnly(AFileName);
+        plugName := clapProbe.EffectName;
+      finally
+        clapProbe.Free;
       end;
     except
       on E: Exception do
@@ -29470,7 +30193,6 @@ begin
         Exit;
       end;
     end;
-    pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(AFileName));
     MixPerform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId,
       Copy(ext, 2, MaxInt), Format('path=%s;state=', [pathB64]), -1,
       IfThen(plugName <> '', plugName, ExtractFileName(AFileName))));
@@ -29478,25 +30200,29 @@ begin
     Exit;
   end;
 
-  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(AFileName));
   if MixStripHasVst2Insert(MixCur.StripById(SelectedMixStripId), pathB64) then
   begin
     MessageDlg('That plugin is already on this strip.', mtInformation, [mbOK], 0);
     Exit;
   end;
 
-  if not ProbeVst2File(AFileName, paramCount, loadError) then
+  { VST2 / VST3: really load it first, so a bad file is refused here and not left as a broken insert }
+  if not ProbePluginFile(AFileName, kind, plugName, paramCount, isInst, wantsMidi, loadError) then
   begin
-    MessageDlg('Not a usable VST2 plugin:'#13#10 + AFileName + #13#10#13#10 + loadError,
+    MessageDlg('Not a usable ' + UpperCase(kind) + ' plugin:'#13#10 + AFileName + #13#10#13#10 + loadError,
       mtError, [mbOK], 0);
     Exit;
   end;
 
-  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(AFileName));
-  MixPerform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId, 'vst2',
+  MixPerform(TAddMixInsertCommand.Create(FProject, SelectedMixStripId, kind,
     Format('path=%s;state=;paramcount=%d', [pathB64, paramCount]), -1,
-    ExtractFileName(AFileName)));
+    IfThen((kind = 'vst3') and (plugName <> ''), plugName, ExtractFileName(AFileName))));
   RefreshMixerTab;
+  if isInst then
+    stbMain.SimpleText := plugName + ' is an instrument: it plays the MIDI of the lane this strip is fed from, ' +
+      'and the MIDI keyboard. Open it with Edit VST to listen.'
+  else if wantsMidi then
+    stbMain.SimpleText := plugName + ' takes MIDI as well as audio: it hears the lane''s MIDI and the MIDI keyboard.';
 end;
 
 procedure TfrmMain.btnMixAddVSTClick(Sender: TObject);
@@ -29510,10 +30236,11 @@ function TfrmMain.OpenVST2EditorForInsert(AStripId, AIndex: Integer): Boolean;
 var
   s: TMixStrip;
   ins: TMixInsert;
-  pathB64, stateB64, path, key: string;
+  pathB64, stateB64, path, key, kind: string;
   frm: TfrmVST2Editor;
   capturedStripId, capturedIndex, capturedParamCount: Integer;
   capturedPathB64: string;
+  live: Boolean;
 begin
   Result := False;
   if FProject = nil then Exit;
@@ -29521,11 +30248,13 @@ begin
   if s = nil then Exit;
   if (AIndex < 0) or (AIndex >= s.InsertCount) then Exit;
   ins := s.GetInsert(AIndex);
-  if not SameText(ins.Kind, 'vst2') then Exit;
+  kind := LowerCase(ins.Kind);
+  if (kind <> 'vst2') and (kind <> 'vst3') then Exit;
 
   pathB64 := MixInsertKV(ins.Params, 'path');
   stateB64 := MixInsertKV(ins.Params, 'state');
   path := TEncoding.UTF8.GetString(TNetEncoding.Base64.DecodeStringToBytes(pathB64));
+  live := MixInsertKV(ins.Params, 'live') <> '0';
 
   capturedStripId := s.Id;
   capturedIndex := AIndex;
@@ -29539,13 +30268,13 @@ begin
     the edited state back into the mixer model as an ordinary undo-safe
     TSetMixInsertParamsCommand, same as the AI mastering assistant's insert
     tuning. }
-  if not frm.OpenPlugin(path, stateB64, FProject.SampleRate, UDAW_DEFAULT_BUFFER_FRAMES,
-    FProject.Channels,
+  if not frm.OpenPlugin(kind, path, stateB64, FProject.SampleRate, UDAW_DEFAULT_BUFFER_FRAMES,
+    FProject.Channels, live,
     procedure(ANewState: string)
     begin
       MixPerform(TSetMixInsertParamsCommand.Create(FProject, capturedStripId, capturedIndex,
-        Format('path=%s;state=%s;paramcount=%d',
-          [capturedPathB64, ANewState, capturedParamCount])));
+        Format('path=%s;state=%s;paramcount=%d;live=%d',
+          [capturedPathB64, ANewState, capturedParamCount, Ord(frm.LiveMidi)])));
       RefreshMixerTab;
     end) then
   begin
@@ -29586,7 +30315,7 @@ begin
   if s = nil then Exit;
   idx := -1;
   for i := s.InsertCount - 1 downto 0 do
-    if SameText(s.GetInsert(i).Kind, 'vst2') then
+    if SameText(s.GetInsert(i).Kind, 'vst2') or SameText(s.GetInsert(i).Kind, 'vst3') then
     begin
       idx := i;
       Break;
@@ -31816,6 +32545,7 @@ begin
     if trackId < 0 then trackId := TlNewAudioTrackId;
     if ImportBrowserFileToTimeline(fileName, trackId, FTlView.Snap(FProject.Timeline.PlayheadSeconds)) then
     begin
+      EnsureMixerStripsForTimelineTracks;
       lblTrkInstrInfo.Caption := 'added to Timeline: ' + ExtractFileName(fileName);
       Logger.Info('ui', 'Tracker instrument added to timeline: ' + fileName);
     end
@@ -35034,6 +35764,14 @@ end;
 procedure TfrmMain.ApplyDirDialogs;
 begin
   TfrmEffectEditor.PresetsFolder := Trim(edDirPresets.Text);
+  { plug-ins started from now on save and load their presets there (a running one keeps its folder) }
+  if (App <> nil) and (PyPluginsFolder <> '') then
+  begin
+    if Trim(edDirPresets.Text) <> '' then
+      PyPresetsFolder := ExcludeTrailingPathDelimiter(Trim(edDirPresets.Text))
+    else
+      PyPresetsFolder := IncludeTrailingPathDelimiter(PluginsDir) + 'Presets';
+  end;
   { the saved equaliser presets in that folder fill the Mixer's preset box from the start }
   MixEqRefreshPresets;
   if edDirAudioLib.Text <> '' then
@@ -35199,6 +35937,38 @@ begin
   end;
 end;
 
+{ MIDI the Python plug-ins on mixer strips produced with send_midi goes out of the MIDI output device
+  chosen in Settings (a plug-in with its editor open sends to the device chosen in its own window).
+  Without an open output device it is discarded so it cannot pile up. }
+procedure TfrmMain.PumpPyMidiOut;
+var
+  i, k: Integer;
+  m: TMidiMessage;
+  plugOut: array[0..255] of TPluginMidi;
+begin
+  { MIDI that VST2 / VST3 plug-ins sent out (an arpeggiator, a MIDI effect...) }
+  k := PluginMidi.TakeOut(plugOut);
+  if (k > 0) and (FMidiOutDevice <> nil) and FMidiOutDevice.IsOpen then
+    for i := 0 to k - 1 do
+    begin
+      m.Status := plugOut[i].Status;
+      m.Data1 := plugOut[i].Data1;
+      m.Data2 := plugOut[i].Data2;
+      FMidiOutDevice.SendMessage(m);
+    end;
+  if FPyMidiOutBuf = nil then Exit;
+  FPyMidiOutBuf.Clear;
+  PyLive.DrainMidiOut(FPyMidiOutBuf);
+  if (FMidiOutDevice = nil) or not FMidiOutDevice.IsOpen then Exit;
+  for i := 0 to FPyMidiOutBuf.Count - 1 do
+  begin
+    m.Status := FPyMidiOutBuf[i].Status;
+    m.Data1 := FPyMidiOutBuf[i].Data1;
+    m.Data2 := FPyMidiOutBuf[i].Data2;
+    FMidiOutDevice.SendMessage(m);
+  end;
+end;
+
 { Called on the UI thread (see tmrUITimer -> FMidiInDevice.Poll) for every
   live event from the open MIDI input device: echoes it out the MIDI output
   device (hardware Thru, when chkMidiThru-style monitoring is wanted - here
@@ -35215,6 +35985,11 @@ var
 begin
   if (FMidiOutDevice <> nil) and FMidiOutDevice.IsOpen then
     FMidiOutDevice.SendMessage(AMsg);
+
+  { Python plug-ins running on mixer strips (no editor open) get the controller's notes for on_midi }
+  PyLive.BroadcastMidi(AMsg.Status, AMsg.Data1, AMsg.Data2);
+  { VST2 / VST3 instruments (and effects that take MIDI) on mixer strips and in open plug-in windows }
+  if AMsg.Status < $F0 then PluginMidi.PostLive(AMsg.Status, AMsg.Data1, AMsg.Data2);
 
   { MIDI record in the Tracker tab writes the played notes into the pattern grid }
   if (btnTrkMidiRec <> nil) and btnTrkMidiRec.Down and TabIs(tabTracker) then
@@ -36672,6 +37447,83 @@ begin
   Result := FRightItems[n].Path;
 end;
 
+{ the plug-in file of the selected item in the Effects list, '' when something else is selected }
+function TfrmMain.TlRightSelectedPlugin: string;
+var
+  node: TGLTreeNode;
+  n: Integer;
+begin
+  Result := '';
+  node := trTlRight.Selected;
+  if (node = nil) or (node.Data = nil) then Exit;
+  n := Integer(NativeInt(node.Data)) - 1;
+  if (n < 0) or (n > High(FRightItems)) or (FRightItems[n].Kind <> RK_FXPLUG) then Exit;
+  Result := FRightItems[n].Path;
+end;
+
+{ A VST2 / VST3 plug-in dropped on the Timeline.
+    instrument  -> over a MIDI / Instrument lane it goes on that lane's strip; anywhere else a new
+                   Instrument lane is made, with its mixer strip created and linked, and the plug-in on it
+    effect      -> on the strip of the audio / MIDI lane it was dropped on; over empty space a new
+                   audio lane (and strip) is made for it }
+procedure TfrmMain.TlDropPlugin(const APath: string; AX, AY: Integer);
+var
+  kind, name, err, pathB64: string;
+  paramCount, ti, trackId: Integer;
+  isInst, wantsMidi: Boolean;
+  trk: TTimelineTrack;
+  cmd: TAddTimelineTrackCommand;
+  strip: TMixStrip;
+begin
+  if FProject = nil then Exit;
+  if not ProbePluginFile(APath, kind, name, paramCount, isInst, wantsMidi, err) then
+  begin
+    memTimeline.Lines.Insert(0, 'Not a usable plug-in: ' + APath + '  (' + err + ')');
+    Exit;
+  end;
+  if name = '' then name := ChangeFileExt(ExtractFileName(APath), '');
+  trackId := 0;
+  if TlTrackAtY(AY, ti) then
+  begin
+    trk := FProject.Timeline.GetTrack(ti);
+    if isInst then
+    begin
+      if trk.Kind in [tkMidi, tkInstrument] then trackId := trk.Id;
+    end
+    else if trk.Kind in [tkAudio, tkMidi, tkInstrument] then
+      trackId := trk.Id;
+  end;
+  if trackId = 0 then
+  begin
+    if isInst then
+      cmd := TAddTimelineTrackCommand.Create(FProject, tkInstrument, name)
+    else
+      cmd := TAddTimelineTrackCommand.Create(FProject, tkAudio, name);
+    FCmds.Perform(cmd);
+    trackId := cmd.CreatedId;
+  end;
+  EnsureMixerStripsForTimelineTracks;         // the lane's strip, created and linked when it has none
+  strip := TlLinkedStrip(trackId);
+  if strip = nil then
+  begin
+    memTimeline.Lines.Insert(0, 'The plug-in could not be added: the lane has no mixer strip.');
+    Exit;
+  end;
+  pathB64 := TNetEncoding.Base64.EncodeBytesToString(TEncoding.UTF8.GetBytes(APath));
+  if MixStripHasVst2Insert(strip, pathB64) then
+    memTimeline.Lines.Insert(0, name + ' is already on that lane.')
+  else
+  begin
+    FCmds.Perform(TAddMixInsertCommand.Create(FProject, strip.Id, kind,
+      Format('path=%s;state=;paramcount=%d', [pathB64, paramCount]), -1, name));
+    memTimeline.Lines.Insert(0, Format('%s added to "%s"%s', [name, strip.Name,
+      IfThen(isInst, ' - it plays the MIDI of this lane and your MIDI keyboard', '')]));
+  end;
+  FTlSelectedTrackId := trackId;
+  RefreshTimelineTab;
+  RefreshMixerTab;
+end;
+
 { a library sample goes onto the selected audio track (or a new one) at the playhead }
 procedure TfrmMain.TlAddSampleAtPlayhead(const APath: string);
 var
@@ -36681,7 +37533,11 @@ begin
   trackId := TlSelectedAudioTrackId;
   if trackId < 0 then trackId := TlNewAudioTrackId;
   if ImportBrowserFileToTimeline(APath, trackId, FProject.Timeline.PlayheadSeconds) then
+  begin
+    EnsureMixerStripsForTimelineTracks;
     RefreshTimelineTab;
+    RefreshMixerTab;
+  end;
 end;
 
 { Opens a library sample in the WAV editor (WAV, FLAC and MP3 files). The original file is never
@@ -36813,12 +37669,14 @@ begin
   if Source = trTlRight then
   begin
     Accept := (FProject <> nil) and ((TlRightSelectedInstr >= 0) or (TlRightSelectedModule <> '') or
-      (TlRightSelectedSample <> ''));
+      (TlRightSelectedSample <> '') or (TlRightSelectedPlugin <> ''));
     Exit;
   end;
   Accept := (Source = tvBrowser) and (FProject <> nil) and
     (tvBrowser.Selected <> nil) and (tvBrowser.Selected.Data = BRND_FILE) and
-    BrowserIsAudioExt(LowerCase(ExtractFileExt(BrowserNodePath(tvBrowser.Selected))));
+    (BrowserIsAudioExt(LowerCase(ExtractFileExt(BrowserNodePath(tvBrowser.Selected)))) or
+     SameText(ExtractFileExt(BrowserNodePath(tvBrowser.Selected)), '.vst3') or
+     SameText(ExtractFileExt(BrowserNodePath(tvBrowser.Selected)), '.dll'));
 end;
 
 { Drops onto an existing audio track import onto that track at the dropped
@@ -36839,6 +37697,12 @@ begin
       TlAddSampleAtPlayhead(TlRightSelectedSample);
       Exit;
     end;
+    { a VST2 / VST3 plug-in dropped on the Timeline: an instrument gets its own lane and strip }
+    if (FProject <> nil) and (TlRightSelectedPlugin <> '') then
+    begin
+      TlDropPlugin(TlRightSelectedPlugin, X, Y);
+      Exit;
+    end;
     { a tracker module dropped on the Timeline asks how to add it, at the playhead }
     if (FProject <> nil) and (TlRightSelectedModule <> '') then
     begin
@@ -36856,6 +37720,11 @@ begin
   if (Source <> tvBrowser) or (tvBrowser.Selected = nil) or
      (tvBrowser.Selected.Data <> BRND_FILE) or (FProject = nil) then Exit;
   path := BrowserNodePath(tvBrowser.Selected);
+  if SameText(ExtractFileExt(path), '.vst3') or SameText(ExtractFileExt(path), '.dll') then
+  begin
+    TlDropPlugin(path, X, Y);
+    Exit;
+  end;
   if not BrowserIsAudioExt(LowerCase(ExtractFileExt(path))) then Exit;
 
   FTlView.SetViewportWidth(pbTimeline.Width);
@@ -36865,7 +37734,11 @@ begin
   trackId := TlDropTargetTrackId(X, Y);
 
   if ImportBrowserFileToTimeline(path, trackId, sec) then
-    memBrowser.Lines.Insert(0, 'dropped onto Timeline: ' + path)
+  begin
+    memBrowser.Lines.Insert(0, 'dropped onto Timeline: ' + path);
+    EnsureMixerStripsForTimelineTracks;      // the lane the clip landed on has its linked strip
+    RefreshMixerTab;
+  end
   else
     memBrowser.Lines.Insert(0, 'drop import FAILED: ' + path);
 end;
@@ -36927,6 +37800,11 @@ begin
       len := DragQueryFile(ADrop, i, nil, 0);
       SetLength(fileName, len);
       DragQueryFile(ADrop, i, PChar(fileName), len + 1);
+      if SameText(ExtractFileExt(fileName), '.vst3') then
+      begin
+        TlDropPlugin(fileName, dropPt.X, dropPt.Y);
+        Continue;
+      end;
       if not BrowserIsAudioExt(LowerCase(ExtractFileExt(fileName))) then
       begin
         memBrowser.Lines.Insert(0, 'skipped (not an importable audio format): ' + fileName);
@@ -36944,6 +37822,8 @@ begin
       else
         memBrowser.Lines.Insert(0, 'Explorer drop import FAILED: ' + fileName);
     end;
+    EnsureMixerStripsForTimelineTracks;      // every lane the files landed on has its linked strip
+    RefreshMixerTab;
   finally
     DragFinish(ADrop);
   end;
@@ -36955,7 +37835,8 @@ procedure TfrmMain.pbMixerDragOver(Sender, Source: TObject; X, Y: Integer;
 begin
   Accept := (Source = tvBrowser) and (FProject <> nil) and
     (tvBrowser.Selected <> nil) and (tvBrowser.Selected.Data = BRND_FILE) and
-    SameText(ExtractFileExt(BrowserNodePath(tvBrowser.Selected)), '.dll');
+    (SameText(ExtractFileExt(BrowserNodePath(tvBrowser.Selected)), '.dll') or
+     SameText(ExtractFileExt(BrowserNodePath(tvBrowser.Selected)), '.vst3'));
 end;
 
 { Mirrors btnMixAddVSTClick's own load-probe-before-adding safety check: a
@@ -36963,14 +37844,15 @@ end;
   same way, rather than becoming a broken insert. }
 procedure TfrmMain.pbMixerDragDrop(Sender, Source: TObject; X, Y: Integer);
 var
-  path, pathB64, loadError: string;
+  path, pathB64, loadError, dropKind, dropName: string;
   i, targetStripId, paramCount: Integer;
   targetStrip: TMixStrip;
+  dropInst, dropMidi: Boolean;
 begin
   if (Source <> tvBrowser) or (tvBrowser.Selected = nil) or
      (tvBrowser.Selected.Data <> BRND_FILE) or (FProject = nil) then Exit;
   path := BrowserNodePath(tvBrowser.Selected);
-  if not SameText(ExtractFileExt(path), '.dll') then Exit;
+  if not (SameText(ExtractFileExt(path), '.dll') or SameText(ExtractFileExt(path), '.vst3')) then Exit;
 
   targetStripId := -1;
   for i := 0 to High(FMixStripRects) do
@@ -36993,19 +37875,19 @@ begin
     Exit;
   end;
 
-  ShowStatusProgress('Adding VST2 plugin ' + ExtractFileName(path) + '...', 100);
+  ShowStatusProgress('Adding plugin ' + ExtractFileName(path) + '...', 100);
   try
-    UpdateStatusProgress(15, 'Probing VST2 plugin...');
-    if not ProbeVst2File(path, paramCount, loadError) then
+    UpdateStatusProgress(15, 'Probing plugin...');
+    if not ProbePluginFile(path, dropKind, dropName, paramCount, dropInst, dropMidi, loadError) then
     begin
-      memBrowser.Lines.Insert(0, 'not a usable VST2 plugin: ' + path + '  (' + loadError + ')');
+      memBrowser.Lines.Insert(0, 'not a usable plugin: ' + path + '  (' + loadError + ')');
       Exit;
     end;
 
     UpdateStatusProgress(70, 'Adding plugin insert to selected mixer strip...');
-    MixPerform(TAddMixInsertCommand.Create(FProject, targetStripId, 'vst2',
+    MixPerform(TAddMixInsertCommand.Create(FProject, targetStripId, dropKind,
       Format('path=%s;state=;paramcount=%d', [pathB64, paramCount]), -1,
-      ExtractFileName(path)));
+      IfThen((dropKind = 'vst3') and (dropName <> ''), dropName, ExtractFileName(path))));
     RefreshMixerTab;
     UpdateStatusProgress(100, 'Plugin insert ready: ' + ExtractFileName(path));
     memBrowser.Lines.Insert(0, 'dropped VST insert onto strip: ' + path);

@@ -49,7 +49,7 @@ except Exception:                       # pragma: no cover
 
 HAS_NUMPY = _np is not None
 
-SDK_VERSION = "1.1"
+SDK_VERSION = "1.3"
 MIN_PYTHON = (3, 14)
 
 # ---------------------------------------------------------------------------------------
@@ -303,6 +303,24 @@ class Param:
         self.log, self.step = bool(log), float(step)
         self.decimals = decimals if decimals is not None else (0 if kind in ("int", "bool", "choice") else 2)
         self.value = self.default
+
+    def to_norm(self, v):
+        """0..1 position of ``v`` in the range (logarithmic for ``log`` parameters)."""
+        lo, hi = self.min, self.max
+        if hi <= lo:
+            return 0.0
+        if self.log and lo > 0:
+            n = (math.log(builtins.max(float(v), lo)) - math.log(lo)) / (math.log(hi) - math.log(lo))
+        else:
+            n = (float(v) - lo) / (hi - lo)
+        return clamp(n, 0.0, 1.0)
+
+    def from_norm(self, n):
+        """The value at 0..1 position ``n`` (inverse of ``to_norm``), snapped like ``clamp``."""
+        n = clamp(float(n), 0.0, 1.0)
+        lo, hi = self.min, self.max
+        v = lo * (hi / lo) ** n if (self.log and lo > 0) else lo + n * (hi - lo)
+        return self.clamp(v)
 
     def clamp(self, v):
         v = float(v)
@@ -563,6 +581,12 @@ class UI:
     def button(self, cid, text, x, y, w=80, h=26, toggle=False, param=None, **kw):
         return self.add("button", cid, x, y, w, h, caption=text, toggle=toggle, param=param, **kw)
 
+    def icon_button(self, cid, icon, x, y, w=28, h=26, toggle=False, param=None, **kw):
+        """A button showing a drawn icon instead of a caption.  ``icon``: "save" (a disk) or
+        "delete" (a bin).  Give it a ``hint=`` so people learn what it does."""
+        return self.add("button", cid, x, y, w, h, caption="", toggle=toggle, param=param,
+                        icon="bi" + str(icon).capitalize(), **kw)
+
     def check(self, cid, text, x, y, w=120, h=22, param=None, **kw):
         return self.add("check", cid, x, y, w, h, caption=text, param=param, **kw)
 
@@ -720,6 +744,13 @@ class Plugin:
     def on_timer(self):
         """About 20 times a second while the window is open (poll state, animate)."""
 
+    def on_midi(self, kind, channel, data1, data2):
+        """A MIDI message from the device chosen in the plug-in window (or from a MIDI track routed to
+        it).  ``kind`` is "note_on", "note_off", "cc" (data1 = controller, data2 = value), "pitch_bend"
+        (data1 = -8192..8191, data2 = 0), "program", "aftertouch", "channel_pressure" or "other";
+        ``channel`` is 0-15.  For notes data1 = note number, data2 = velocity.  Runs on the control
+        thread, not in ``process()``: store what you need and read it in ``process()``."""
+
     def get_state(self):
         """Extra JSON-serialisable data to keep in the project besides parameter values."""
         return None
@@ -750,6 +781,7 @@ class Plugin:
             prm.value = v
             self._ui_params[pid] = v
             self.on_param(pid, v)
+            self._midi_feedback(pid, v)
 
     def ui_set(self, cid, **props):
         """Changes a control: ``value=``, ``caption=``, ``visible=``, ``enabled=`` or any
@@ -759,6 +791,345 @@ class Plugin:
     def repaint(self, cid=None):
         """Asks UDAW to redraw a canvas now (all canvases when ``cid`` is None)."""
         self._ui_repaint.add(cid or "*")
+
+    def send_midi(self, kind, channel=0, data1=0, data2=0):
+        """Sends a MIDI message out of the plug-in (to the MIDI output device chosen in the plug-in
+        window).  Takes the same ``kind`` / ``channel`` / ``data1`` / ``data2`` as ``on_midi``:
+        "note_on", "note_off", "cc", "pitch_bend" (data1 = -8192..8191), "program", "aftertouch" or
+        "channel_pressure".  Values are clamped to the legal MIDI range.  Safe to call from
+        ``process()``, ``on_midi``, ``on_timer`` and the event hooks; messages are delivered in the
+        order sent."""
+        ch = min(max(int(channel), 0), 15)
+        a, b = int(data1), int(data2)
+        if kind == "note_on":
+            st, a, b = 0x90, a & 0x7F, min(max(b, 0), 127)
+        elif kind == "note_off":
+            st, a, b = 0x80, a & 0x7F, min(max(b, 0), 127)
+        elif kind == "cc":
+            st, a, b = 0xB0, a & 0x7F, min(max(b, 0), 127)
+        elif kind == "pitch_bend":
+            v = min(max(a, -8192), 8191) + 8192
+            st, a, b = 0xE0, v & 0x7F, v >> 7
+        elif kind == "program":
+            st, a, b = 0xC0, a & 0x7F, 0
+        elif kind == "aftertouch":
+            st, a, b = 0xA0, a & 0x7F, min(max(b, 0), 127)
+        elif kind == "channel_pressure":
+            st, a, b = 0xD0, a & 0x7F, 0
+        else:
+            raise ValueError("send_midi: unknown kind %r" % (kind,))
+        self._midi_out.append((st | ch, a, b))
+
+    def note_on(self, note, velocity=100, channel=0):
+        """Shortcut for ``send_midi("note_on", channel, note, velocity)``."""
+        self.send_midi("note_on", channel, note, velocity)
+
+    def note_off(self, note, channel=0):
+        """Shortcut for ``send_midi("note_off", channel, note, 0)``."""
+        self.send_midi("note_off", channel, note, 0)
+
+    def all_notes_off(self, channel=None):
+        """Sends "all notes off" (CC 123) on one channel, or on all 16 when ``channel`` is None."""
+        for ch in ([channel] if channel is not None else range(16)):
+            self.send_midi("cc", ch, 123, 0)
+
+    # ---- ready-made MIDI behaviour (opt in with add_midi_params) ----------------------------
+    #: controller number -> parameter id: the controller moves the parameter, and (with "MIDI
+    #: feedback" on) moving the parameter sends the controller out again
+    midi_cc = {}
+    #: one line per extra thing the plug-in's own on_midi does (shown on the MIDI page)
+    midi_notes = ()
+
+    def add_midi_params(self, control="midi_in", control_default=True):
+        """Adds the standard MIDI settings: ``control`` (respond to MIDI), ``midi_fb`` (send a
+        controller message out when a mapped parameter changes), ``midi_thru`` (pass incoming MIDI
+        to the output) and ``midi_ch`` (Omni or channel 1-16).  Call it from ``setup()``; show them
+        with ``ui_midi_page``.  With it, ``midi_cc`` is applied for you and ``on_midi`` only runs
+        when the control switch is on and the channel matches."""
+        self._midi_ctl = control
+        self.add_bool(control, "MIDI control", default=control_default, group="MIDI")
+        self.add_bool("midi_fb", "MIDI feedback", default=False, group="MIDI")
+        self.add_bool("midi_thru", "MIDI thru", default=False, group="MIDI")
+        self.add_choice("midi_ch", "MIDI channel", ["Omni"] + [str(i) for i in range(1, 17)], default=0,
+                        group="MIDI")
+
+    def midi_help_text(self):
+        lines = ["MIDI in:  pick a keyboard or controller in the MIDI input list of the plug-in window.",
+                 "MIDI out: pick a device in the MIDI out list (or in Settings for a plug-in on a mixer strip).",
+                 ""]
+        if self.midi_cc:
+            lines.append("Controllers (moving one moves the parameter; with MIDI feedback on, moving the parameter")
+            lines.append("sends the controller out, so a controller with motor faders or lights follows):")
+            for cc in sorted(self.midi_cc):
+                prm = self._params._d.get(self.midi_cc[cc])
+                if prm is not None:
+                    lines.append("   CC %-3d  ->  %s" % (cc, prm.name + (" (%s)" % prm.group if prm.group else "")))
+            lines.append("")
+        for ln in self.midi_notes:
+            lines.append(ln)
+        return "\n".join(lines)
+
+    def ui_midi_page(self, ui, parent, extra_rows=0):
+        """Builds the MIDI page's controls on ``parent`` (e.g. ``"tabs#1"``).  ``extra_rows`` leaves
+        that many 26-pixel rows free under the channel selector (first at y=146 on the page, inside
+        the MIDI group) for the plug-in's own MIDI options."""
+        ctl = getattr(self, "_midi_ctl", "midi_in")
+        ui.group("midi_g", "MIDI", 8, 8, 756, 320, parent=parent)
+        ui.check("midi_x_in", "MIDI control: respond to the MIDI input", 20, 30, 360, 22, param=ctl, parent=parent)
+        ui.check("midi_x_fb", "MIDI feedback: send a controller message out when a knob moves", 20, 56, 460, 22,
+                 param="midi_fb", parent=parent,
+                 hint="Needs a MIDI output device. Lets a controller with motor faders or lights follow the knobs.")
+        ui.check("midi_x_thru", "MIDI thru: pass the incoming MIDI on to the MIDI output", 20, 82, 460, 22,
+                 param="midi_thru", parent=parent)
+        ui.label("midi_l_ch", "Channel", 20, 114, 60, 20, parent=parent)
+        ui.combo("midi_c_ch", ["Omni"] + [str(i) for i in range(1, 17)], 84, 110, 120, 24, param="midi_ch",
+                 parent=parent, hint="Which MIDI channel to listen to, and to send on (Omni listens to all, sends on 1)")
+        ui.memo("midi_m_map", self.midi_help_text(), 20, 146 + 26 * extra_rows, 724, 168 - 26 * extra_rows,
+                parent=parent, read_only=True)
+
+    def _midi_dispatch(self, kind, ch, a, b):
+        d = self._params._d
+        thru = d.get("midi_thru")
+        if thru is not None and thru.value >= 0.5 and kind != "other":
+            self.send_midi(kind, ch, a, b)
+        ctl = d.get(getattr(self, "_midi_ctl", ""))
+        if ctl is not None:
+            if ctl.value < 0.5:
+                return
+            sel = d["midi_ch"].value
+            if sel > 0 and ch != int(sel) - 1:
+                return
+        if kind == "cc":
+            prm = d.get(self.midi_cc.get(a, ""))
+            if prm is not None:
+                self._cc_guard = True
+                try:
+                    self.set_param(prm.id, prm.from_norm(b / 127.0))
+                finally:
+                    self._cc_guard = False
+        self.on_midi(kind, ch, a, b)
+
+    def _midi_feedback(self, pid, v):
+        if self._cc_guard:
+            return
+        d = self._params._d
+        fb = d.get("midi_fb")
+        if fb is None or fb.value < 0.5:
+            return
+        for cc, mapped in self.midi_cc.items():
+            if mapped == pid:
+                val = int(round(d[pid].to_norm(v) * 127.0))
+                if self._cc_sent.get(cc) != val:
+                    self._cc_sent[cc] = val
+                    self.send_midi("cc", max(int(d["midi_ch"].value) - 1, 0), cc, val)
+                return
+
+    # ---- presets: the plug-in's built-in ones and the user's own files ---------------------------
+    #: parameter ids a preset never stores (the MIDI settings are never stored either)
+    preset_skip = ()
+
+    def builtin_presets(self):
+        """Names of the built-in presets, in the order of the preset box.  Default: the module's
+        ``PRESET_ORDER`` list; with ``load_builtin`` it can be overridden."""
+        return list(getattr(sys.modules.get(type(self).__module__), "PRESET_ORDER", []))
+
+    def load_builtin(self, index):
+        """Loads built-in preset ``index`` (0-based).  Default: ``on_preset("select", index + 1)``."""
+        fn = getattr(self, "on_preset", None)
+        if callable(fn):
+            fn("select", index + 1)
+
+    def preset_begin(self):
+        """A preset file is about to set several parameters: switch off any logic in ``on_param``
+        that would react to one parameter by changing others."""
+
+    def preset_end(self):
+        """The preset file has been applied."""
+
+    def preset_folder(self):
+        """This plug-in's own folder inside the presets folder chosen in Settings."""
+        base = self._presets_root or os.path.join(self._script_dir or os.getcwd(), "Presets")
+        safe = "".join(c if (c.isalnum() or c in " -_") else "_" for c in self.name).strip() or "Plugin"
+        return os.path.join(base, "PythonPlugins", safe)
+
+    def _preset_path(self, name):
+        safe = "".join(c if (c.isalnum() or c in " -_.()") else "_" for c in name).strip(" .")[:80]
+        if not safe:
+            raise ValueError("a preset needs a name")
+        return os.path.join(self.preset_folder(), safe + PRESET_EXT)
+
+    def user_presets(self):
+        """Names of the presets the user has saved for this plug-in."""
+        folder = self.preset_folder()
+        try:
+            files = os.listdir(folder)
+        except OSError:
+            return []
+        names = []
+        for fn in files:
+            if fn.lower().endswith(PRESET_EXT):
+                names.append(self._preset_name_in(os.path.join(folder, fn), fn[:-len(PRESET_EXT)]))
+        return sorted(names, key=str.lower)
+
+    @staticmethod
+    def _preset_name_in(path, fallback):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return str(json.load(fh).get("name") or fallback)
+        except (OSError, ValueError, AttributeError):
+            return fallback
+
+    def save_preset(self, name):
+        """Writes every parameter (and ``get_state()``) to the presets folder under ``name``."""
+        name = str(name).strip()
+        path = self._preset_path(name)
+        data = {"format": 1, "plugin": self.name, "name": name, "sdk": SDK_VERSION,
+                "values": {p.id: p.value for p in self._params
+                           if p.group != "MIDI" and p.id not in self.preset_skip},
+                "custom": self.get_state()}
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=1)
+        os.replace(tmp, path)
+
+    def load_preset(self, name):
+        """Loads a saved preset: parameters first, then ``set_state``."""
+        with open(self._preset_path(name), encoding="utf-8") as fh:
+            data = json.load(fh)
+        values = data.get("values") or {}
+        self.preset_begin()
+        try:
+            for pid, v in values.items():
+                prm = self._params._d.get(pid)
+                if prm is not None and prm.group != "MIDI" and pid not in self.preset_skip:
+                    self.set_param(pid, v)
+        finally:
+            self.preset_end()
+        if data.get("custom") is not None:
+            self.set_state(data["custom"])
+
+    def delete_preset(self, name):
+        os.remove(self._preset_path(name))
+
+    def _pset_labels(self):
+        b, u = self.builtin_presets(), self.user_presets()
+        return ["Presets..."] + b + ["User: " + n for n in u], b, u
+
+    def _pset_index(self):
+        _, b, u = self._pset_labels()
+        n = self._pset_name
+        if n.startswith("b:") and n[2:] in b:
+            return 1 + b.index(n[2:])
+        if n.startswith("u:") and n[2:] in u:
+            return 1 + len(b) + u.index(n[2:])
+        return 0
+
+    def _pset_refresh(self):
+        if self._pset_ui:
+            labels, _, _ = self._pset_labels()
+            self.ui_set("pset", items=labels, value=self._pset_index())
+
+    def ui_presets(self, ui, x=None, y=None, w=None, tabs="tabs"):
+        """The preset box with the name field and the icon buttons (save, delete), after a separator.
+        Call it LAST in ``ui()``.  It finds the page tabs control (``tabs``) and puts the controls
+        INSIDE it, on its tab row straight after the last tab: they are positioned relative to the
+        tab strip, so wherever the tabs control sits in the window they stay level with the tabs.
+        ``x`` / ``y`` / ``w`` override the position (relative to the tabs control; ``w`` is the whole
+        width of the row).  Picking a preset loads it at once; the disk saves the current settings
+        under the name in the field (loading a preset fills the field in, so the disk overwrites it)."""
+        t = next((c for c in ui.controls if c["id"] == tabs and c["type"] == "tabs"), None)
+        parent = None
+        if t is not None:
+            parent = tabs
+            pages = t.get("props", {}).get("pages", [])
+            if x is None:                                   # tab headers: about 24 px + 6.2 px a letter, a touch generous
+                x = sum(int(24 + 6.2 * len(str(p))) for p in pages) + 16
+            if y is None:
+                y = 0
+            if w is None:
+                w = max(250, min(346, t["w"] - x - 4))
+        else:                                               # no tabs: a row of its own at the top of the window
+            x = 466 if x is None else x
+            y = 8 if y is None else y
+            w = 346 if w is None else w
+        self._pset_ui = True
+        labels, _, _ = self._pset_labels()
+        cw = w - 170
+        ui.recess("pset_sep", x - 10, y + 2, 2, 22, parent=parent)
+        ui.combo("pset", labels, x, y, cw, 26, value=self._pset_index(), parent=parent,
+                 hint="Pick a preset and it loads at once. 'User:' presets are your own.")
+        ui.edit("pset_name", self._pset_text, x + cw + 6, y, 96, 26, parent=parent,
+                hint="The name to save the settings under (loading a preset fills this in, so Save overwrites it)")
+        ui.icon_button("pset_save", "save", x + cw + 108, y, 28, 26, parent=parent,
+                       hint="Save the current settings as a preset with this name, in the presets folder")
+        ui.icon_button("pset_del", "delete", x + cw + 142, y, 28, 26, parent=parent,
+                       hint="Delete the selected user preset")
+
+    def select_builtin(self, index):
+        """Loads built-in preset ``index`` (0-based) and shows it in the preset box (MIDI program change)."""
+        b = self.builtin_presets()
+        if 0 <= index < len(b):
+            self.load_builtin(index)
+            self._pset_name = "b:" + b[index]
+            self._pset_refresh()
+
+    def on_pset(self, event, value):
+        try:
+            idx = int(value)
+        except (TypeError, ValueError):
+            return
+        labels, b, u = self._pset_labels()
+        if idx <= 0 or idx >= len(labels):
+            return
+        if idx <= len(b):
+            self.load_builtin(idx - 1)
+            self._pset_name = "b:" + b[idx - 1]
+            return
+        name = u[idx - 1 - len(b)]
+        try:
+            self.load_preset(name)
+        except (OSError, ValueError) as e:
+            self.log("preset: could not load %r: %s" % (name, e))
+            return
+        self._pset_name = "u:" + name
+        self._pset_text = name
+        self.ui_set("pset_name", text=name)
+
+    def on_pset_name(self, event, value):
+        self._pset_text = "" if value is None else str(value)
+
+    def on_pset_save(self, event, value):
+        if event != "click":
+            return
+        name = self._pset_text.strip()
+        if not name:
+            self.log("preset: type a name in the box next to the disk first")
+            return
+        try:
+            self.save_preset(name)
+        except (OSError, ValueError) as e:
+            self.log("preset: could not save %r: %s" % (name, e))
+            return
+        self._pset_name = "u:" + name
+        self._pset_refresh()
+        self.log("preset saved: " + name)
+
+    def on_pset_del(self, event, value):
+        if event != "click":
+            return
+        if not self._pset_name.startswith("u:"):
+            self.log("preset: pick one of your own presets (User: ...) to delete it")
+            return
+        name = self._pset_name[2:]
+        try:
+            self.delete_preset(name)
+        except (OSError, ValueError) as e:
+            self.log("preset: could not delete %r: %s" % (name, e))
+            return
+        self._pset_name = ""
+        self._pset_refresh()
+        self.log("preset deleted: " + name)
 
     def log(self, *args):
         print(*args)
@@ -771,6 +1142,15 @@ class Plugin:
         self._ui_params = {}
         self._ui_controls = {}
         self._ui_repaint = set()
+        self._midi_out = []
+        self._midi_ctl = ""
+        self._cc_guard = False
+        self._cc_sent = {}
+        self._pset_ui = False
+        self._pset_name = ""
+        self._pset_text = ""
+        self._presets_root = ""
+        self._script_dir = ""
         self.sample_rate = 48000
         self.channels = 2
         self.max_frames = 512
@@ -780,8 +1160,9 @@ class Plugin:
 # Host runtime (UDAW's side - do not edit below this line)
 # ---------------------------------------------------------------------------------------
 
-M_INIT, M_PROCESS, M_PARAM, M_SHUTDOWN, M_EVENT, M_PAINT, M_GETSTATE, M_SETSTATE, M_RESET, M_TICK = range(1, 11)
-R_READY, R_PROCESSED, R_LOG, R_UI, R_PAINT, R_STATE, R_ERROR = range(101, 108)
+M_INIT, M_PROCESS, M_PARAM, M_SHUTDOWN, M_EVENT, M_PAINT, M_GETSTATE, M_SETSTATE, M_RESET, M_TICK, M_MIDI = range(1, 12)
+R_READY, R_PROCESSED, R_LOG, R_UI, R_PAINT, R_STATE, R_ERROR, R_MIDI = range(101, 109)
+PRESET_EXT = ".udawpreset"
 _HDR = struct.Struct("<II")
 _PHDR = struct.Struct("<QII")
 
@@ -883,6 +1264,13 @@ class _Runtime:
                 self.log("error", "ui_set value is not JSON-serialisable: %s" % e)
         self.last_flush = now
 
+    def flush_midi(self):
+        inst = self.inst
+        if inst is None or not inst._midi_out:
+            return
+        msgs, inst._midi_out = inst._midi_out[:4096], inst._midi_out[4096:]
+        self.send(R_MIDI, b"".join(bytes(m) for m in msgs))
+
     # -- handlers -------------------------------------------------------------------------
     def on_init(self, d):
         if sys.version_info < MIN_PYTHON:
@@ -892,12 +1280,14 @@ class _Runtime:
         mod, inst = load_plugin(d["source"], d.get("filename", "plugin.py"), d.get("script_dir"))
         self.inst = inst
         inst.sample_rate, inst.channels, inst.max_frames = self.sr, self.ch, self.maxf
+        inst._presets_root = d.get("presets_dir") or ""
+        inst._script_dir = d.get("script_dir") or ""
         for pid, v in (d.get("values") or {}).items():
             prm = inst._params._d.get(pid)
             if prm is not None:
                 prm.value = prm.clamp(v)
         if d.get("state") is not None:
-            inst.set_state(d["state"])
+            self.restore_custom(d["state"])
         inst.prepare(self.sr, self.ch, self.maxf)
         ui = build_ui(inst)
         found = []
@@ -954,6 +1344,7 @@ class _Runtime:
         v = prm.clamp(d["value"])
         prm.value = v
         inst.on_param(prm.id, v)
+        inst._midi_feedback(prm.id, v)
 
     def on_event(self, d):
         inst = self.inst
@@ -978,9 +1369,41 @@ class _Runtime:
             inst.paint(cid, cv)
         self.send_json(R_PAINT, {"id": cid, "w": cv.width, "h": cv.height, "cmds": cv.cmds})
 
+    def on_midi_msg(self, status, d1, d2):
+        hi, ch = status & 0xF0, status & 0x0F
+        if hi == 0x90 and d2 > 0:
+            kind, a, b = "note_on", d1, d2
+        elif hi == 0x80 or hi == 0x90:
+            kind, a, b = "note_off", d1, d2
+        elif hi == 0xB0:
+            kind, a, b = "cc", d1, d2
+        elif hi == 0xE0:
+            kind, a, b = "pitch_bend", ((d2 << 7) | d1) - 8192, 0
+        elif hi == 0xC0:
+            kind, a, b = "program", d1, 0
+        elif hi == 0xA0:
+            kind, a, b = "aftertouch", d1, d2
+        elif hi == 0xD0:
+            kind, a, b = "channel_pressure", d1, 0
+        else:
+            kind, a, b = "other", d1, d2
+        self.inst._midi_dispatch(kind, ch, a, b)
+
     def state_dict(self):
         inst = self.inst
-        return {"values": {p.id: p.value for p in inst._params}, "custom": inst.get_state()}
+        custom = inst.get_state()
+        if inst._pset_name and (custom is None or isinstance(custom, dict)):
+            custom = dict(custom or {})
+            custom["_pset"] = inst._pset_name          # which preset the box shows
+        return {"values": {p.id: p.value for p in inst._params}, "custom": custom}
+
+    def restore_custom(self, custom):
+        inst = self.inst
+        if isinstance(custom, dict) and "_pset" in custom:
+            custom = dict(custom)
+            inst._pset_name = str(custom.pop("_pset") or "")
+            inst._pset_refresh()
+        inst.set_state(custom)
 
     def run(self):
         while True:
@@ -1000,6 +1423,9 @@ class _Runtime:
                     self.on_event(json.loads(payload))
                 elif mtype == M_PAINT:
                     self.on_paint(json.loads(payload))
+                elif mtype == M_MIDI:
+                    for i in range(0, len(payload) - 2, 3):
+                        self.on_midi_msg(payload[i], payload[i + 1], payload[i + 2])
                 elif mtype == M_TICK:
                     self.inst.on_timer()
                     self.flush_ui(True)
@@ -1013,7 +1439,7 @@ class _Runtime:
                             prm.value = prm.clamp(v)
                             self.inst._ui_params[pid] = prm.value
                     if d.get("custom") is not None:
-                        self.inst.set_state(d["custom"])
+                        self.restore_custom(d["custom"])
                 elif mtype == M_RESET:
                     self.position = 0
                     self.faulted = False
@@ -1027,6 +1453,10 @@ class _Runtime:
                 self.error(traceback.format_exc(), fatal)
                 if fatal:
                     return
+            try:
+                self.flush_midi()
+            except Exception:
+                pass
             if mtype != M_PROCESS or self.inst is not None:
                 try:
                     self.flush_ui()
@@ -1088,7 +1518,7 @@ def _check_lint(tree, issues):
                                "launching programs from a plug-in is almost never what you want"))
 
 
-_CONTAINERS = ("group", "panel", "recess", "collapse", "scroll_box", "bevel", "shine")
+_CONTAINERS = ("group", "panel", "recess", "collapse", "scroll_box", "bevel", "shine", "tabs")
 
 
 def _rect_of(c):

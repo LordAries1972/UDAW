@@ -34,7 +34,7 @@ uses
   UDAW.Errors, UDAW.Threading,
   UDAW.Audio.Types, UDAW.Audio.Buffer,
   UDAW.DSP.Math, UDAW.DSP.Meter,
-  UDAW.Audio.Graph.Nodes,
+  UDAW.Audio.Graph.Nodes, UDAW.Mixer.PluginHost,
   UDAW.Mixer.Model, UDAW.Mixer.Automation, UDAW.Mixer.Modulation;
 
 type
@@ -579,6 +579,7 @@ var
   modOn: Boolean;
   modV, pk, sm: Double;
   mi: Integer;
+  plug: TPluginHostBase;
 begin
   s := ARt.FStrip;
   modOn := (FModulation <> nil) and FModulation.HasRoutes;
@@ -637,28 +638,32 @@ begin
   for k := 0 to High(ARt.FInserts) do
   begin
     if ARt.FInserts[k].Bypass then Continue;
-    if modOn and (ARt.FInserts[k] is TVST2Node) and
-       (TVST2Node(ARt.FInserts[k]).Host <> nil) then
-      for i := 0 to FModulation.RouteCount - 1 do
-        if (FModulation.GetRoute(i).StripId = s.Id) and
-           (FModulation.GetRoute(i).Param = apInsertParam) and
-           (FModulation.GetRoute(i).TargetIndex = k) then
+    { hosted VST2 / VST3 plug-ins: the lane this strip is fed from (so a plug-in instrument gets that
+      lane's MIDI), then modulation and automation of their parameters (sub-index = parameter index) }
+    plug := PluginHostOf(ARt.FInserts[k]);
+    if plug <> nil then
+    begin
+      PluginNodeSetLane(ARt.FInserts[k], s.InputSourceId);
+      if modOn then
+        for i := 0 to FModulation.RouteCount - 1 do
+          if (FModulation.GetRoute(i).StripId = s.Id) and
+             (FModulation.GetRoute(i).Param = apInsertParam) and
+             (FModulation.GetRoute(i).TargetIndex = k) then
+          begin
+            modV := FModulation.Offset(s.Id, apInsertParam, k,
+              FModulation.GetRoute(i).SubIndex, FPlayheadSeconds);
+            plug.SetParam(FModulation.GetRoute(i).SubIndex,
+              EnsureRange(FModulation.GetRoute(i).Base + modV, 0.0, 1.0));
+          end;
+      if readAuto then
+        for i := 0 to FAutomation.LaneCount - 1 do
         begin
-          modV := FModulation.Offset(s.Id, apInsertParam, k,
-            FModulation.GetRoute(i).SubIndex, FPlayheadSeconds);
-          TVST2Node(ARt.FInserts[k]).Host.SetParam(FModulation.GetRoute(i).SubIndex,
-            EnsureRange(FModulation.GetRoute(i).Base + modV, 0.0, 1.0));
+          lane := FAutomation.GetLane(i);
+          if (lane.StripId = s.Id) and (lane.Param = apInsertParam) and
+             (lane.TargetIndex = k) and (lane.PointCount > 0) then
+            plug.SetParam(lane.SubIndex, lane.Evaluate(FPlayheadSeconds));
         end;
-    if readAuto and (ARt.FInserts[k] is TVST2Node) and
-       (TVST2Node(ARt.FInserts[k]).Host <> nil) then
-      for i := 0 to FAutomation.LaneCount - 1 do
-      begin
-        lane := FAutomation.GetLane(i);
-        if (lane.StripId = s.Id) and (lane.Param = apInsertParam) and
-           (lane.TargetIndex = k) and (lane.PointCount > 0) then
-          TVST2Node(ARt.FInserts[k]).Host.SetParam(lane.SubIndex,
-            lane.Evaluate(FPlayheadSeconds));
-      end;
+    end;
     { Python plug-in parameters: sub-index = the parameter's position, values 0..1 }
     if (ARt.FInserts[k] is TPythonNode) and (TPythonNode(ARt.FInserts[k]).Host <> nil) then
     begin

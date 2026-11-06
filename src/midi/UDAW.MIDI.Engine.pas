@@ -132,6 +132,8 @@ type
     FLoop: Boolean;
     FLoopStartSec, FLoopEndSec: Double;
     FEndTick: Int64;
+    FTapLane: Integer;
+    FMuteSynth: Boolean;
     procedure Flatten;
     procedure SeekInternal(ASeconds: Double);
   public
@@ -164,6 +166,11 @@ type
       TempoScale it is applied to the time consumed per block, so it can change while
       the sequence is playing (a tempo change on the timeline). }
     property Rate: Double read FRate write FRate;
+    { A Timeline lane whose strip holds a plug-in instrument: every message is also posted to the
+      plug-in MIDI hub for that lane (with its position inside the block), and MuteSynth keeps the
+      built-in synth silent so only the plug-in sounds.  TapLane 0 = off. }
+    property TapLane: Integer read FTapLane write FTapLane;
+    property MuteSynth: Boolean read FMuteSynth write FMuteSynth;
     property Loop: Boolean read FLoop write FLoop;
     property LoopStartSeconds: Double read FLoopStartSec write FLoopStartSec;
     property LoopEndSeconds: Double read FLoopEndSec write FLoopEndSec;
@@ -175,7 +182,7 @@ implementation
 
 
 uses
-  UDAW.DSP.MathTables;
+  UDAW.DSP.MathTables, UDAW.Mixer.PluginMidi;
 
 const
   ENGINE_SUBSYS = 'MIDI.Engine';
@@ -794,8 +801,9 @@ end;
 procedure TMidiPlaybackEngine.Render(ABuffer: TAudioBuffer);
 var
   n: Integer;
-  blockSeconds, endSeconds: Double;
+  blockSeconds, endSeconds, evSec: Double;
   curTick: Int64;
+  delta: Integer;
 begin
   ABuffer.Clear;
   n := ABuffer.FrameCount;
@@ -816,7 +824,17 @@ begin
   curTick := FSeq.SecondsToTick(endSeconds * FTempoScale);
   while (FCursor < FEventCount) and (FEvents[FCursor].Tick <= curTick) do
   begin
-    FSynth.DispatchMessage(FEvents[FCursor].Msg);
+    if FTapLane <> 0 then
+    begin
+      { where inside this block the event falls, for sample-accurate delivery to a plug-in }
+      evSec := FSeq.TickToSeconds(FEvents[FCursor].Tick) / Max(0.0001, FTempoScale);
+      delta := Round((evSec - FSeconds) / Max(1.0E-6, blockSeconds * Max(0.01, FRate)) * n);
+      if delta < 0 then delta := 0;
+      if delta > n - 1 then delta := n - 1;
+      PluginMidi.Post(FTapLane, FEvents[FCursor].Msg.Status, FEvents[FCursor].Msg.Data1,
+        FEvents[FCursor].Msg.Data2, delta);
+    end;
+    if not FMuteSynth then FSynth.DispatchMessage(FEvents[FCursor].Msg);
     Inc(FCursor);
   end;
 

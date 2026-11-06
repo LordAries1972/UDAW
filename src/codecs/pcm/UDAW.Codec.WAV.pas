@@ -166,6 +166,8 @@ type
     procedure Reset;
     function Name: string;
     property AtEnd: Boolean read FAtEnd;
+    { frames of the file played so far (fractional) - what a playhead shows }
+    property Position: Double read FPos;
     property SourceFrames: Integer read FSrcFrames;
     property SourceChannels: Integer read FSrcChannels;
     property SourceRate: Integer read FSrcRate;

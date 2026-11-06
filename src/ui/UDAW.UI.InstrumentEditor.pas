@@ -17,9 +17,9 @@ interface
 
 uses
   Winapi.Windows, System.SysUtils, System.Classes, System.Math, System.Types, System.UITypes,
-  System.Generics.Collections, System.StrUtils, Vcl.Controls, Vcl.Forms, Vcl.Graphics,
+  System.Generics.Collections, System.StrUtils, System.Diagnostics, Vcl.ExtCtrls, Vcl.Controls, Vcl.Forms, Vcl.Graphics,
   Winapi.MMSystem, UDAW.Audio.Types, UDAW.Drum.Machine, UDAW.GL.Canvas, UDAW.GL.Controls, UDAW.GL.Widgets,
-  UDAW.Timeline.FxPresets, UDAW.UI.FileDialog, Vcl.Dialogs;
+  UDAW.Timeline.FxPresets, UDAW.UI.FileDialog, UDAW.Audio.Source, UDAW.Codec.WAV, Vcl.Dialogs;
 
 type
   TfrmInstrumentEditor = class(TForm)
@@ -46,6 +46,7 @@ type
     lstFx: TGLList;
     lblHint: TGLLabel;
     ibDialog: TGLIconBar;      // OK, cancel
+    tmrPlay: TTimer;           // moves the playhead while a region is heard
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure pbWavePaint(Sender: TObject);
     procedure pbWaveMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -81,6 +82,7 @@ type
     procedure btnFxClick(Sender: TObject);
     procedure btnOKClick(Sender: TObject);
     procedure btnCancelClick(Sender: TObject);
+    procedure tmrPlayTimer(Sender: TObject);
   private
     const
       RULER_H = 20;
@@ -109,6 +111,12 @@ type
     FShown: TArray<Integer>;   // list row -> FFx index
     FPreviewKind: string;
     FPreviewA, FPreviewB: Integer;
+    FPlayFrom, FPlayLen: Integer;   // the heard region: first frame in the sound, length in frames
+    FPlayFrame: Integer;            // frame being heard now, -1 when nothing plays
+    FPlayLoop: Boolean;             // the region repeats until Stop or the window closes
+    FPlayClock: TStopwatch;
+    FPlaySrc: TWavPlayerSource;     // file mode: the source the audio engine is reading
+    FPlayHold: IAudioSource;        // keeps FPlaySrc alive while the playhead reads it
     function Frames: Integer;
     function Channels: Integer;
     function HasSel: Boolean;
@@ -125,11 +133,13 @@ type
     procedure ZoomBy(AFactor: Double; ACenterFrame: Integer);
     procedure Note(const AMsg: string);
     procedure FillEffectList;
-    procedure Audition(const AData: TAudioPlanar);
+    procedure Audition(const AData: TAudioPlanar; AFromFrame: Integer);
     procedure FxAudition(const AParams: string);
     procedure ApplyEffect(const AName, AKind, AParams: string; AFrom, ATo: Integer);
     function SaveEdited(const AOutDir: string; out APath: string): Boolean;
     procedure StopAudition;
+    procedure StartPlayhead(AFromFrame, ALength: Integer);
+    procedure EndPlayhead;
     procedure RestoreOriginal;
     procedure SaveToDisk;
     procedure UpdateFileBar;
@@ -158,7 +168,7 @@ type
 implementation
 
 uses UDAW.DSP.MathTables,
-  UDAW.Codec.WAV, UDAW.DSP.TimeStretch, UDAW.UI.EffectEditor, UDAW.Timeline.OfflineFx,
+  UDAW.DSP.TimeStretch, UDAW.UI.EffectEditor, UDAW.Timeline.OfflineFx,
   UDAW.App;
 
 {$R *.dfm}
@@ -204,6 +214,7 @@ begin
     SetLength(frm.FOrig, smp.Channels);
     frm.FData := CopyPlanar(frm.FOrig);
     frm.FSelA := -1;
+    frm.FPlayFrame := -1;
     frm.FSelB := -1;
     frm.FFx := FxExtraPresets + FxPresetList;
     frm.FillEffectList;
@@ -271,6 +282,7 @@ begin
     frm.FAuditionPath := IncludeTrailingPathDelimiter(AOutDir) + 'audition.wav';
     ForceDirectories(ExtractFilePath(frm.FAuditionPath));
     frm.FSelA := -1;
+    frm.FPlayFrame := -1;
     frm.FSelB := -1;
     frm.FFx := FxExtraPresets + FxPresetList;
     frm.FillEffectList;
@@ -513,6 +525,12 @@ begin
   for lane := 0 to lanes - 1 do
   begin
     mid := RULER_H + lane * laneH + laneH div 2;
+    { stereo: left above right, a divider between them and an L / R tag on each, as on the Timeline }
+    if (lanes = 2) and (lane = 1) then
+    begin
+      cv.Brush.Color := $707070;
+      cv.FillRect(Rect(0, RULER_H + laneH, w, RULER_H + laneH + 1));
+    end;
     cv.Brush.Color := $404040;
     cv.FillRect(Rect(0, mid, w, mid + 1));
     cv.Pen.Style := psSolid;
@@ -536,6 +554,26 @@ begin
       cv.LineTo(x, mid - Round(Max(-1, lo) * (laneH div 2 - 3)) + 1);
     end;
     cv.Pen.Style := psClear;
+    if lanes = 2 then
+    begin
+      cv.Brush.Style := bsClear;
+      cv.Font.Color := clSilver;
+      cv.TextOut(5, RULER_H + lane * laneH + 3, IfThen(lane = 0, 'L', 'R'));
+      cv.Brush.Style := bsSolid;
+    end;
+  end;
+  { playhead: the frame being heard, with a marker in the ruler }
+  if FPlayFrame >= 0 then
+  begin
+    x := FrameToX(FPlayFrame);
+    if (x >= 0) and (x < w) then
+    begin
+      cv.Brush.Color := $00D7FF;
+      cv.FillRect(Rect(x, RULER_H, x + 2, h));
+      cv.FillRect(Rect(x - 5, 0, x + 7, RULER_H - 6));
+      cv.FillRect(Rect(x - 3, RULER_H - 6, x + 5, RULER_H - 3));
+      cv.FillRect(Rect(x - 1, RULER_H - 3, x + 3, RULER_H));
+    end;
   end;
   { region edges }
   if HasSel then
@@ -949,6 +987,7 @@ end;
 
 procedure TfrmInstrumentEditor.StopAudition;
 begin
+  EndPlayhead;
   if FMachine <> nil then FMachine.StopPad(FNote)
   else if FFileMode then
   begin
@@ -959,7 +998,7 @@ end;
 
 { ---- hearing the work ---- }
 
-procedure TfrmInstrumentEditor.Audition(const AData: TAudioPlanar);
+procedure TfrmInstrumentEditor.Audition(const AData: TAudioPlanar; AFromFrame: Integer);
 begin
   if FFileMode then
   begin
@@ -970,17 +1009,89 @@ begin
     try
       SaveWavFile(FAuditionPath, AData, Length(AData), FRate, Length(AData[0]), wsfPCM16);
       if (App <> nil) and (App.Audio <> nil) then
-        App.Audio.SetSource(TWavPlayerSource.Create(FAuditionPath, False))
+      begin
+        { with the Loop icon lit the heard region repeats until Stop or the window closes }
+        FPlayLoop := FShowLoop and FLoop;
+        FPlaySrc := TWavPlayerSource.Create(FAuditionPath, FPlayLoop);
+        FPlayHold := FPlaySrc;
+        App.Audio.SetSource(FPlayHold);
+      end
       else
         PlaySound(PChar(FAuditionPath), 0, SND_FILENAME or SND_ASYNC or SND_NODEFAULT);
     except
-      on E: Exception do Note('Audition failed: ' + E.Message);
+      on E: Exception do
+      begin
+        Note('Audition failed: ' + E.Message);
+        Exit;
+      end;
     end;
+    StartPlayhead(AFromFrame, Length(AData[0]));
     Exit;
   end;
   if (FMachine = nil) or (Length(AData) < 1) or (Length(AData[0]) < 2) then Exit;
   FMachine.StopPad(FNote);
-  if FMachine.SetPadData(FNote, AData, FRate, FOrigPath) then FMachine.Hit(FNote, 110);
+  if FMachine.SetPadData(FNote, AData, FRate, FOrigPath) then
+  begin
+    FMachine.Hit(FNote, 110);
+    StartPlayhead(AFromFrame, Length(AData[0]));
+  end;
+end;
+
+{ ---- playhead ---- }
+
+procedure TfrmInstrumentEditor.StartPlayhead(AFromFrame, ALength: Integer);
+begin
+  FPlayFrom := AFromFrame;
+  FPlayLen := ALength;
+  FPlayFrame := AFromFrame;
+  FPlayClock := TStopwatch.StartNew;
+  tmrPlay.Enabled := True;
+  pbWave.Invalidate;
+end;
+
+procedure TfrmInstrumentEditor.EndPlayhead;
+begin
+  tmrPlay.Enabled := False;
+  FPlayFrame := -1;
+  FPlayLoop := False;
+  FPlaySrc := nil;
+  FPlayHold := nil;
+  pbWave.Invalidate;
+end;
+
+{ moves the playhead to what is being heard and, when it reaches the right edge of the
+  picture (or has left it), turns the page so the heard part is always on screen }
+procedure TfrmInstrumentEditor.tmrPlayTimer(Sender: TObject);
+var
+  played: Integer;
+  atEnd: Boolean;
+begin
+  if FPlayFrame < 0 then
+  begin
+    tmrPlay.Enabled := False;
+    Exit;
+  end;
+  if FPlaySrc <> nil then
+  begin
+    played := Round(FPlaySrc.Position);
+    atEnd := FPlaySrc.AtEnd;
+  end
+  else
+  begin
+    played := Round(FPlayClock.Elapsed.TotalSeconds * FRate);
+    atEnd := played >= FPlayLen;
+  end;
+  if atEnd or ((played >= FPlayLen) and not FPlayLoop) then
+  begin
+    EndPlayhead;
+    Exit;
+  end;
+  if FPlayLoop and (FPlayLen > 0) then played := played mod FPlayLen;
+  FPlayFrame := EnsureRange(FPlayFrom + played, 0, Max(0, Frames - 1));
+  if (FPlayFrame < FViewStart) or (FPlayFrame > FViewStart + FViewLen - FViewLen div 20) then
+    if FViewLen < Frames then
+      SetView(FPlayFrame - FViewLen div 10, FViewLen);
+  pbWave.Invalidate;
 end;
 
 procedure TfrmInstrumentEditor.btnPlayClick(Sender: TObject);
@@ -988,7 +1099,7 @@ var
   a, b: Integer;
 begin
   if not EditRange(a, b) then Exit;
-  Audition(Slice(a, b));
+  Audition(Slice(a, b), a);
 end;
 
 procedure TfrmInstrumentEditor.btnStopClick(Sender: TObject);
@@ -1004,7 +1115,7 @@ var
 begin
   part := Slice(FPreviewA, FPreviewB);
   if ApplyEffectOffline(FPreviewKind, AParams, part, Length(part), FRate, 0, Length(part[0]), err) then
-    Audition(part)
+    Audition(part, FPreviewA)
   else
     Note('Audition failed: ' + err);
 end;
@@ -1104,8 +1215,10 @@ begin
   begin
     FLoop := not FLoop;
     UpdateFileBar;
-    if FLoop then Note('Loop on: the clip repeats on the Timeline until the last segment')
-    else Note('Loop off: the clip plays once');
+    if FLoop then Note('Loop on: Play repeats until Stop, and the clip repeats on the Timeline until the last segment')
+    else Note('Loop off: Play and the clip play once');
+    { a change made while the sound is playing takes effect at once }
+    if tmrPlay.Enabled then btnPlayClick(nil);
   end;
 end;
 

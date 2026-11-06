@@ -60,6 +60,8 @@ PRESET_ORDER = list(PRESETS)
 
 
 class Plugin(up.Plugin):
+    midi_cc = {1: "r_decay", 7: "level", 74: "r_damp", 91: "r_mix", 93: "c_mix"}
+    midi_notes = ("Program change 0-n loads the presets in list order.",)
     name = "Reverberator & Chorus"
     vendor = "UDAW examples"
     author = "Daniel J. Hobson, Australia"
@@ -84,6 +86,7 @@ class Plugin(up.Plugin):
         self.add_param("r_width", "Width", min=0, max=100, default=100, unit="%", decimals=0, group="Reverb")
         self.add_param("r_mix", "Mix", min=0, max=100, default=28, unit="%", decimals=0, group="Reverb")
         self.add_param("level", "Level", min=-24, max=12, default=0, unit="dB", decimals=1, group="Output")
+        self.add_midi_params()
         self._preset = 0
         self._anim = 0.0
         self._applying = False      # a preset / room type is moving several controls: do not treat them as hand edits
@@ -93,10 +96,8 @@ class Plugin(up.Plugin):
         ui.window(820, 440, "Reverberator & Chorus", color="#16181d")
         ui.label("title", "REVERB & CHORUS", 16, 10, 260, 22, font_size=15, bold=True)
         ui.label("sub", "ensemble in front, room behind", 16, 32, 260, 16, font_color="#8a93a3")
-        ui.combo("preset", ["Presets..."] + PRESET_ORDER, 580, 12, 224, 26, value=self._preset,
-                 hint="Load a ready-made sound")
 
-        ui.tabs("tabs", ["Effects", "About"], 8, 56, 804, 376)
+        ui.tabs("tabs", ["Effects", "MIDI", "About"], 8, 56, 804, 376)
         ui.group("g_cho", "CHORUS", 8, 8, 372, 196, parent="tabs#0")
         ui.check("x_con", "Chorus on", 18, 28, 140, 22, param="c_on", parent="tabs#0")
         ui.knob("k_crate", 16, 54, 66, 98, param="c_rate", label="Rate", parent="tabs#0",
@@ -130,7 +131,10 @@ class Plugin(up.Plugin):
         ui.meter("m_in", 108, 232, 20, 96, vertical=True, parent="tabs#0", hint="Input level")
         ui.meter("m_out", 136, 232, 20, 96, vertical=True, parent="tabs#0", hint="Output level")
         ui.memo("hint", self.hint_text(), 176, 232, 580, 96, parent="tabs#0", read_only=True)
-        ui.memo("about", self.about_text(), 12, 12, 780, 320, parent="tabs#1", read_only=True)
+        self.ui_midi_page(ui, "tabs#1")
+        ui.memo("about", self.about_text(), 12, 12, 780, 320, parent="tabs#2", read_only=True)
+        # created last: the preset controls go on the tab row, straight after the page tabs
+        self.ui_presets(ui)
 
     def hint_text(self):
         return ("Chorus first, then reverb.  Use the Room type list for a quick start (Room, Hall, Plate, Cathedral),\n"
@@ -366,6 +370,16 @@ class Plugin(up.Plugin):
         cv.text(6, 2, "TAIL (-60 dB at the orange line)", "#8a93a3", 9, True)
 
     # ---- presets and saved state -----------------------------------------------------------------
+    def preset_begin(self):
+        self._applying = True
+
+    def preset_end(self):
+        self._applying = False
+
+    def on_midi(self, kind, channel, data1, data2):
+        if kind == "program":
+            self.select_builtin(data1)
+
     def on_preset(self, event, value):
         try:
             idx = int(value)
@@ -393,7 +407,6 @@ class Plugin(up.Plugin):
     def set_state(self, state):
         if isinstance(state, dict):
             self._preset = int(state.get("preset", 0))
-            self.ui_set("preset", value=self._preset)
 
 
 #: output scale of the reverb tail, set so a 100% wet room is about as loud as its input

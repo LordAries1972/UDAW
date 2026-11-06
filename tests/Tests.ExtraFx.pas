@@ -14,6 +14,7 @@ implementation
 uses
   SysUtils, Math,
   UDAW.Testing, UDAW.Audio.Types, UDAW.Timeline.ExtraFx, UDAW.Timeline.SpectralFx,
+  UDAW.Timeline.LoopScan,
   UDAW.Video.Effects, UDAW.DSP.CurveMath, UDAW.DSP.Dynamics, UDAW.DSP.Spectral,
   UDAW.DSP.Distortion, UDAW.DSP.Exciter;
 
@@ -509,8 +510,80 @@ begin
   Check((Length(outp) = 2) and (Length(outp[0]) >= N), 'voice isolation fills both channels');
 end;
 
+{ Six 0.1 s bursts, one every 0.25 s (an eighth note at 120 BPM), after 0.1 s of
+  silence: the scan must cut at each gap and call every segment 1/8. }
+procedure LoopScanFindsEighthNoteSegments;
+const
+  N = 70560;   // 1.6 s
+var
+  pl: TAudioPlanar;
+  cuts: TArray<Integer>;
+  i, k, onset: Integer;
+  div_: TLoopDivision;
+begin
+  pl := SinePlanar(2, N, 200, 0.5);
+  for i := 0 to N - 1 do
+  begin
+    k := i - SR div 10;                          // frames since the first onset
+    if (k < 0) or ((k mod (SR div 4)) >= SR div 10) then
+    begin
+      pl[0][i] := 0;
+      pl[1][i] := 0;
+    end;
+  end;
+  cuts := FindLoopCuts(pl, 2, 0, N, SR);
+  Check(Length(cuts) = 7, 'six segments need seven cut points, got ' + IntToStr(Length(cuts)));
+  for i := 0 to Length(cuts) - 2 do
+  begin
+    Check(Abs((cuts[i + 1] - cuts[i]) - SR div 4) < SR div 100, 'segment ' + IntToStr(i) + ' is an eighth note long');
+    Check(ClassifyLoopLength((cuts[i + 1] - cuts[i]) / SR, 0.5, div_) and (div_ = ldEighth),
+      'segment ' + IntToStr(i) + ' classifies as 1/8');
+  end;
+  onset := SR div 10;
+  Check(cuts[0] < onset, 'the first cut sits ahead of the first attack');
+  Check(cuts[0] > onset - SR div 50, 'the first cut sits right at the end of the lead-in silence');
+  Check(Length(FindLoopCuts(SinePlanar(2, 4096, 0, 0), 2, 0, 4096, SR)) = 0, 'digital silence gives no cuts');
+end;
+
+procedure LoopLengthClassification;
+var
+  d: TLoopDivision;
+begin
+  Check(ClassifyLoopLength(0.5, 0.5, d) and (d = ldQuarter), '1/4');
+  Check(ClassifyLoopLength(0.25, 0.5, d) and (d = ldEighth), '1/8');
+  Check(ClassifyLoopLength(0.125, 0.5, d) and (d = ldSixteenth), '1/16');
+  Check(ClassifyLoopLength(0.0625, 0.5, d) and (d = ldThirtySecond), '1/32');
+  Check(ClassifyLoopLength(0.03125, 0.5, d) and (d = ldSixtyFourth), '1/64');
+  Check(ClassifyLoopLength(1.0, 0.5, d) and (d = ldHalfBar), '2/4');
+  Check(ClassifyLoopLength(2.0, 0.5, d) and (d = ldBar), '4/4');
+  Check(ClassifyLoopLength(1.0 * 1.05, 0.5, d) and (d = ldHalfBar), 'a 5% error still matches');
+  CheckFalse(ClassifyLoopLength(0.7, 0.5, d), 'a length between divisions matches none');
+  CheckFalse(ClassifyLoopLength(3.0, 0.5, d), 'three beats is not one of the listed lengths');
+  Check(LoopDivisionName(ldBar) = '4/4', 'names');
+end;
+
+{ cuts every 1/16 at 120 BPM (0.125 s) for two bars: the walk must take them as two
+  4/4 segments, not as thirty-two separate 1/16 pieces }
+procedure LoopMatchChainsAcrossCuts;
+var
+  cuts: TArray<Integer>;
+  segs: TArray<TLoopSegment>;
+  i, skipped: Integer;
+begin
+  cuts := nil;
+  for i := 0 to 32 do cuts := cuts + [i * (SR div 8)];
+  segs := MatchLoopSegments(cuts, SR,
+    function(AFrame: Integer): Double begin Result := 0.5; end, skipped);
+  Check(Length(segs) = 2, 'two bars, got ' + IntToStr(Length(segs)));
+  Check((Length(segs) > 0) and (segs[0].Division = ldBar), 'chained into 4/4');
+  Check(skipped = 0, 'nothing skipped');
+end;
+
 procedure RegisterExtraFxTests;
 begin
+  RegisterTest(GRP, 'loop match chains across cuts', LoopMatchChainsAcrossCuts);
+  RegisterTest(GRP, 'loop scan cuts at silent gaps', LoopScanFindsEighthNoteSegments);
+  RegisterTest(GRP, 'loop length classification', LoopLengthClassification);
   RegisterTest(GRP, 'extra kinds are recognised', KindsAreRecognised);
   RegisterTest(GRP, 'swap channels and invert phase', SwapAndInvert);
   RegisterTest(GRP, 'echo repeats the signal', EchoRepeatsTheSignal);

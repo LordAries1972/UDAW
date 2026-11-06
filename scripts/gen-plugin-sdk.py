@@ -16,6 +16,10 @@ function PluginSdkSource: string;
 function PluginExampleSource: string;
 function PluginVocoderSource: string;
 function PluginReverbSource: string;
+function PluginRigSource: string;
+function PluginStutterSource: string;
+function PluginTunerSource: string;
+function PluginTemplateSource: string;
 
 implementation
 
@@ -59,6 +63,26 @@ begin
   Result := Join(REVERB_LINES);
 end;
 
+function PluginRigSource: string;
+begin
+  Result := Join(RIG_LINES);
+end;
+
+function PluginStutterSource: string;
+begin
+  Result := Join(STUTTER_LINES);
+end;
+
+function PluginTunerSource: string;
+begin
+  Result := Join(TUNER_LINES);
+end;
+
+function PluginTemplateSource: string;
+begin
+  Result := Join(TEMPLATE_LINES);
+end;
+
 end.
 """
 
@@ -80,12 +104,18 @@ def table(name, text):
 
 
 def main():
-    sdk = open(os.path.join(root, "Plugins", "udaw_plugin.py"), encoding="utf-8").read()
+    sdk = open(os.path.join(root, "Plugins", "udaw_plugin.py"), encoding="utf-8-sig").read()
     ex = open(os.path.join(root, "Plugins", "Guitar_Overdrive_Distortion.py"), encoding="utf-8").read()
     voc = open(os.path.join(root, "Plugins", "Vocoder.py"), encoding="utf-8").read()
     rev = open(os.path.join(root, "Plugins", "Reverberator_Chorus.py"), encoding="utf-8").read()
+    rig = open(os.path.join(root, "Plugins", "Virtual_Guitar_Rig.py"), encoding="utf-8").read()
+    stu = open(os.path.join(root, "Plugins", "Stutter_Edit.py"), encoding="utf-8").read()
+    tun = open(os.path.join(root, "Plugins", "Tuner.py"), encoding="utf-8").read()
+    tpl = open(os.path.join(root, "scripts", "plugin_template.py"), encoding="utf-8").read()
     body = (HEAD + table("SDK_LINES", sdk) + "\n" + table("EXAMPLE_LINES", ex) + "\n" +
-            table("VOCODER_LINES", voc) + "\n" + table("REVERB_LINES", rev) + TAIL)
+            table("VOCODER_LINES", voc) + "\n" + table("REVERB_LINES", rev) + "\n" +
+            table("RIG_LINES", rig) + "\n" + table("STUTTER_LINES", stu) + "\n" +
+            table("TUNER_LINES", tun) + "\n" + table("TEMPLATE_LINES", tpl) + TAIL)
     path = os.path.join(root, "src", "ai", "UDAW.Scripting.PluginSdk.pas")
     with open(path, "w", encoding="utf-8", newline="\r\n") as f:
         f.write(body)

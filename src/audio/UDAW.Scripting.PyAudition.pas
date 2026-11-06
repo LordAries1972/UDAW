@@ -12,7 +12,7 @@ unit UDAW.Scripting.PyAudition;
 interface
 
 uses
-  SysUtils, Math, UDAW.Audio.Types, UDAW.Audio.Buffer, UDAW.Audio.Source, UDAW.Scripting.PyPlugin;
+  SysUtils, Math, UDAW.Audio.Types, UDAW.Audio.Buffer, UDAW.Audio.Ring, UDAW.Audio.Source, UDAW.Scripting.PyPlugin;
 
 type
   TPyPlanar = TArray<TArray<Single>>;
@@ -25,15 +25,22 @@ type
     FIn, FOut: TPyPlanar;
     FInPtrs, FOutPtrs: TArray<System.PSingle>;
     FBypass: Boolean;
+    FRing: TAudioRing;          // live input mode: what the engine captured (nil = looped material)
+    FRingBuf: TArray<Single>;   // interleaved scratch for reading the ring
+    FRingCh: Integer;
   public
     { retains AHost; AMaterial is planar audio at the engine's sample rate }
     constructor Create(AHost: TPyPluginHost; const AMaterial: TPyPlanar);
+    { live input: the source owns a ring the engine fills with the captured input (AInputChannels wide);
+      the first input channel feeds every channel of the plug-in }
+    constructor CreateLive(AHost: TPyPluginHost; AInputChannels, ASampleRate: Integer);
     destructor Destroy; override;
     procedure Render(ABuffer: TAudioBuffer);
     procedure Prepare(ASampleRate, AMaxFrames, AChannels: Integer);
     procedure Reset;
     function Name: string;
     property Bypass: Boolean read FBypass write FBypass;
+    property Ring: TAudioRing read FRing;
   end;
 
 { a clean electric-guitar riff (two stereo-identical channels), about ten seconds, peaking at -7 dBFS }
@@ -64,8 +71,20 @@ begin
   end;
 end;
 
+constructor TPyAuditionSource.CreateLive(AHost: TPyPluginHost; AInputChannels, ASampleRate: Integer);
+var
+  none: TPyPlanar;
+begin
+  SetLength(none, 0);
+  Create(AHost, none);
+  FRingCh := Max(1, AInputChannels);
+  FRing := TAudioRing.Create(FRingCh, Max(4096, ASampleRate));
+  SetLength(FRingBuf, FHost.MaxFrames * FRingCh);
+end;
+
 destructor TPyAuditionSource.Destroy;
 begin
+  FreeAndNil(FRing);
   FHost.Release;
   inherited Destroy;
 end;
@@ -92,7 +111,7 @@ var
 begin
   n := ABuffer.FrameCount;
   nch := ABuffer.ChannelCount;
-  if FLen <= 0 then
+  if (FLen <= 0) and (FRing = nil) then
   begin
     ABuffer.Clear;
     Exit;
@@ -101,12 +120,23 @@ begin
   while done < n do
   begin
     m := Min(n - done, FHost.MaxFrames);
-    for i := 0 to m - 1 do
+    if FRing <> nil then
     begin
-      p := (FPos + i) mod FLen;
-      for c := 0 to FChans - 1 do FIn[c][i] := FMat[Min(c, High(FMat))][p];
+      { keep the delay short: if the input has run ahead by more than a few blocks, drop the oldest }
+      if FRing.FramesAvailable > m * 6 then FRing.SkipFrames(FRing.FramesAvailable - m * 2);
+      FRing.ReadFrames(FRingBuf[0], m, True);
+      for i := 0 to m - 1 do
+        for c := 0 to FChans - 1 do FIn[c][i] := FRingBuf[i * FRingCh];
+    end
+    else
+    begin
+      for i := 0 to m - 1 do
+      begin
+        p := (FPos + i) mod FLen;
+        for c := 0 to FChans - 1 do FIn[c][i] := FMat[Min(c, High(FMat))][p];
+      end;
+      FPos := (FPos + m) mod FLen;
     end;
-    FPos := (FPos + m) mod FLen;
     ok := (not FBypass) and FHost.ProcessBlock(FInPtrs, FOutPtrs, m);
     if not ok then
       for c := 0 to FChans - 1 do Move(FIn[c][0], FOut[c][0], m * SizeOf(Single));

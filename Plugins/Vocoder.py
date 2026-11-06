@@ -64,6 +64,9 @@ PRESET_ORDER = list(PRESETS)
 
 
 class Plugin(up.Plugin):
+    midi_cc = {1: "formant", 7: "level", 11: "voice", 73: "attack", 72: "release", 74: "bright"}
+    midi_notes = ("Keys play the carrier: the key sets Note and Octave (middle C = C4, octaves 1-5).",
+                  "Program change 0-n loads the presets in list order.")
     name = "Vocoder"
     vendor = "UDAW examples"
     author = "Daniel J. Hobson, Australia"
@@ -87,6 +90,7 @@ class Plugin(up.Plugin):
         self.add_param("gate", "Gate", min=-80, max=-30, default=-62, unit="dB", decimals=0, group="Output")
         self.add_param("voice", "Voice", min=0, max=100, default=0, unit="%", decimals=0, group="Output")
         self.add_param("level", "Level", min=-24, max=18, default=0, unit="dB", decimals=1, group="Output")
+        self.add_midi_params()
         self._preset = 0
         self._dirty_voices = True
 
@@ -95,10 +99,8 @@ class Plugin(up.Plugin):
         ui.window(820, 440, "Vocoder", color="#16181d")
         ui.label("title", "VOCODER", 16, 10, 200, 22, font_size=15, bold=True)
         ui.label("sub", "make a voice talk through a synthesiser", 16, 32, 320, 16, font_color="#8a93a3")
-        ui.combo("preset", ["Presets..."] + PRESET_ORDER, 580, 12, 224, 26, value=self._preset,
-                 hint="Load a ready-made sound")
 
-        ui.tabs("tabs", ["Vocoder", "About"], 8, 56, 804, 376)
+        ui.tabs("tabs", ["Vocoder", "MIDI", "About"], 8, 56, 804, 376)
         ui.group("g_car", "CARRIER (the synthesiser)", 8, 8, 304, 196, parent="tabs#0")
         ui.combo("c_car", CARRIERS, 18, 30, 170, 26, param="carrier", parent="tabs#0")
         ui.combo("c_chord", CHORD_NAMES, 196, 30, 108, 26, param="chord", parent="tabs#0")
@@ -133,7 +135,10 @@ class Plugin(up.Plugin):
         ui.meter("m_in", 268, 232, 20, 96, vertical=True, parent="tabs#0", hint="Voice level")
         ui.meter("m_out", 296, 232, 20, 96, vertical=True, parent="tabs#0", hint="Output level")
         ui.memo("hint", self.hint_text(), 332, 232, 424, 96, parent="tabs#0", read_only=True)
-        ui.memo("about", self.about_text(), 12, 12, 780, 320, parent="tabs#1", read_only=True)
+        self.ui_midi_page(ui, "tabs#1")
+        ui.memo("about", self.about_text(), 12, 12, 780, 320, parent="tabs#2", read_only=True)
+        # created last: the preset controls go on the tab row, straight after the page tabs
+        self.ui_presets(ui)
 
     def hint_text(self):
         return ("Put this on a vocal.  Speak or sing; the synthesiser takes on the voice.\n"
@@ -357,6 +362,14 @@ class Plugin(up.Plugin):
         cv.text(8, 4, "VOICE BANDS", "#8a93a3", 10, True)
 
     # ---- presets and saved state -----------------------------------------------------------------
+    def on_midi(self, kind, channel, data1, data2):
+        if kind == "note_on":
+            # a key plays the carrier: its pitch class and octave (middle C = C4)
+            self.set_param("note", data1 % 12)
+            self.set_param("octave", data1 // 12 - 1)
+        elif kind == "program":
+            self.select_builtin(data1)
+
     def on_preset(self, event, value):
         try:
             idx = int(value)
@@ -379,4 +392,3 @@ class Plugin(up.Plugin):
     def set_state(self, state):
         if isinstance(state, dict):
             self._preset = int(state.get("preset", 0))
-            self.ui_set("preset", value=self._preset)

@@ -61,10 +61,14 @@ uses
   UDAW.Synth.Instruments in '..\src\synth\UDAW.Synth.Instruments.pas',
   UDAW.Mixer.Modulation in '..\src\mixer\UDAW.Mixer.Modulation.pas',
   UDAW.Mixer.CLAP in '..\src\mixer\UDAW.Mixer.CLAP.pas',
+  UDAW.Mixer.PluginHost in '..\src\mixer\UDAW.Mixer.PluginHost.pas',
+  UDAW.Mixer.PluginMidi in '..\src\mixer\UDAW.Mixer.PluginMidi.pas',
+  UDAW.Mixer.PluginRender in '..\src\mixer\UDAW.Mixer.PluginRender.pas',
   UDAW.Mixer.VST3 in '..\src\mixer\UDAW.Mixer.VST3.pas',
   UDAW.DSP.AudioToMidi in '..\src\audio\dsp\UDAW.DSP.AudioToMidi.pas',
   UDAW.Timeline.ExtraFx in '..\src\timeline\UDAW.Timeline.ExtraFx.pas',
   UDAW.Timeline.SpectralFx in '..\src\timeline\UDAW.Timeline.SpectralFx.pas',
+  UDAW.Timeline.LoopScan in '..\src\timeline\UDAW.Timeline.LoopScan.pas',
   UDAW.Timeline.Warp in '..\src\timeline\UDAW.Timeline.Warp.pas',
   UDAW.DSP.Exciter in '..\src\audio\dsp\UDAW.DSP.Exciter.pas',
   UDAW.DSP.LookaheadLimiter in '..\src\audio\dsp\UDAW.DSP.LookaheadLimiter.pas',
@@ -204,6 +208,7 @@ uses
   Tests.Phase36 in 'Tests.Phase36.pas',
   Tests.Phase37 in 'Tests.Phase37.pas',
   Tests.Phase39 in 'Tests.Phase39.pas',
+  Tests.PluginHost in 'Tests.PluginHost.pas',
   Tests.Drum in 'Tests.Drum.pas',
   Tests.Pattern in 'Tests.Pattern.pas',
   Tests.Phase38 in 'Tests.Phase38.pas',
@@ -256,6 +261,7 @@ begin
     RegisterPhase37Tests;
     RegisterPhase38Tests;
     RegisterPhase39Tests;
+    RegisterPluginHostTests;
     RegisterDrumTests;
     RegisterPatternTests;
     RegisterDAWImportAbletonTests;

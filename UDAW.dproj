@@ -114,10 +114,14 @@
         <DCCReference Include="src\synth\UDAW.Synth.Instruments.pas" />
         <DCCReference Include="src\mixer\UDAW.Mixer.Modulation.pas" />
         <DCCReference Include="src\mixer\UDAW.Mixer.CLAP.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.PluginHost.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.PluginMidi.pas" />
+        <DCCReference Include="src\mixer\UDAW.Mixer.PluginRender.pas" />
         <DCCReference Include="src\mixer\UDAW.Mixer.VST3.pas" />
         <DCCReference Include="src\audio\dsp\UDAW.DSP.AudioToMidi.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.ExtraFx.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.SpectralFx.pas" />
+        <DCCReference Include="src\timeline\UDAW.Timeline.LoopScan.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.Warp.pas" />
         <DCCReference Include="src\timeline\UDAW.Timeline.VideoPlayer.pas" />
         <DCCReference Include="src\timeline\UDAW.Video.EffectsPlus.pas" />

@@ -11,8 +11,8 @@ UDAW_LICENSE RCDATA "udaw-license.dat"
 #define VFT_APP        0x00000001L
 
 1 VERSIONINFO
- FILEVERSION 1,0,0,659
- PRODUCTVERSION 1,0,0,659
+ FILEVERSION 1,0,0,682
+ PRODUCTVERSION 1,0,0,682
  FILEOS VOS__WINDOWS32
  FILETYPE VFT_APP
 BEGIN
@@ -22,11 +22,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName",      "Ultimanium\0"
       VALUE "FileDescription",  "Ultimanium Digital Audio Workstation (UDAW)\0"
-      VALUE "FileVersion",      "1.0.659\0"
+      VALUE "FileVersion",      "1.0.682\0"
       VALUE "InternalName",     "UDAW\0"
       VALUE "OriginalFilename", "UDAW.exe\0"
       VALUE "ProductName",      "Ultimanium Digital Audio Workstation (UDAW)\0"
-      VALUE "ProductVersion",   "1.0.659\0"
+      VALUE "ProductVersion",   "1.0.682\0"
     END
   END
   BLOCK "VarFileInfo"

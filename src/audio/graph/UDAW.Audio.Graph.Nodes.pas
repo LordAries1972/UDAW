@@ -28,7 +28,8 @@ uses
   UDAW.DSP.MultibandComp, UDAW.DSP.Mastering, UDAW.DSP.Visualization,
   UDAW.DSP.ParametricEQ, UDAW.DSP.StereoWidth, UDAW.DSP.TransientShaper,
   UDAW.DSP.Exciter, UDAW.DSP.LookaheadLimiter, UDAW.DSP.PitchShift,
-  UDAW.Mixer.VST2, UDAW.Mixer.CLAP, UDAW.Mixer.VST3, UDAW.Scripting.PyPlugin;
+  UDAW.Mixer.VST2, UDAW.Mixer.CLAP, UDAW.Mixer.VST3, UDAW.Mixer.PluginHost,
+  UDAW.Mixer.PluginMidi, UDAW.Scripting.PyPlugin;
 
 const
   GRAPH_SUBSYS = 'AudioGraph';
@@ -573,6 +574,18 @@ type
     procedure DoConfigure; override;
   end;
 
+  { What a hosted plug-in insert (VST2 / VST3) needs to take part in MIDI: which Timeline lane its
+    strip is fed from, whether it listens to the live keyboard, and a scratch buffer for the
+    messages it drains from the hub (UDAW.Mixer.PluginMidi) at the start of each block. }
+  TPluginNodeMidi = record
+    Lane: Integer;              // Timeline lane id (0 = none)
+    Live: Boolean;              // listens to the MIDI keyboard / controller
+    Wants: Boolean;             // the plug-in takes MIDI at all
+    Instrument: Boolean;        // it is an instrument: replaces the built-in synth on its lane
+    OwnTransport: Boolean;      // the owner sets the host's transport itself (offline renders)
+    Buf: array[0..PLUGIN_MAX_MIDI - 1] of TPluginMidi;
+  end;
+
   { ---- Phase (VST2 hosting) - hosted plugin insert ---- }
 
   { Wraps a UDAW.Mixer.VST2.TVST2Host as an insert-chain node. Params carry
@@ -590,12 +603,21 @@ type
     FStateB64: string;
     FLoadError: string;
     FPendingStateApplied: Boolean;
+    FMidi: TPluginNodeMidi;
+    FSideBuf: TAudioBuffer;            // not owned
+    FSidePtrs: array of PSingle;
+    function GetLaneId: Integer;
+    function GetLiveMidi: Boolean;
+    procedure SetLiveMidi(AValue: Boolean);
+    function GetOwnTransport: Boolean;
+    procedure SetOwnTransport(AValue: Boolean);
   public
     destructor Destroy; override;
     procedure Reset; override;
     procedure Process(AIn, AOut: TAudioBuffer); override;
     function SerializeParams: string; override;
     procedure DeserializeParams(const AText: string); override;
+    procedure SetSidechain(ABuffer: TAudioBuffer); override;
     { The path as given to LoadOnly/LoadAndOpen (decoded from FPathB64). }
     function PluginPath: string;
     { Call after changing parameters/state from a plugin editor UI so the
@@ -603,8 +625,13 @@ type
       not the live plugin, to avoid round-tripping through the plugin on
       every save). }
     procedure CaptureState;
+    { the Timeline lane the strip holding this insert is fed from (set by the mixer) }
+    procedure SetLaneId(ALane: Integer);
     property Host: TVST2Host read FHost;
     property LoadError: string read FLoadError;
+    property LaneId: Integer read GetLaneId;
+    property LiveMidi: Boolean read GetLiveMidi write SetLiveMidi;
+    property OwnTransport: Boolean read GetOwnTransport write SetOwnTransport;
   protected
     procedure DoConfigure; override;
   end;
@@ -642,12 +669,21 @@ type
     FStateB64: string;
     FLoadError: string;
     FPendingStateApplied: Boolean;
+    FMidi: TPluginNodeMidi;
+    FSideBuf: TAudioBuffer;            // not owned
+    FSidePtrs: array of PSingle;
+    function GetLaneId: Integer;
+    function GetLiveMidi: Boolean;
+    procedure SetLiveMidi(AValue: Boolean);
+    function GetOwnTransport: Boolean;
+    procedure SetOwnTransport(AValue: Boolean);
   public
     destructor Destroy; override;
     procedure Reset; override;
     procedure Process(AIn, AOut: TAudioBuffer); override;
     function SerializeParams: string; override;
     procedure DeserializeParams(const AText: string); override;
+    procedure SetSidechain(ABuffer: TAudioBuffer); override;
     { The path as given to LoadOnly/LoadAndOpen (decoded from FPathB64). }
     function PluginPath: string;
     { Call after changing parameters/state from a plugin editor UI so the
@@ -655,8 +691,13 @@ type
       not the live plugin, to avoid round-tripping through the plugin on
       every save). }
     procedure CaptureState;
+    { the Timeline lane the strip holding this insert is fed from (set by the mixer) }
+    procedure SetLaneId(ALane: Integer);
     property Host: TVST3Host read FHost;
     property LoadError: string read FLoadError;
+    property LaneId: Integer read GetLaneId;
+    property LiveMidi: Boolean read GetLiveMidi write SetLiveMidi;
+    property OwnTransport: Boolean read GetOwnTransport write SetOwnTransport;
   protected
     procedure DoConfigure; override;
   end;
@@ -716,6 +757,10 @@ type
 
 { ---- factory + name maps ---- }
 
+{ the hosted VST2 / VST3 plug-in behind an insert node, or nil for any other node }
+function PluginHostOf(ANode: TAudioNode): TPluginHostBase;
+{ tells a plug-in insert which Timeline lane its strip is fed from (VST2 / VST3 nodes only) }
+procedure PluginNodeSetLane(ANode: TAudioNode; ALane: Integer);
 function CreateNode(AId: Integer; AKind: TNodeKind; const AName: string): TAudioNode;
 function NodeKindId(AKind: TNodeKind): string;
 function NodeKindFromId(const AId: string; out AKind: TNodeKind): Boolean;
@@ -2787,12 +2832,106 @@ begin
   FCurLin := DbToLinear(FGainDb);
 end;
 
+{ ================= hosted plug-in MIDI / transport helpers ================= }
+
+function PluginHostOf(ANode: TAudioNode): TPluginHostBase;
+begin
+  Result := nil;
+  if ANode is TVST2Node then Result := TVST2Node(ANode).Host
+  else if ANode is TVST3Node then Result := TVST3Node(ANode).Host;
+end;
+
+procedure PluginNodeSetLane(ANode: TAudioNode; ALane: Integer);
+begin
+  if ANode is TVST2Node then TVST2Node(ANode).SetLaneId(ALane)
+  else if ANode is TVST3Node then TVST3Node(ANode).SetLaneId(ALane);
+end;
+
+{ (re)registers a plug-in with the MIDI hub; call after it has loaded or its lane changed }
+procedure PluginNodeRegister(AKey: Pointer; AHost: TPluginHostBase; var S: TPluginNodeMidi);
+begin
+  S.Wants := (AHost <> nil) and AHost.IsLoaded and AHost.WantsMidi;
+  S.Instrument := S.Wants and AHost.IsSynth;
+  if S.Wants then PluginMidi.Register(AKey, S.Lane, S.Live, S.Instrument)
+  else PluginMidi.Unregister(AKey);
+end;
+
+{ start of a block: the transport, then the MIDI that arrived for this plug-in }
+procedure PluginNodePump(AKey: Pointer; AHost: TPluginHostBase; var S: TPluginNodeMidi);
+var
+  n, i: Integer;
+begin
+  if not S.OwnTransport then AHost.SetTransport(PluginMidi.Transport);
+  if not S.Wants then Exit;
+  n := PluginMidi.Take(AKey, S.Buf);
+  for i := 0 to n - 1 do
+    AHost.SendMidi(S.Buf[i].Status, S.Buf[i].Data1, S.Buf[i].Data2, S.Buf[i].DeltaFrames);
+end;
+
+{ end of a block: MIDI the plug-in sent out goes to the hub (and from there to the MIDI output) }
+procedure PluginNodePumpOut(AHost: TPluginHostBase; var S: TPluginNodeMidi);
+var
+  n, i: Integer;
+begin
+  if not S.Wants then Exit;
+  n := AHost.PopMidiOut(S.Buf);
+  for i := 0 to n - 1 do
+    PluginMidi.PostOut(S.Buf[i].Status, S.Buf[i].Data1, S.Buf[i].Data2);
+end;
+
+procedure PluginNodeSidePtrs(ABuffer: TAudioBuffer; var APtrs: array of PSingle);
+var
+  ch: Integer;
+begin
+  for ch := 0 to Min(High(APtrs), ABuffer.ChannelCount - 1) do
+    APtrs[ch] := PSingle(ABuffer.ChannelPtr(ch));
+end;
+
 { ================= TVST2Node ================= }
 
 destructor TVST2Node.Destroy;
 begin
+  PluginMidi.Unregister(Self);
   FHost.Free;
   inherited Destroy;
+end;
+
+function TVST2Node.GetLaneId: Integer;
+begin
+  Result := FMidi.Lane;
+end;
+
+function TVST2Node.GetLiveMidi: Boolean;
+begin
+  Result := FMidi.Live;
+end;
+
+procedure TVST2Node.SetLiveMidi(AValue: Boolean);
+begin
+  FMidi.Live := AValue;
+  if FMidi.Wants then PluginMidi.Register(Self, FMidi.Lane, FMidi.Live, FMidi.Instrument);
+end;
+
+function TVST2Node.GetOwnTransport: Boolean;
+begin
+  Result := FMidi.OwnTransport;
+end;
+
+procedure TVST2Node.SetOwnTransport(AValue: Boolean);
+begin
+  FMidi.OwnTransport := AValue;
+end;
+
+procedure TVST2Node.SetLaneId(ALane: Integer);
+begin
+  if FMidi.Lane = ALane then Exit;
+  FMidi.Lane := ALane;
+  if FMidi.Wants then PluginMidi.SetLane(Self, ALane);
+end;
+
+procedure TVST2Node.SetSidechain(ABuffer: TAudioBuffer);
+begin
+  FSideBuf := ABuffer;
 end;
 
 procedure TVST2Node.DoConfigure;
@@ -2807,6 +2946,7 @@ begin
   begin
     FLoadError := '';
     FPendingStateApplied := False;
+    FHost.RequireEffect := False;     { instruments are hosted too }
     try
       FHost.LoadAndOpen(path, FSampleRate, FMaxFrames, FChannels);
     except
@@ -2825,11 +2965,16 @@ begin
     FHost.LoadStateBase64(FStateB64);
     FPendingStateApplied := True;
   end;
+  PluginNodeRegister(Self, FHost, FMidi);
 end;
 
 procedure TVST2Node.Reset;
 begin
-  if (FHost <> nil) and FHost.IsLoaded then FHost.Reset;
+  if (FHost <> nil) and FHost.IsLoaded then
+  begin
+    FHost.Reset;
+    if FMidi.Wants then FHost.AllNotesOff;     { no hanging notes after a stop / seek }
+  end;
 end;
 
 procedure TVST2Node.Process(AIn, AOut: TAudioBuffer);
@@ -2844,7 +2989,17 @@ begin
   if (FHost <> nil) and FHost.IsLoaded then
   begin
     try
+      PluginNodePump(Self, FHost, FMidi);
+      if FSideBuf <> nil then
+      begin
+        if Length(FSidePtrs) <> FSideBuf.ChannelCount then SetLength(FSidePtrs, FSideBuf.ChannelCount);
+        PluginNodeSidePtrs(FSideBuf, FSidePtrs);
+        FHost.SetSidechain(FSidePtrs);
+      end
+      else
+        FHost.SetSidechain([]);
       FHost.Process(FInPtrs, FOutPtrs, n);
+      PluginNodePumpOut(FHost, FMidi);
       ok := True;
     except
       on E: Exception do
@@ -2853,6 +3008,8 @@ begin
           not take the audio engine down with it: record the fault, unload
           it, and fall through to dry pass-through like a load failure }
         FLoadError := 'VST2 process fault: ' + E.Message;
+        PluginMidi.Unregister(Self);
+        FMidi.Wants := False;
         FHost.Close;
       end;
     end;
@@ -2885,13 +3042,14 @@ begin
     whatever UI has the editor open) so a plugin's live tweaking doesn't pay
     for a chunk dump on every keystroke; this just persists whatever was
     last captured (or the state the insert was loaded with). }
-  Result := Format('path=%s;state=%s', [FPathB64, FStateB64]);
+  Result := Format('path=%s;state=%s;live=%d', [FPathB64, FStateB64, Ord(FMidi.Live)]);
 end;
 
 procedure TVST2Node.DeserializeParams(const AText: string);
 begin
   FPathB64 := ParamStrDef(AText, 'path', '');
   FStateB64 := ParamStrDef(AText, 'state', '');
+  FMidi.Live := ParamBool(AText, 'live', True);
   FPendingStateApplied := False;
   if FConfigured then DoConfigure;
 end;
@@ -3009,8 +3167,47 @@ end;
 
 destructor TVST3Node.Destroy;
 begin
+  PluginMidi.Unregister(Self);
   FHost.Free;
   inherited Destroy;
+end;
+
+function TVST3Node.GetLaneId: Integer;
+begin
+  Result := FMidi.Lane;
+end;
+
+function TVST3Node.GetLiveMidi: Boolean;
+begin
+  Result := FMidi.Live;
+end;
+
+procedure TVST3Node.SetLiveMidi(AValue: Boolean);
+begin
+  FMidi.Live := AValue;
+  if FMidi.Wants then PluginMidi.Register(Self, FMidi.Lane, FMidi.Live, FMidi.Instrument);
+end;
+
+function TVST3Node.GetOwnTransport: Boolean;
+begin
+  Result := FMidi.OwnTransport;
+end;
+
+procedure TVST3Node.SetOwnTransport(AValue: Boolean);
+begin
+  FMidi.OwnTransport := AValue;
+end;
+
+procedure TVST3Node.SetLaneId(ALane: Integer);
+begin
+  if FMidi.Lane = ALane then Exit;
+  FMidi.Lane := ALane;
+  if FMidi.Wants then PluginMidi.SetLane(Self, ALane);
+end;
+
+procedure TVST3Node.SetSidechain(ABuffer: TAudioBuffer);
+begin
+  FSideBuf := ABuffer;
 end;
 
 procedure TVST3Node.DoConfigure;
@@ -3025,6 +3222,7 @@ begin
   begin
     FLoadError := '';
     FPendingStateApplied := False;
+    FHost.RequireEffect := False;     { instruments are hosted too }
     try
       FHost.LoadAndOpen(path, FSampleRate, FMaxFrames, FChannels);
     except
@@ -3043,11 +3241,16 @@ begin
     FHost.LoadStateBase64(FStateB64);
     FPendingStateApplied := True;
   end;
+  PluginNodeRegister(Self, FHost, FMidi);
 end;
 
 procedure TVST3Node.Reset;
 begin
-  if (FHost <> nil) and FHost.IsLoaded then FHost.Reset;
+  if (FHost <> nil) and FHost.IsLoaded then
+  begin
+    FHost.Reset;
+    if FMidi.Wants then FHost.AllNotesOff;     { no hanging notes after a stop / seek }
+  end;
 end;
 
 procedure TVST3Node.Process(AIn, AOut: TAudioBuffer);
@@ -3062,7 +3265,17 @@ begin
   if (FHost <> nil) and FHost.IsLoaded then
   begin
     try
+      PluginNodePump(Self, FHost, FMidi);
+      if FSideBuf <> nil then
+      begin
+        if Length(FSidePtrs) <> FSideBuf.ChannelCount then SetLength(FSidePtrs, FSideBuf.ChannelCount);
+        PluginNodeSidePtrs(FSideBuf, FSidePtrs);
+        FHost.SetSidechain(FSidePtrs);
+      end
+      else
+        FHost.SetSidechain([]);
       FHost.Process(FInPtrs, FOutPtrs, n);
+      PluginNodePumpOut(FHost, FMidi);
       ok := True;
     except
       on E: Exception do
@@ -3071,6 +3284,8 @@ begin
           not take the audio engine down with it: record the fault, unload
           it, and fall through to dry pass-through like a load failure }
         FLoadError := 'VST3 process fault: ' + E.Message;
+        PluginMidi.Unregister(Self);
+        FMidi.Wants := False;
         FHost.Close;
       end;
     end;
@@ -3103,13 +3318,14 @@ begin
     whatever UI has the editor open) so a plugin's live tweaking doesn't pay
     for a chunk dump on every keystroke; this just persists whatever was
     last captured (or the state the insert was loaded with). }
-  Result := Format('path=%s;state=%s', [FPathB64, FStateB64]);
+  Result := Format('path=%s;state=%s;live=%d', [FPathB64, FStateB64, Ord(FMidi.Live)]);
 end;
 
 procedure TVST3Node.DeserializeParams(const AText: string);
 begin
   FPathB64 := ParamStrDef(AText, 'path', '');
   FStateB64 := ParamStrDef(AText, 'state', '');
+  FMidi.Live := ParamBool(AText, 'live', True);
   FPendingStateApplied := False;
   if FConfigured then DoConfigure;
 end;

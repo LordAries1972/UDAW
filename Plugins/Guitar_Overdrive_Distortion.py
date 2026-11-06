@@ -93,6 +93,8 @@ PRESET_ORDER = list(PRESETS)
 
 
 class Plugin(up.Plugin):
+    midi_cc = {1: "drive", 7: "level", 11: "mix", 71: "tight", 74: "tone"}
+    midi_notes = ("Program change 0-6 loads the presets in list order.",)
     name = "Guitar Overdrive & Distortion"
     vendor = "UDAW examples"
     author = "Daniel J. Hobson, Australia"
@@ -117,6 +119,7 @@ class Plugin(up.Plugin):
         self.add_bool("protect", "Output limiter", default=True, group="Output")
         self.add_param("mix", "Mix", min=0, max=100, default=100, unit="%", decimals=0, group="Output")
         self.add_param("level", "Level", min=-40, max=12, default=-6, unit="dB", decimals=1, group="Output")
+        self.add_midi_params()
         self._preset = 0
 
     # ---- window ---------------------------------------------------------------------------------
@@ -124,10 +127,8 @@ class Plugin(up.Plugin):
         ui.window(820, 430, "Guitar Overdrive & Distortion", color="#16181d")
         ui.label("title", "OVERDRIVE / DISTORTION", 16, 10, 320, 22, font_size=15, bold=True)
         ui.label("sub", "for guitar recordings", 16, 32, 200, 16, font_color="#8a93a3")
-        ui.combo("preset", ["Presets..."] + PRESET_ORDER, 580, 12, 224, 26, value=self._preset,
-                 hint="Load a ready-made sound")
 
-        ui.tabs("tabs", ["Tone", "About"], 8, 56, 804, 366)
+        ui.tabs("tabs", ["Tone", "MIDI", "About"], 8, 56, 804, 366)
         # ---- Tone page: every control sits on its frame, so it takes the frame's background ----
         ui.group("g_in", "INPUT", 8, 8, 100, 190, parent="tabs#0")
         ui.knob("k_gate", 14, 28, 72, 104, param="gate", label="Gate", parent="tabs#0")
@@ -160,8 +161,11 @@ class Plugin(up.Plugin):
         ui.check("x_prot", "Output limiter", 208, 226, 150, 22, param="protect", parent="tabs#0",
                  hint="Soft limiter on the output so heavy drive can never go over 0 dBFS")
         ui.canvas("scope", 208, 252, 548, 68, parent="tabs#0", fps=20, mouse=False)
+        self.ui_midi_page(ui, "tabs#1")
         # ---- About page ---------------------------------------------------------------------
-        ui.memo("about", self.about_text(), 12, 12, 780, 290, parent="tabs#1", read_only=True)
+        ui.memo("about", self.about_text(), 12, 12, 780, 290, parent="tabs#2", read_only=True)
+        # created last: the preset controls go on the tab row, straight after the page tabs
+        self.ui_presets(ui)
 
     def about_text(self):
         return (
@@ -375,6 +379,10 @@ class Plugin(up.Plugin):
         cv.text(x0 + 4, 7, "OUTPUT", "#8a93a3", 10, True)
 
     # ---- presets and saved state ---------------------------------------------------------------
+    def on_midi(self, kind, channel, data1, data2):
+        if kind == "program":
+            self.select_builtin(data1)
+
     def on_preset(self, event, value):
         try:
             idx = int(value)
@@ -398,4 +406,3 @@ class Plugin(up.Plugin):
     def set_state(self, state):
         if isinstance(state, dict):
             self._preset = int(state.get("preset", 0))
-            self.ui_set("preset", value=self._preset)

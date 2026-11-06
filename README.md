@@ -79,7 +79,7 @@ No one is obliged to provide support (see the [License](LICENSE.md)), but report
 - Unlimited audio, MIDI and tracker tracks on a zoomable, scrollable timeline with snap-to-grid, markers, regions, loop range, chord lane, and a tempo map with multiple tempo changes and time signatures.
 - Non-destructive editing: move, trim, split, duplicate, fade in/out, crossfade, ripple and range selection, with cut / copy / paste of ranges that keep their effects, titles, markers and regions.
 - Unlimited undo / redo across the whole project, autosave and crash recovery.
-- Per-clip tempo-stretch and warp markers, stem splitting, audio-to-MIDI, and metronome.
+- Per-clip tempo-stretch and warp markers, stem splitting, loop-segment scanning (captures whole 1/4, 1/8, 1/16, 1/32, 1/64, 2/4 and 4/4 segments between near-silent points), audio-to-MIDI, and metronome.
 - Clip Stage (clip launcher) for performing with scenes.
 - Per-track colours, mute / solo / record-arm, track titles and renaming, and range-based effects (noise reduction, auto-tune, convolution reverb and more).
 - Editing modes on one screen: **Arrange, Piano, Score, Instrument, Pattern, Mix, Tracker, Record, AI and Foley**.
@@ -229,10 +229,11 @@ UDAW is a large, fast-moving project. Being upfront about its limits:
 - **MIDI:** any class-compliant MIDI keyboard or controller.
 - **AI features:** your own accounts / API keys for the services you want to use, and an internet connection.
 - **Python plug-ins:** Python 3.14 or newer on your machine, if you want to run or write Python plug-ins. See [Installing Python](#installing-python) below.
+- **numpy (for the bundled Python plug-ins):** five of the six bundled plug-ins (Vocoder, Reverberator & Chorus, Virtual Guitar Rig, Stutter Edit and Tuner), which also take MIDI in and send MIDI out, need the `numpy` package installed for the same Python. Without it they pass the audio through and say so in their log. See [Installing numpy](#installing-numpy) below.
 
 ### Installing Python
 
-Python is only needed for Python plug-ins and scripting. **UDAW requires Python 3.14 or newer.** Install a 64-bit release of that version (or later) for your platform, then restart UDAW so it can find it.
+Python is only needed for Python plug-ins and scripting. UDAW's own MIDI sequencing, Piano Roll, MIDI device input and output, and MIDI file import and export are built in and need no Python at all. **UDAW requires Python 3.14 or newer.** Install a 64-bit release of that version (or later) for your platform, then restart UDAW so it can find it.
 
 **Windows**
 
@@ -256,6 +257,24 @@ Many distributions ship an older Python 3, so check with `python3 --version`. If
 2. Check it in Terminal with `python3 --version`.
 
 Alternatively, with [Homebrew](https://brew.sh/): `brew install python@3.14`
+
+### Installing numpy
+
+**numpy** is a free Python package for fast maths. The Vocoder, Reverberator & Chorus, Virtual Guitar Rig, Stutter Edit and Tuner plug-ins use it, so install it before using them (the MIDI in and MIDI out of those plug-ins also depends on the plug-in itself running). Guitar Overdrive Distortion and your own plug-ins do not need it unless they ask for it. Install numpy for the **same Python that UDAW finds**, then restart UDAW.
+
+**Windows**
+
+1. Open a new Command Prompt.
+2. Run `python -m pip install numpy`.
+3. Check it with `python -c "import numpy; print(numpy.__version__)"`. A version number means it worked.
+
+**Linux and macOS**
+
+1. Run `python3 -m pip install numpy`.
+2. Check it with `python3 -c "import numpy; print(numpy.__version__)"`.
+3. If pip refuses with an "externally-managed-environment" message, install it with your package manager instead: `sudo apt install python3-numpy` (Debian / Ubuntu), `sudo dnf install python3-numpy` (Fedora), `sudo pacman -S python-numpy` (Arch) or `brew install numpy` (Homebrew). Make sure it is installed for the Python 3.14 that UDAW uses.
+
+To see whether a plug-in found numpy, open it: a plug-in that needs numpy and cannot find it says so in its log and in its window.
 
 ---
 
@@ -305,6 +324,7 @@ All contributor instructions below are for the Windows build.
 | **Git** | To clone, branch and submit changes. |
 | **PowerShell** | Windows PowerShell 5.1 (already on Windows) or PowerShell 7 to run the build and test scripts. |
 | **Python 3.14 or newer** (optional) | Only if you work on Python plug-ins or run the helper scripts in `scripts/` that are written in Python. See [Installing Python](#installing-python). |
+| **numpy** (optional) | Only for Python plug-in work: the bundled Vocoder, Reverberator & Chorus, Virtual Guitar Rig, Stutter Edit and Tuner plug-ins need it. Install with `python -m pip install numpy`. See [Installing numpy](#installing-numpy). |
 | **A working audio output device** | Needed to run the program and to hear what you are changing. The tests do not need one. |
 
 You do **not** need any third-party audio, DSP, codec or GUI package, and you must not add one (see [Coding rules](#4-coding-rules-the-short-version)). Everything UDAW needs, apart from the items under "Bundled third-party code" below, is in this repository or ships with Delphi.
@@ -421,6 +441,7 @@ powershell -ExecutionPolicy Bypass -File scripts\test-windows.ps1 -Clean
 | Build succeeds but AI, update or licence features fail to connect | The OpenSSL DLLs are not beside `UDAW.exe`. Copy `ThirdParty\OpenSSL\Win64\*.dll` there. |
 | Strange crashes or behaviour after changing a shared unit | A stale compiled unit. Rebuild with `-Clean`. |
 | Python plug-ins report that Python was not found | Install Python 3.14 or newer and tick **Add python.exe to PATH**, then restart UDAW. See [Installing Python](#installing-python). |
+| A bundled plug-in (Vocoder, Reverb, Guitar Rig, Stutter Edit, Tuner) passes the sound through and says numpy is missing | Install numpy for the same Python: `python -m pip install numpy`, then restart UDAW. See [Installing numpy](#installing-numpy). |
 | Release build fails near the end (packaging) | Expected on a contributor machine. Use `-Config Debug`. |
 | Your settings or recent projects are different from normal | The scripts use `.udaw-home`. Unset `UDAW_HOME` to use your normal profile. |
 
@@ -446,6 +467,7 @@ Reviewers check against the [coding rules](docs/CodingRules.md). A change is com
 - [ ] `ThirdParty\OpenSSL\Win64\*.dll` sit beside `UDAW.exe` in `build\bin`.
 - [ ] `scripts\test-windows.ps1` finishes with exit code 0.
 - [ ] (Optional) Python 3.14 or newer installed, for Python plug-in work.
+- [ ] (Optional) numpy installed (`python -m pip install numpy`), for the bundled Python plug-ins.
 - [ ] You have read [docs/CodingRules.md](docs/CodingRules.md).
 
 ---

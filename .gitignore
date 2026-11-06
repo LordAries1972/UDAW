@@ -1,7 +1,6 @@
-*.exe
-*.dcu
 *.dcu
 *.exe
+*.zip
 .workspace
 .workspace.bak
 /.udaw-home
@@ -18,6 +17,3 @@
 /releases
 .mcp.json
 
-*.dcu
-*.exe
-*.zip

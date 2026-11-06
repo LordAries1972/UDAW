@@ -15,6 +15,10 @@
                    checksum every running copy of this exact build is
                    compared against at startup)
 
+  The package also carries the repository's Plugins\ and scripts\ folders
+  (Python caches, Plugins\prof and this script - it holds the signing key - are
+  left out).
+
   Nothing here uploads anything: the two files must still be uploaded to
   ultimanium.com by FTP (cgi-bin\ file into cgi-bin\, the .json into the site
   root) before running copies see the update.
@@ -65,6 +69,31 @@ try {
     if (Test-Path (Join-Path $BinDir 'resources')) {
         Copy-Item (Join-Path $BinDir 'resources') (Join-Path $stage 'resources') -Recurse
     }
+
+    # Plugins\ and scripts\ ship with every package, taken from the repository so the package never
+    # depends on what a previous run left in the bin folder. Left out: Python caches (__pycache__,
+    # *.pyc), the profiler's output (Plugins\prof) and scripts\package-release.ps1 itself, which
+    # holds the manifest signing key and must never reach a user's machine.
+    function Copy-ShippedFolder([string]$Name, [string[]]$Skip) {
+        $srcDir = Join-Path $root $Name
+        if (-not (Test-Path $srcDir)) { throw "$Name\ not found at $srcDir - it must ship with every package." }
+        $srcFull = (Resolve-Path $srcDir).Path.TrimEnd('\') + '\'
+        $count = 0
+        foreach ($f in Get-ChildItem $srcDir -Recurse -File) {
+            $rel = $f.FullName.Substring($srcFull.Length)
+            if (@($rel.Split('\') | Where-Object { $_ -ieq '__pycache__' }).Count -gt 0) { continue }
+            if ($f.Extension -ieq '.pyc') { continue }
+            if ($Skip -icontains $rel) { continue }
+            $dest = Join-Path (Join-Path $stage $Name) $rel
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+            Copy-Item $f.FullName $dest
+            $count++
+        }
+        if ($count -eq 0) { throw "$Name\ held nothing to ship." }
+        Write-Host "    shipping $Name\ ($count files)"
+    }
+    Copy-ShippedFolder 'Plugins' @('prof')
+    Copy-ShippedFolder 'scripts' @('package-release.ps1')
 
     $exeSha = (Get-FileHash (Join-Path $stage 'UDAW.exe') -Algorithm SHA256).Hash.ToLower()
 

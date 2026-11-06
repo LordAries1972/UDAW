@@ -123,8 +123,10 @@ WHAT THIS SCRIPT DOES, IN ORDER
        is on this machine; never fails the build if it isn't, or if the edit
        fails.
     6. Release only: packages the build as an over-the-air update by running
-       scripts\package-release.ps1 -BinDir <OutputDir>. A packaging failure
-       DOES fail this script. Nothing is uploaded - that is still a manual FTP.
+       scripts\package-release.ps1 -BinDir <OutputDir>. The package carries the
+       Plugins\ and scripts\ folders from the repository too (minus Python
+       caches, the profiler output, and package-release.ps1 itself, which holds
+       the signing key). A packaging failure DOES fail this script. Nothing is uploaded - that is still a manual FTP.
 
 ENVIRONMENT
     BDS        Path to the Delphi 12 (Studio 23.0) install root. If unset,

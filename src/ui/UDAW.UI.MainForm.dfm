@@ -5799,6 +5799,22 @@ object frmMain: TfrmMain
                   Caption = ' '
                 end
               end
+              object memAudio: TGLMemo
+                Left = 0
+                Top = 64
+                Width = 952
+                Height = 426
+                Align = alClient
+                Font.Charset = DEFAULT_CHARSET
+                Font.Color = clWindowText
+                Font.Height = -12
+                Font.Name = 'Consolas'
+                Font.Style = []
+                ParentFont = False
+                PlainText = True
+                ScrollBars = ssVertical
+                TabOrder = 1
+              end
             end
             object tabDSP: TGLPage
               Caption = 'DSP'
@@ -5874,6 +5890,22 @@ object frmMain: TfrmMain
                 Align = alBottom
                 BevelOuter = bvNone
                 TabOrder = 1
+                object memDspReadout: TGLMemo
+                  Left = 0
+                  Top = 0
+                  Width = 952
+                  Height = 150
+                  Align = alClient
+                  Font.Charset = DEFAULT_CHARSET
+                  Font.Color = clWindowText
+                  Font.Height = -12
+                  Font.Name = 'Consolas'
+                  Font.Style = []
+                  ParentFont = False
+                  PlainText = True
+                  ScrollBars = ssVertical
+                  TabOrder = 0
+                end
               end
               object pbSpectrum: TGLView
                 Left = 0
@@ -5931,6 +5963,22 @@ object frmMain: TfrmMain
                 Align = alBottom
                 BevelOuter = bvNone
                 TabOrder = 1
+                object memGraph: TGLMemo
+                  Left = 0
+                  Top = 0
+                  Width = 952
+                  Height = 170
+                  Align = alClient
+                  Font.Charset = DEFAULT_CHARSET
+                  Font.Color = clWindowText
+                  Font.Height = -12
+                  Font.Name = 'Consolas'
+                  Font.Style = []
+                  ParentFont = False
+                  PlainText = True
+                  ScrollBars = ssVertical
+                  TabOrder = 0
+                end
               end
               object pbGraph: TGLView
                 Left = 0
@@ -5976,6 +6024,22 @@ object frmMain: TfrmMain
                   Height = 23
                   TabOrder = 1
                 end
+              end
+              object memWav: TGLMemo
+                Left = 0
+                Top = 80
+                Width = 952
+                Height = 410
+                Align = alClient
+                Font.Charset = DEFAULT_CHARSET
+                Font.Color = clWindowText
+                Font.Height = -12
+                Font.Name = 'Consolas'
+                Font.Style = []
+                ParentFont = False
+                PlainText = True
+                ScrollBars = ssVertical
+                TabOrder = 1
               end
             end
             object tabSecure: TGLPage
@@ -6104,6 +6168,22 @@ object frmMain: TfrmMain
                 TabOrder = 9
                 OnClick = btnSecProbeClick
               end
+              object memSecure: TGLMemo
+                Left = 12
+                Top = 154
+                Width = 920
+                Height = 320
+                Anchors = [akLeft, akTop, akRight, akBottom]
+                Font.Charset = DEFAULT_CHARSET
+                Font.Color = clWindowText
+                Font.Height = -12
+                Font.Name = 'Consolas'
+                Font.Style = []
+                ParentFont = False
+                PlainText = True
+                ScrollBars = ssVertical
+                TabOrder = 10
+              end
             end
             object tabMP3: TGLPage
               Caption = 'MP3'
@@ -6132,6 +6212,22 @@ object frmMain: TfrmMain
                   TabOrder = 0
                 end
               end
+              object memMp3: TGLMemo
+                Left = 0
+                Top = 36
+                Width = 952
+                Height = 454
+                Align = alClient
+                Font.Charset = DEFAULT_CHARSET
+                Font.Color = clWindowText
+                Font.Height = -12
+                Font.Name = 'Consolas'
+                Font.Style = []
+                ParentFont = False
+                PlainText = True
+                ScrollBars = ssVertical
+                TabOrder = 1
+              end
             end
             object tabMP4: TGLPage
               Caption = 'MP4'
@@ -6159,6 +6255,22 @@ object frmMain: TfrmMain
                   Height = 23
                   TabOrder = 0
                 end
+              end
+              object memMp4: TGLMemo
+                Left = 0
+                Top = 80
+                Width = 952
+                Height = 410
+                Align = alClient
+                Font.Charset = DEFAULT_CHARSET
+                Font.Color = clWindowText
+                Font.Height = -12
+                Font.Name = 'Consolas'
+                Font.Style = []
+                ParentFont = False
+                PlainText = True
+                ScrollBars = ssVertical
+                TabOrder = 1
               end
             end
             object tabScope: TGLPage
@@ -6219,6 +6331,22 @@ object frmMain: TfrmMain
                 Align = alBottom
                 BevelOuter = bvNone
                 TabOrder = 1
+                object memScopeReadout: TGLMemo
+                  Left = 0
+                  Top = 0
+                  Width = 952
+                  Height = 150
+                  Align = alClient
+                  Font.Charset = DEFAULT_CHARSET
+                  Font.Color = clWindowText
+                  Font.Height = -12
+                  Font.Name = 'Consolas'
+                  Font.Style = []
+                  ParentFont = False
+                  PlainText = True
+                  ScrollBars = ssVertical
+                  TabOrder = 0
+                end
               end
               object pbScope: TGLView
                 Left = 0
@@ -6286,6 +6414,22 @@ object frmMain: TfrmMain
                   TabOrder = 2
                   Text = '2.0'
                 end
+              end
+              object memAdvDspReadout: TGLMemo
+                Left = 0
+                Top = 72
+                Width = 952
+                Height = 418
+                Align = alClient
+                Font.Charset = DEFAULT_CHARSET
+                Font.Color = clWindowText
+                Font.Height = -12
+                Font.Name = 'Consolas'
+                Font.Style = []
+                ParentFont = False
+                PlainText = True
+                ScrollBars = ssVertical
+                TabOrder = 1
               end
             end
           end
@@ -7485,6 +7629,11 @@ object frmMain: TfrmMain
             object mnuTlFxSplitStems: TMenuItem
               Tag = 38
               Caption = 'Split Stems (Drums/Bass/Vocals/Other)'
+              OnClick = TlFxMenuClick
+            end
+            object mnuTlFxScanLoops: TMenuItem
+              Tag = 218
+              Caption = 'Stem Splitting - Scan Loop Segments...'
               OnClick = TlFxMenuClick
             end
           end
@@ -9242,6 +9391,10 @@ object frmMain: TfrmMain
           Caption = 'Set Loop to Selection'
           OnClick = btnTlLoopToRangeClick
         end
+        object mnuTlLoopClear: TMenuItem
+          Caption = 'Clear Loop'
+          OnClick = btnTlLoopClearClick
+        end
       end
       object mnuTlBrowserSep: TMenuItem
         Caption = '-'
@@ -9624,25 +9777,31 @@ object frmMain: TfrmMain
       object mnuPySep: TMenuItem
         Caption = '-'
       end
-      object mnuPyEditor: TMenuItem
-        Caption = 'Open Python Editor...'
-        OnClick = mnuPyEditorClick
+      object mnuPlgOpen: TMenuItem
+        Caption = 'Open'
+        object mnuPyEditor: TMenuItem
+          Caption = 'Python Editor...'
+          OnClick = mnuPyEditorClick
+        end
+        object mnuPyExample: TMenuItem
+          Caption = 'Example: Guitar Overdrive / Distortion'
+          OnClick = mnuPyExampleClick
+        end
+        object mnuPyFolder: TMenuItem
+          Caption = 'Plug-ins Folder'
+          OnClick = mnuPyFolderClick
+        end
+      end
+      object mnuPlgOpenSep: TMenuItem
+        Caption = '-'
       end
       object mnuPyNew: TMenuItem
         Caption = 'New Python Plug-in...'
         OnClick = mnuPyNewClick
       end
-      object mnuPyExample: TMenuItem
-        Caption = 'Open Example: Guitar Overdrive / Distortion'
-        OnClick = mnuPyExampleClick
-      end
       object mnuPlgRescan: TMenuItem
         Caption = 'Rescan Plug-ins'
         OnClick = mnuPlgRescanClick
-      end
-      object mnuPyFolder: TMenuItem
-        Caption = 'Open Plug-ins Folder'
-        OnClick = mnuPyFolderClick
       end
     end
     object mnuHelp: TMenuItem
@@ -10932,6 +11091,11 @@ object frmMain: TfrmMain
         object pmTlFxSplitStems: TMenuItem
           Tag = 38
           Caption = 'Split Stems (Drums/Bass/Vocals/Other)'
+          OnClick = TlFxMenuClick
+        end
+        object pmTlFxScanLoops: TMenuItem
+          Tag = 218
+          Caption = 'Stem Splitting - Scan Loop Segments...'
           OnClick = TlFxMenuClick
         end
       end
@@ -12225,6 +12389,10 @@ object frmMain: TfrmMain
           Caption = 'Set Loop to Selection'
           OnClick = btnTlLoopToRangeClick
         end
+        object pmTlLoopClear: TMenuItem
+          Caption = 'Clear Loop'
+          OnClick = btnTlLoopClearClick
+        end
       end
       object pmTlPlay: TMenuItem
         Caption = 'Play'
@@ -12367,6 +12535,15 @@ object frmMain: TfrmMain
         Caption = 'Set Loop to Selection'
         OnClick = btnTlLoopToRangeClick
       end
+      object pmTlrLoopClear: TMenuItem
+        Caption = 'Clear Loop'
+        OnClick = btnTlLoopClearClick
+      end
+    end
+    object pmTlrClearLoop: TMenuItem
+      Caption = 'Clear Loop Area'
+      Hint = 'Remove the marked loop area from the ruler.'
+      OnClick = btnTlLoopClearClick
     end
     object pmTimelineRulerShowLog: TMenuItem
       Caption = 'Open Log...'
@@ -13356,24 +13533,6 @@ object frmMain: TfrmMain
   object memSysPaths: TLogSink
   end
   object memSystem: TLogSink
-  end
-  object memAudio: TLogSink
-  end
-  object memDspReadout: TLogSink
-  end
-  object memGraph: TLogSink
-  end
-  object memWav: TLogSink
-  end
-  object memSecure: TLogSink
-  end
-  object memMp3: TLogSink
-  end
-  object memMp4: TLogSink
-  end
-  object memScopeReadout: TLogSink
-  end
-  object memAdvDspReadout: TLogSink
   end
   object memBrowser: TLogSink
   end

@@ -25,6 +25,7 @@ type
     Name: string;
     Vendor: string;
     Stamp: string;   // "<size>:<filetime>" - cache validity key
+    Instrument: Boolean;   // a synth / sampler: driven by MIDI, makes its own sound
   end;
 
   { ADone of ATotal candidates probed; ACurrent is the file being probed. }
@@ -61,7 +62,7 @@ uses
   UDAW.Mixer.VST2, UDAW.Mixer.VST3;
 
 const
-  CACHE_HEADER = 'UDAW-PLUGINS 1';
+  CACHE_HEADER = 'UDAW-PLUGINS 2';
 
 constructor TPluginScanner.Create;
 begin
@@ -221,15 +222,18 @@ begin
       p.Path := cands[i];
       p.Stamp := stamp;
       p.Vendor := '';
+      p.Instrument := False;
       try
         if ext = '.vst3' then
         begin
           p.Format := pfVST3;
           v3 := TVST3Host.Create;
           try
+            v3.RequireEffect := False;       { instruments are listed too }
             v3.LoadOnly(cands[i]);
             p.Name := v3.EffectName;
             p.Vendor := v3.VendorString;
+            p.Instrument := v3.IsSynth;
           finally
             v3.Free;
           end;
@@ -239,9 +243,11 @@ begin
           p.Format := pfVST2;
           v2 := TVST2Host.Create;
           try
+            v2.RequireEffect := False;       { instruments are listed too }
             v2.LoadOnly(cands[i]);
             p.Name := v2.EffectName;
             p.Vendor := v2.VendorString;
+            p.Instrument := v2.IsSynth;
           finally
             v2.Free;
           end;
@@ -296,7 +302,7 @@ begin
     for i := 0 to FPlugins.Count - 1 do
     begin
       p := FPlugins[i];
-      sl.Add(Format('P'#9'%d'#9'%s'#9'%s'#9'%s'#9'%s', [Ord(p.Format), p.Path, p.Name, p.Vendor, p.Stamp]));
+      sl.Add(Format('P'#9'%d'#9'%s'#9'%s'#9'%s'#9'%s', [Ord(p.Format), p.Path, p.Name, p.Vendor, p.Stamp]) + #9 + IntToStr(Ord(p.Instrument)));
     end;
     ForceDirectories(ExtractFilePath(AFileName));
     sl.SaveToFile(AFileName, TEncoding.UTF8);
@@ -323,13 +329,14 @@ begin
       f := sl[i].Split([#9]);
       if (Length(f) = 2) and (f[0] = 'R') then
         AddRoot(f[1])
-      else if (Length(f) = 6) and (f[0] = 'P') then
+      else if (Length(f) = 7) and (f[0] = 'P') then
       begin
         p.Format := TPluginFormat(StrToIntDef(f[1], 0) and 1);
         p.Path := f[2];
         p.Name := f[3];
         p.Vendor := f[4];
         p.Stamp := f[5];
+        p.Instrument := f[6] = '1';
         if FileExists(p.Path) or DirectoryExists(p.Path) then FPlugins.Add(p);
       end;
     end;

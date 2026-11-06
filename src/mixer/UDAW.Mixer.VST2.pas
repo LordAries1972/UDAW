@@ -25,16 +25,19 @@ unit UDAW.Mixer.VST2;
   path a given plugin supports, save/restore actually produces the plugin's
   real state, not a placeholder.
 
-  What's deliberately not attempted: VST3 (a completely different, COM-based
-  ABI that needs real COM interop infrastructure this project doesn't have),
-  and multi-bus / sidechain-aware VST2 routing (kVstEvents/MIDI and
-  speaker-arrangement opcodes are not sent - this host is an audio-in/
-  audio-out effect host, matching what a mixer insert needs). }
+  Also hosted: MIDI in (effProcessEvents with VstMidiEvents, sample-accurate
+  delta frames) and MIDI out (audioMasterProcessEvents), instruments (no audio
+  inputs), VstTimeInfo transport/tempo/bar/cycle info for tempo-synced
+  plugins, programs/presets, bypass, tail and latency, pin properties (multi-
+  output instruments, sidechain inputs), speaker arrangement, parameter
+  properties / text entry, and the editor callbacks (size window, automate,
+  begin/end edit). VST3 lives in UDAW.Mixer.VST3. }
 
 interface
 
 uses
-  Windows, SysUtils, Classes, Math, System.Types, System.NetEncoding;
+  Windows, SysUtils, Classes, Math, SyncObjs, System.Types, System.NetEncoding,
+  UDAW.Mixer.PluginHost;
 
 const
   { ---- dispatcher opcodes (AEffect->dispatcher) ---- }
@@ -56,33 +59,56 @@ const
   effEditIdle             = 19;
   effGetChunk             = 23;
   effSetChunk             = 24;
+  effProcessEvents        = 25;
   effCanBeAutomated       = 26;
+  effString2Parameter     = 27;
+  effGetProgramNameIndexed = 29;
+  effGetInputProperties   = 33;
+  effGetOutputProperties  = 34;
+  effGetPlugCategory      = 35;
+  effSetSpeakerArrangement = 42;
+  effSetBypass            = 44;
   effGetEffectName        = 45;
   effGetVendorString       = 47;
   effGetProductString      = 48;
   effGetVendorVersion      = 49;
   effCanDo                = 51;
+  effGetTailSize          = 52;
+  effGetParameterProperties = 56;
   effGetVstVersion        = 58;
+  effBeginSetProgram      = 67;
+  effEndSetProgram        = 68;
   effStartProcess         = 71;
   effStopProcess          = 72;
+  effGetNumMidiInputChannels  = 78;
+  effGetNumMidiOutputChannels = 79;
 
   { ---- host callback opcodes (audioMaster) ---- }
   audioMasterAutomate         = 0;
   audioMasterVersion          = 1;
   audioMasterCurrentId        = 2;
   audioMasterIdle             = 3;
+  audioMasterWantMidi         = 6;
   audioMasterGetTime          = 7;
+  audioMasterProcessEvents    = 8;
+  audioMasterGetNumAutomatableParameters = 11;
+  audioMasterIOChanged        = 13;
+  audioMasterNeedIdle         = 14;
   audioMasterSizeWindow       = 15;
   audioMasterGetSampleRate    = 16;
   audioMasterGetBlockSize     = 17;
   audioMasterGetInputLatency  = 18;
   audioMasterGetOutputLatency = 19;
+  audioMasterWillReplaceOrAccumulate = 22;
+  audioMasterGetCurrentProcessLevel = 23;
+  audioMasterGetAutomationState = 24;
   audioMasterGetVendorString  = 32;
   audioMasterGetProductString = 33;
   audioMasterGetVendorVersion = 34;
   audioMasterCanDo            = 37;
   audioMasterGetLanguage      = 38;
-  audioMasterUpdateDisplay    = 41;
+  audioMasterGetDirectory     = 41;
+  audioMasterUpdateDisplay    = 42;
   audioMasterBeginEdit        = 43;
   audioMasterEndEdit          = 44;
 
@@ -92,6 +118,40 @@ const
   effFlagsProgramChunks      = 1 shl 5;
   effFlagsIsSynth            = 1 shl 8;
   effFlagsCanDoubleReplacing = 1 shl 12;
+
+  { VstTimeInfo.flags }
+  kVstTransportChanged  = 1 shl 0;
+  kVstTransportPlaying  = 1 shl 1;
+  kVstTransportCycleActive = 1 shl 2;
+  kVstTransportRecording = 1 shl 3;
+  kVstNanosValid        = 1 shl 8;
+  kVstPpqPosValid       = 1 shl 9;
+  kVstTempoValid        = 1 shl 10;
+  kVstBarsValid         = 1 shl 11;
+  kVstCyclePosValid     = 1 shl 12;
+  kVstTimeSigValid      = 1 shl 13;
+
+  { effGetPlugCategory results }
+  kPlugCategUnknown = 0;
+  kPlugCategEffect = 1;
+  kPlugCategSynth = 2;
+  kPlugCategGenerator = 11;
+
+  { VstParameterProperties.flags }
+  kVstParameterIsSwitch = 1 shl 0;
+  kVstParameterUsesIntegerMinMax = 1 shl 1;
+  kVstParameterUsesFloatStep = 1 shl 2;
+  kVstParameterUsesIntStep = 1 shl 3;
+
+  { VstPinProperties.flags }
+  kVstPinIsActive = 1 shl 0;
+  kVstPinIsStereo = 1 shl 1;
+
+  { VstSpeakerArrangement types }
+  kSpeakerArrMono = 12;
+  kSpeakerArrStereo = 1;
+
+  VST2_MAX_EVENTS = 2048;       // queued MIDI events per block, each direction
 
   kEffectMagic = (Ord('V') shl 24) or (Ord('s') shl 16) or (Ord('t') shl 8) or Ord('P');
   VST_MAX_STATE_BYTES = 64 * 1024 * 1024;
@@ -143,17 +203,59 @@ type
   end;
   PVstERect = ^TVstERect;
 
+  { VstTimeInfo: what audioMasterGetTime returns (88 bytes, 8-byte aligned). }
+  TVstTimeInfo = record
+    SamplePos, SampleRate, NanoSeconds, PpqPos, Tempo, BarStartPos,
+    CycleStartPos, CycleEndPos: Double;
+    TimeSigNumerator, TimeSigDenominator, SmpteOffset, SmpteFrameRate,
+    SamplesToNextClock, Flags: Integer;
+  end;
+  PVstTimeInfo = ^TVstTimeInfo;
+
+  { VstMidiEvent (kVstMidiType = 1), 32 bytes. }
+  TVstMidiEvent = record
+    EventType, ByteSize, DeltaFrames, Flags, NoteLength, NoteOffset: Integer;
+    MidiData: array[0..3] of Byte;
+    Detune, NoteOffVelocity, Reserved1, Reserved2: ShortInt;
+  end;
+  PVstMidiEvent = ^TVstMidiEvent;
+
+  { VstEvents with room for VST2_MAX_EVENTS pointers (the C header declares 2). }
+  TVstEventsBlock = record
+    NumEvents: Integer;
+    Reserved: NativeInt;
+    Events: array[0..VST2_MAX_EVENTS - 1] of Pointer;
+  end;
+  PVstEventsBlock = ^TVstEventsBlock;
+
+  TVstParameterProperties = record
+    StepFloat, SmallStepFloat, LargeStepFloat: Single;
+    Lbl: array[0..63] of AnsiChar;
+    Flags: Integer;
+    MinInteger, MaxInteger, StepInteger, LargeStepInteger: Integer;
+    ShortLabel: array[0..7] of AnsiChar;
+    DisplayIndex, Category, NumParametersInCategory, Reserved: SmallInt;
+    CategoryLabel: array[0..23] of AnsiChar;
+    Future: array[0..15] of Byte;
+  end;
+
+  TVstPinProperties = record
+    Lbl: array[0..63] of AnsiChar;
+    Flags: Integer;
+    ArrangementType: Integer;
+    ShortLabel: array[0..7] of AnsiChar;
+    Future: array[0..47] of Byte;
+  end;
+
   EVST2Error = class(Exception);
 
   { One loaded, opened plugin instance. Not thread-safe by itself - a mixer
     insert calls Process only from the block that owns it, matching every
     other TAudioNode. }
-  TVST2Host = class
+  TVST2Host = class(TPluginHostBase)
   private
     FModuleHandle: HMODULE;
     FEffect: PAEffect;
-    FPath: string;
-    FSampleRate: Integer;
     FBlockSize: Integer;
     FOpened: Boolean;
     FProcessing: Boolean;
@@ -163,6 +265,16 @@ type
     FScratch: array of Single;   // backing store for FInBuf/FOutBuf (2 * maxch * maxframes)
     FMaxFrames: Integer;
     FChannels: Integer;
+    FTimeInfo: TVstTimeInfo;
+    FStopwatch: Int64;
+    FStopFreq: Int64;
+    FEvPlay: array[0..VST2_MAX_EVENTS - 1] of TVstMidiEvent;
+    FEvBlock: TVstEventsBlock;
+    FIOChanged: Boolean;
+    FMidiScratch: array[0..PLUGIN_MAX_MIDI - 1] of TPluginMidi;
+    procedure DeliverEvents(AFrames: Integer);
+    procedure AdvanceTransport(AFrames: Integer);
+    function HostCanDo(const AText: string): Integer;
     function DispatchOpcode(AOpcode, AIndex: Integer; AValue: NativeInt; APtr: Pointer;
       AOpt: Single): NativeInt;
     function HandleHostCallback(AOpcode, AIndex: Integer; AValue: NativeInt;
@@ -175,54 +287,101 @@ type
       it for processing yet - used to scan a plugin (name/vendor/param count)
       before committing to inserting it. Raises EVST2Error on any failure -
       a bad/incompatible DLL never leaves this host silently "working". }
-    procedure LoadOnly(const APath: string);
+    procedure LoadOnly(const APath: string); override;
     { LoadOnly, then effOpen + effMainsChanged(1) + Configure - ready to
       Process. }
-    procedure LoadAndOpen(const APath: string; ASampleRate, AMaxFrames, AChannels: Integer);
-    procedure Configure(ASampleRate, AMaxFrames, AChannels: Integer);
-    procedure Close;
+    procedure LoadAndOpen(const APath: string; ASampleRate, AMaxFrames, AChannels: Integer); override;
+    procedure Configure(ASampleRate, AMaxFrames, AChannels: Integer); override;
+    procedure Close; override;
 
     { RT-safe once Configure has sized the scratch buffers: deinterleaves
       AIn/AOut's channel pointers into the plugin's expected per-channel
       float arrays and calls processReplacing (or process, for the rare
       plugin that never adopted the replacing API). }
-    procedure Process(const AIn, AOut: array of System.PSingle; AFrames: Integer);
-    procedure Reset;
+    procedure Process(const AIn, AOut: array of System.PSingle; AFrames: Integer); override;
+    procedure Reset; override;
 
-    function IsLoaded: Boolean;
-    function HasEditor: Boolean;
-    function EffectName: string;
-    function VendorString: string;
+    function IsLoaded: Boolean; override;
+    function HasEditor: Boolean; override;
+    function EffectName: string; override;
+    function VendorString: string; override;
     function ProductString: string;
     function UniqueID: Integer;
-    function NumInputs: Integer;
-    function NumOutputs: Integer;
+    function NumInputs: Integer; override;
+    function NumOutputs: Integer; override;
 
     { ---- parameters (by index, for automation) ---- }
-    function ParamCount: Integer;
-    function ParamName(AIndex: Integer): string;
-    function ParamLabel(AIndex: Integer): string;
-    function ParamDisplay(AIndex: Integer): string;
-    function GetParam(AIndex: Integer): Single;    // 0..1, VST convention
-    procedure SetParam(AIndex: Integer; AValue: Single);
+    function ParamCount: Integer; override;
+    function ParamName(AIndex: Integer): string; override;
+    function ParamLabel(AIndex: Integer): string; override;
+    function ParamDisplay(AIndex: Integer): string; override;
+    function GetParam(AIndex: Integer): Single; override;   // 0..1, VST convention
+    procedure SetParam(AIndex: Integer; AValue: Single); override;
 
     { ---- state persistence ---- }
     { Program-chunk state if the plugin advertises effFlagsProgramChunks,
       else a per-parameter float dump - either way, real recoverable state,
       base64-encoded so it fits in the mixer's text-format INSERT line. }
-    function SaveStateBase64: string;
-    procedure LoadStateBase64(const AState: string);
+    function SaveStateBase64: string; override;
+    procedure LoadStateBase64(const AState: string); override;
 
     { ---- native editor GUI (effEditOpen) ---- }
     { AParentWnd is the HWND that will host the plugin's own window (a
       TPanel's Handle, typically). Returns the plugin-requested size. }
-    function OpenEditor(AParentWnd: HWND; out AWidth, AHeight: Integer): Boolean;
-    procedure CloseEditor;
-    procedure EditorIdle;   // call periodically (e.g. a 30 ms timer) while open
+    function OpenEditor(AParentWnd: HWND; out AWidth, AHeight: Integer): Boolean; override;
+    procedure CloseEditor; override;
+    procedure EditorIdle; override;   // call periodically (e.g. a 30 ms timer) while open
     property EditorOpen: HWND read FEditorWnd;
 
-    property Path: string read FPath;
-    property SampleRate: Integer read FSampleRate;
+    { ---- instruments, MIDI and transport ---- }
+    function IsSynth: Boolean; override;
+    function Category: Integer;                 // kPlugCateg*
+    function NumMidiInputChannels: Integer;
+    function NumMidiOutputChannels: Integer;
+    function WantsMidi: Boolean; override;      // synth, or reports MIDI input channels
+
+    { ---- programs / presets, bypass, tail, latency ---- }
+    function ProgramCount: Integer; override;
+    function CurrentProgram: Integer; override;
+    procedure SetProgram(AIndex: Integer); override;
+    function ProgramName(AIndex: Integer): string; override;
+    function SupportsBypass: Boolean; override;
+    procedure SetBypass(ABypass: Boolean); override;
+    function TailSamples: Integer; override;    // 0 unknown, 1 none, else samples
+    function LatencySamples: Integer; override;
+    function PluginCanDo(const AText: string): Integer;   // 1 yes, -1 no, 0 don't know
+    function VstVersion: Integer;
+    function VendorVersion: Integer;
+
+    { ---- parameters, extended ---- }
+    function ParamCanAutomate(AIndex: Integer): Boolean; override;
+    function ParamProperties(AIndex: Integer; out AProps: TVstParameterProperties): Boolean;
+    function SetParamFromText(AIndex: Integer; const AText: string): Boolean; override;
+
+    { ---- buses ---- }
+    function InputPinLabel(AIndex: Integer): string;
+    function OutputPinLabel(AIndex: Integer): string;
+    function InputPinIsStereo(AIndex: Integer): Boolean;
+    function OutputPinIsStereo(AIndex: Integer): Boolean;
+    function SetSpeakerArrangement(AInputs, AOutputs: Integer): Boolean;  // channel counts 1 or 2
+    { After Process: the plugin's output channel ACh (also beyond the channels the caller asked
+      for), valid until the next Process; nil when out of range. Lets a multi-output instrument
+      be routed to several mixer channels. }
+    function OutputChannel(ACh: Integer): System.PSingle; override;
+    { True once after a plugin called audioMasterIOChanged (its I/O layout changed): call
+      Configure again. }
+    function TakeIOChanged: Boolean;
+
+    { the editor's size as the plugin reports it now (some only know it after effEditOpen) }
+
+    { ---- the common plug-in host interface (UDAW.Mixer.PluginHost) ---- }
+    function FormatName: string; override;
+    procedure SetTransport(const ATransport: TPluginTransport); override;
+    function ParamSteps(AIndex: Integer): Integer; override;
+    function ParamIsSwitch(AIndex: Integer): Boolean; override;
+    function IsEditorOpen: Boolean; override;
+    function EditorSize(out AWidth, AHeight: Integer): Boolean; override;
+    function TakeRestartRequest: Boolean; override;
   end;
 
 implementation
@@ -276,6 +435,14 @@ end;
 constructor TVST2Host.Create;
 begin
   inherited Create;
+  QueryPerformanceFrequency(FStopFreq);
+  QueryPerformanceCounter(FStopwatch);
+  FillChar(FTimeInfo, SizeOf(FTimeInfo), 0);
+  FTimeInfo.Tempo := 120;
+  FTimeInfo.TimeSigNumerator := 4;
+  FTimeInfo.TimeSigDenominator := 4;
+  FTimeInfo.SampleRate := 44100;
+  FSampleRate := 44100;
   if GHosts = nil then GHosts := TList.Create;
   GHosts.Add(Self);
 end;
@@ -294,15 +461,38 @@ begin
   Result := FEffect^.Dispatcher(FEffect, AOpcode, AIndex, AValue, APtr, AOpt);
 end;
 
+function TVST2Host.HostCanDo(const AText: string): Integer;
+const
+  Supported: array[0..11] of string = ('sendVstEvents', 'sendVstMidiEvent', 'sendVstTimeInfo',
+    'receiveVstEvents', 'receiveVstMidiEvent', 'reportConnectionChanges', 'acceptIOChanges',
+    'sizeWindow', 'startStopProcess', 'sendVstMidiEventFlagIsRealtime', 'supplyIdle', 'supportShell');
+var
+  i: Integer;
+begin
+  Result := 0;
+  for i := Low(Supported) to High(Supported) do
+    if SameText(AText, Supported[i]) then
+    begin
+      Result := 1;
+      Exit;
+    end;
+end;
+
 function TVST2Host.HandleHostCallback(AOpcode, AIndex: Integer; AValue: NativeInt;
   APtr: Pointer; AOpt: Single): NativeInt;
 var
   s: UTF8String;
+  ev: PVstEventsBlock;
+  me: PVstMidiEvent;
+  i, n: Integer;
+  t: Int64;
 begin
   case AOpcode of
     audioMasterVersion:          Result := 2400;
     audioMasterCurrentId:        Result := 0;
     audioMasterIdle:             Result := 0;
+    audioMasterNeedIdle:         Result := 1;
+    audioMasterWantMidi:         Result := 1;
     audioMasterGetSampleRate:    Result := FSampleRate;
     audioMasterGetBlockSize:     Result := FBlockSize;
     audioMasterGetInputLatency:  Result := 0;
@@ -317,14 +507,73 @@ begin
         Result := 1;
       end;
     audioMasterGetVendorVersion: Result := 1000;
-    audioMasterCanDo:            Result := 0;   { conservative: claim no optional features }
+    audioMasterCanDo:
+      if APtr <> nil then Result := HostCanDo(string(AnsiString(PAnsiChar(APtr))))
+      else Result := 0;
     audioMasterGetLanguage:      Result := 1;    { kVstLangEnglish }
     audioMasterUpdateDisplay:    Result := 0;
-    audioMasterBeginEdit:        Result := 0;
-    audioMasterEndEdit:          Result := 0;
-    audioMasterAutomate:         Result := 0;   { parameter changed from the plugin's own UI;
-                                                   the UI polls GetParam instead of subscribing }
-    audioMasterGetTime:          Result := 0;   { no VstTimeInfo offered - insert-effect scope }
+    audioMasterBeginEdit:
+      begin
+        if Assigned(FOnBeginEdit) then FOnBeginEdit(AIndex);
+        Result := 1;
+      end;
+    audioMasterEndEdit:
+      begin
+        if Assigned(FOnEndEdit) then FOnEndEdit(AIndex);
+        Result := 1;
+      end;
+    audioMasterAutomate:
+      begin
+        { the plugin's own UI moved a parameter; AOpt is the new 0..1 value }
+        if Assigned(FOnAutomate) then FOnAutomate(AIndex, AOpt);
+        Result := 1;
+      end;
+    audioMasterGetTime:
+      begin
+        QueryPerformanceCounter(t);
+        if FStopFreq > 0 then
+          FTimeInfo.NanoSeconds := (t - FStopwatch) * 1.0e9 / FStopFreq;
+        FTimeInfo.SampleRate := FSampleRate;
+        Result := NativeInt(@FTimeInfo);
+      end;
+    audioMasterProcessEvents:
+      begin
+        { MIDI a plugin sends out; only MIDI events (type 1) are kept }
+        Result := 0;
+        ev := PVstEventsBlock(APtr);
+        if ev <> nil then
+        begin
+          n := ev^.NumEvents;
+          if n > VST2_MAX_EVENTS then n := VST2_MAX_EVENTS;
+          for i := 0 to n - 1 do
+          begin
+            me := PVstMidiEvent(ev^.Events[i]);
+            if (me <> nil) and (me^.EventType = 1) then
+              PushMidiOut(me^.MidiData[0], me^.MidiData[1], me^.MidiData[2], me^.DeltaFrames);
+          end;
+          Result := 1;
+        end;
+      end;
+    audioMasterIOChanged:
+      begin
+        FIOChanged := True;
+        Result := 1;
+      end;
+    audioMasterSizeWindow:
+      begin
+        if Assigned(FOnSizeWindow) then
+        begin
+          FOnSizeWindow(AIndex, Integer(AValue));
+          Result := 1;
+        end
+        else
+          Result := 0;
+      end;
+    audioMasterWillReplaceOrAccumulate: Result := 1;   { replace }
+    audioMasterGetCurrentProcessLevel:  Result := 2;   { kVstProcessLevelRealtime }
+    audioMasterGetAutomationState:      Result := 1;   { off }
+    audioMasterGetNumAutomatableParameters:
+      if FEffect <> nil then Result := FEffect^.NumParams else Result := 0;
   else
     Result := 0;
   end;
@@ -359,9 +608,14 @@ begin
     if FEffect^.Magic <> kEffectMagic then
       raise EVST2Error.CreateFmt('VST2: "%s" AEffect magic mismatch - not a valid VST2 effect',
         [APath]);
-    if (FEffect^.Flags and effFlagsIsSynth <> 0) or
-       (FEffect^.NumInputs <= 0) or (FEffect^.NumOutputs <= 0) then
-      raise EVST2Error.CreateFmt('VST2: "%s" is not an audio-in/audio-out effect', [APath]);
+    if FRequireEffect then
+    begin
+      if (FEffect^.Flags and effFlagsIsSynth <> 0) or
+         (FEffect^.NumInputs <= 0) or (FEffect^.NumOutputs <= 0) then
+        raise EVST2Error.CreateFmt('VST2: "%s" is not an audio-in/audio-out effect', [APath]);
+    end
+    else if FEffect^.NumOutputs <= 0 then
+      raise EVST2Error.CreateFmt('VST2: "%s" has no audio outputs', [APath]);
     if (FEffect^.NumInputs > 64) or (FEffect^.NumOutputs > 64) or
        (FEffect^.NumParams < 0) or (FEffect^.NumParams > 16384) then
       raise EVST2Error.CreateFmt('VST2: "%s" reports unreasonable I/O or parameter counts',
@@ -464,10 +718,13 @@ begin
   for ch := 0 to High(FOutBuf) do
     FillChar(FOutBuf[ch]^, n * SizeOf(Single), 0);
 
+  DeliverEvents(n);
+
   if (FEffect^.Flags and effFlagsCanReplacing <> 0) and Assigned(FEffect^.ProcessReplacing) then
     FEffect^.ProcessReplacing(FEffect, @FInBuf[0], @FOutBuf[0], n)
   else if Assigned(FEffect^.ProcessDeprecated) then
     FEffect^.ProcessDeprecated(FEffect, @FInBuf[0], @FOutBuf[0], n);
+  AdvanceTransport(n);
 
   for ch := 0 to High(AOut) do
   begin
@@ -481,9 +738,329 @@ begin
     insert in this host's chain (see UDAW.Audio.Graph.Nodes) }
 end;
 
+{ ---- MIDI, transport ---- }
+
+procedure TVST2Host.AdvanceTransport(AFrames: Integer);
+var
+  secs: Double;
+begin
+  FTimeInfo.Flags := FTimeInfo.Flags and (not kVstTransportChanged);
+  if (FTimeInfo.Flags and kVstTransportPlaying) = 0 then Exit;
+  FTimeInfo.SamplePos := FTimeInfo.SamplePos + AFrames;
+  if FSampleRate > 0 then
+  begin
+    secs := AFrames / FSampleRate;
+    FTimeInfo.PpqPos := FTimeInfo.PpqPos + secs * FTimeInfo.Tempo / 60.0;
+  end;
+end;
+
+procedure TVST2Host.DeliverEvents(AFrames: Integer);
+var
+  i, n: Integer;
+begin
+  n := TakeMidiIn(FMidiScratch);
+  if n > VST2_MAX_EVENTS then n := VST2_MAX_EVENTS;
+  if n = 0 then Exit;
+  for i := 0 to n - 1 do
+  begin
+    FillChar(FEvPlay[i], SizeOf(TVstMidiEvent), 0);
+    FEvPlay[i].EventType := 1;                      { kVstMidiType }
+    FEvPlay[i].ByteSize := SizeOf(TVstMidiEvent);
+    FEvPlay[i].DeltaFrames := Min(FMidiScratch[i].DeltaFrames, Max(0, AFrames - 1));
+    FEvPlay[i].Flags := 1;                          { kVstMidiEventIsRealtime }
+    FEvPlay[i].MidiData[0] := FMidiScratch[i].Status;
+    FEvPlay[i].MidiData[1] := FMidiScratch[i].Data1;
+    FEvPlay[i].MidiData[2] := FMidiScratch[i].Data2;
+    FEvBlock.Events[i] := @FEvPlay[i];
+  end;
+  FEvBlock.NumEvents := n;
+  FEvBlock.Reserved := 0;
+  DispatchOpcode(effProcessEvents, 0, 0, @FEvBlock, 0);
+end;
+
+procedure TVST2Host.SetTransport(const ATransport: TPluginTransport);
+var
+  fl: Integer;
+  barLen: Double;
+begin
+  inherited SetTransport(ATransport);
+  fl := kVstNanosValid or kVstPpqPosValid or kVstTempoValid or kVstBarsValid or
+        kVstCyclePosValid or kVstTimeSigValid;
+  if FTransport.Playing then fl := fl or kVstTransportPlaying;
+  if FTransport.LoopOn then fl := fl or kVstTransportCycleActive;
+  if FTransport.Recording then fl := fl or kVstTransportRecording;
+  if (fl and kVstTransportPlaying) <> (FTimeInfo.Flags and kVstTransportPlaying) then
+    fl := fl or kVstTransportChanged;
+  barLen := FTransport.TimeSigNum * 4.0 / FTransport.TimeSigDen;
+  FTimeInfo.SamplePos := FTransport.SamplePos;
+  FTimeInfo.PpqPos := FTransport.PpqPos;
+  FTimeInfo.Tempo := FTransport.Tempo;
+  FTimeInfo.TimeSigNumerator := FTransport.TimeSigNum;
+  FTimeInfo.TimeSigDenominator := FTransport.TimeSigDen;
+  FTimeInfo.BarStartPos := Floor(FTransport.PpqPos / barLen) * barLen;
+  FTimeInfo.CycleStartPos := FTransport.LoopStartPpq;
+  FTimeInfo.CycleEndPos := FTransport.LoopEndPpq;
+  FTimeInfo.Flags := fl;
+end;
+
+function TVST2Host.FormatName: string;
+begin
+  Result := 'VST2';
+end;
+
+function TVST2Host.ParamSteps(AIndex: Integer): Integer;
+var
+  pp: TVstParameterProperties;
+begin
+  Result := 0;
+  if not ParamProperties(AIndex, pp) then Exit;
+  if (pp.Flags and kVstParameterIsSwitch) <> 0 then
+    Result := 1
+  else if ((pp.Flags and kVstParameterUsesIntStep) <> 0) and (pp.StepInteger > 0) and
+          ((pp.Flags and kVstParameterUsesIntegerMinMax) <> 0) then
+    Result := (pp.MaxInteger - pp.MinInteger) div pp.StepInteger;
+end;
+
+function TVST2Host.ParamIsSwitch(AIndex: Integer): Boolean;
+var
+  pp: TVstParameterProperties;
+begin
+  Result := ParamProperties(AIndex, pp) and ((pp.Flags and kVstParameterIsSwitch) <> 0);
+end;
+
+function TVST2Host.IsEditorOpen: Boolean;
+begin
+  Result := FEditorWnd <> 0;
+end;
+
+function TVST2Host.TakeRestartRequest: Boolean;
+begin
+  Result := TakeIOChanged;
+end;
+
+{ ---- identity, programs, bypass ---- }
+
+function TVST2Host.IsSynth: Boolean;
+begin
+  Result := (FEffect <> nil) and
+    (((FEffect^.Flags and effFlagsIsSynth) <> 0) or (Category = kPlugCategSynth));
+end;
+
+function TVST2Host.Category: Integer;
+begin
+  Result := Integer(DispatchOpcode(effGetPlugCategory, 0, 0, nil, 0));
+end;
+
+function TVST2Host.NumMidiInputChannels: Integer;
+begin
+  Result := Max(0, Integer(DispatchOpcode(effGetNumMidiInputChannels, 0, 0, nil, 0)));
+end;
+
+function TVST2Host.NumMidiOutputChannels: Integer;
+begin
+  Result := Max(0, Integer(DispatchOpcode(effGetNumMidiOutputChannels, 0, 0, nil, 0)));
+end;
+
+function TVST2Host.WantsMidi: Boolean;
+begin
+  Result := IsSynth or (PluginCanDo('receiveVstMidiEvent') > 0) or (NumMidiInputChannels > 0);
+end;
+
+function TVST2Host.ProgramCount: Integer;
+begin
+  if FEffect = nil then Exit(0);
+  Result := FEffect^.NumPrograms;
+end;
+
+function TVST2Host.CurrentProgram: Integer;
+begin
+  Result := Integer(DispatchOpcode(effGetProgram, 0, 0, nil, 0));
+end;
+
+procedure TVST2Host.SetProgram(AIndex: Integer);
+begin
+  if (FEffect = nil) or (AIndex < 0) or (AIndex >= FEffect^.NumPrograms) then Exit;
+  DispatchOpcode(effBeginSetProgram, 0, 0, nil, 0);
+  DispatchOpcode(effSetProgram, 0, AIndex, nil, 0);
+  DispatchOpcode(effEndSetProgram, 0, 0, nil, 0);
+end;
+
+function TVST2Host.ProgramName(AIndex: Integer): string;
+var
+  buf: array[0..255] of AnsiChar;
+begin
+  FillChar(buf, SizeOf(buf), 0);
+  if DispatchOpcode(effGetProgramNameIndexed, AIndex, 0, @buf[0], 0) = 0 then
+  begin
+    { plugins that cannot name a program by index only know the current one }
+    if AIndex <> CurrentProgram then Exit('Program ' + IntToStr(AIndex + 1));
+    DispatchOpcode(effGetProgramName, 0, 0, @buf[0], 0);
+  end;
+  Result := string(AnsiString(PAnsiChar(@buf[0])));
+  if Result = '' then Result := 'Program ' + IntToStr(AIndex + 1);
+end;
+
+function TVST2Host.PluginCanDo(const AText: string): Integer;
+var
+  a: AnsiString;
+begin
+  a := AnsiString(AText);
+  Result := Integer(DispatchOpcode(effCanDo, 0, 0, PAnsiChar(a), 0));
+end;
+
+function TVST2Host.SupportsBypass: Boolean;
+begin
+  Result := PluginCanDo('bypass') > 0;
+end;
+
+procedure TVST2Host.SetBypass(ABypass: Boolean);
+begin
+  DispatchOpcode(effSetBypass, 0, Ord(ABypass), nil, 0);
+end;
+
+function TVST2Host.TailSamples: Integer;
+begin
+  Result := Max(0, Integer(DispatchOpcode(effGetTailSize, 0, 0, nil, 0)));
+end;
+
+function TVST2Host.LatencySamples: Integer;
+begin
+  if FEffect = nil then Exit(0);
+  Result := Max(0, FEffect^.InitialDelay);
+end;
+
+function TVST2Host.VstVersion: Integer;
+begin
+  Result := Integer(DispatchOpcode(effGetVstVersion, 0, 0, nil, 0));
+end;
+
+function TVST2Host.VendorVersion: Integer;
+begin
+  Result := Integer(DispatchOpcode(effGetVendorVersion, 0, 0, nil, 0));
+end;
+
+{ ---- parameters, extended ---- }
+
+function TVST2Host.ParamCanAutomate(AIndex: Integer): Boolean;
+begin
+  { 0 = the plugin does not say: treat as automatable, like every host does }
+  Result := DispatchOpcode(effCanBeAutomated, AIndex, 0, nil, 0) <> 0;
+end;
+
+function TVST2Host.ParamProperties(AIndex: Integer; out AProps: TVstParameterProperties): Boolean;
+begin
+  FillChar(AProps, SizeOf(AProps), 0);
+  Result := DispatchOpcode(effGetParameterProperties, AIndex, 0, @AProps, 0) = 1;
+end;
+
+function TVST2Host.SetParamFromText(AIndex: Integer; const AText: string): Boolean;
+var
+  a: AnsiString;
+begin
+  a := AnsiString(AText);
+  Result := DispatchOpcode(effString2Parameter, AIndex, 0, PAnsiChar(a), 0) = 1;
+end;
+
+{ ---- buses ---- }
+
+function TVST2Host.InputPinLabel(AIndex: Integer): string;
+var
+  pp: TVstPinProperties;
+begin
+  FillChar(pp, SizeOf(pp), 0);
+  if DispatchOpcode(effGetInputProperties, AIndex, 0, @pp, 0) = 1 then
+    Result := string(AnsiString(PAnsiChar(@pp.Lbl[0])))
+  else
+    Result := '';
+  if Result = '' then Result := 'In ' + IntToStr(AIndex + 1);
+end;
+
+function TVST2Host.OutputPinLabel(AIndex: Integer): string;
+var
+  pp: TVstPinProperties;
+begin
+  FillChar(pp, SizeOf(pp), 0);
+  if DispatchOpcode(effGetOutputProperties, AIndex, 0, @pp, 0) = 1 then
+    Result := string(AnsiString(PAnsiChar(@pp.Lbl[0])))
+  else
+    Result := '';
+  if Result = '' then Result := 'Out ' + IntToStr(AIndex + 1);
+end;
+
+function TVST2Host.InputPinIsStereo(AIndex: Integer): Boolean;
+var
+  pp: TVstPinProperties;
+begin
+  FillChar(pp, SizeOf(pp), 0);
+  Result := (DispatchOpcode(effGetInputProperties, AIndex, 0, @pp, 0) = 1) and
+            ((pp.Flags and kVstPinIsStereo) <> 0);
+end;
+
+function TVST2Host.OutputPinIsStereo(AIndex: Integer): Boolean;
+var
+  pp: TVstPinProperties;
+begin
+  FillChar(pp, SizeOf(pp), 0);
+  Result := (DispatchOpcode(effGetOutputProperties, AIndex, 0, @pp, 0) = 1) and
+            ((pp.Flags and kVstPinIsStereo) <> 0);
+end;
+
+function TVST2Host.SetSpeakerArrangement(AInputs, AOutputs: Integer): Boolean;
+type
+  { VstSpeakerArrangement with eight 112-byte VstSpeakerProperties (zeroed: only the type and
+    channel count matter to the plugins that look at it) }
+  TArr = record
+    ArrType, NumChannels: Integer;
+    Speakers: array[0..8 * 112 - 1] of Byte;
+  end;
+var
+  a, b: TArr;
+
+  procedure Fill(var X: TArr; AChannels: Integer);
+  begin
+    FillChar(X, SizeOf(X), 0);
+    X.NumChannels := AChannels;
+    if AChannels = 1 then X.ArrType := kSpeakerArrMono else X.ArrType := kSpeakerArrStereo;
+  end;
+
+begin
+  Fill(a, AInputs);
+  Fill(b, AOutputs);
+  Result := DispatchOpcode(effSetSpeakerArrangement, 0, NativeInt(@a), @b, 0) = 1;
+end;
+
+function TVST2Host.OutputChannel(ACh: Integer): System.PSingle;
+begin
+  if (ACh < 0) or (ACh > High(FOutBuf)) then Exit(nil);
+  Result := FOutBuf[ACh];
+end;
+
+function TVST2Host.TakeIOChanged: Boolean;
+begin
+  Result := FIOChanged;
+  FIOChanged := False;
+end;
+
+function TVST2Host.EditorSize(out AWidth, AHeight: Integer): Boolean;
+var
+  rectPtr: PVstERect;
+begin
+  AWidth := 0;
+  AHeight := 0;
+  rectPtr := nil;
+  DispatchOpcode(effEditGetRect, 0, 0, @rectPtr, 0);
+  Result := rectPtr <> nil;
+  if Result then
+  begin
+    AWidth := rectPtr^.Right - rectPtr^.Left;
+    AHeight := rectPtr^.Bottom - rectPtr^.Top;
+  end;
+end;
+
 procedure TVST2Host.Reset;
 begin
   if FEffect = nil then Exit;
+  ClearMidiIn;
   DispatchOpcode(effStopProcess, 0, 0, nil, 0);
   DispatchOpcode(effStartProcess, 0, 0, nil, 0);
 end;
@@ -697,6 +1274,7 @@ end;
 function TVST2Host.OpenEditor(AParentWnd: HWND; out AWidth, AHeight: Integer): Boolean;
 var
   rectPtr: PVstERect;
+  w2, h2: Integer;
 begin
   AWidth := 0; AHeight := 0;
   Result := False;
@@ -712,6 +1290,12 @@ begin
   if AHeight <= 0 then AHeight := 300;
   DispatchOpcode(effEditOpen, 0, 0, Pointer(NativeUInt(AParentWnd)), 0);
   FEditorWnd := AParentWnd;
+  { several plugins only know their real size once the editor is open }
+  if EditorSize(w2, h2) and (w2 > 0) and (h2 > 0) then
+  begin
+    AWidth := w2;
+    AHeight := h2;
+  end;
   Result := True;
 end;
 

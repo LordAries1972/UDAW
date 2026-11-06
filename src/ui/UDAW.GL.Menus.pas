@@ -233,13 +233,28 @@ begin
   Result := AItem.Caption = '-';
 end;
 
+function ItemShown(AItem: TMenuItem): Boolean; forward;
+
+{ how many entries of a menu will really be listed (separators do not count) }
 function VisibleKids(AItem: TMenuItem): Integer;
 var
   i: Integer;
 begin
   Result := 0;
   for i := 0 to AItem.Count - 1 do
-    if AItem.Items[i].Visible then Inc(Result);
+    if (not ItemIsSep(AItem.Items[i])) and ItemShown(AItem.Items[i]) then Inc(Result);
+end;
+
+{ A menu lists only what can be used right now: a disabled command is left out (it comes back by itself
+  the next time the menu opens and the command is valid again - menus are built fresh on every open),
+  and so is a submenu that has nothing usable in it.  A submenu whose own OnClick fills or enables its
+  entries is kept, since it can only do that once it is opened.  Separators are tidied by the caller. }
+function ItemShown(AItem: TMenuItem): Boolean;
+begin
+  Result := AItem.Visible;
+  if (not Result) or ItemIsSep(AItem) then Exit;
+  if not AItem.Enabled then Exit(False);
+  if (AItem.Count > 0) and (not Assigned(AItem.OnClick)) and (VisibleKids(AItem) = 0) then Exit(False);
 end;
 
 function KeyHookProc(ACode: Integer; AWParam: WPARAM; ALParam: LPARAM): LRESULT; stdcall;
@@ -405,11 +420,20 @@ var
   i, n, y, w, tw: Integer;
   it: TMenuItem;
   cnt: Integer;
+  shown: TArray<TMenuItem>;
 begin
   FMeasure.Canvas.Font.Assign(FMenuFont);
-  cnt := 0;
+  { the entries to list; no separator first, last or twice in a row }
+  SetLength(shown, 0);
   for i := 0 to FParentItem.Count - 1 do
-    if FParentItem.Items[i].Visible then Inc(cnt);
+  begin
+    it := FParentItem.Items[i];
+    if not ItemShown(it) then Continue;
+    if ItemIsSep(it) and ((Length(shown) = 0) or ItemIsSep(shown[High(shown)])) then Continue;
+    shown := shown + [it];
+  end;
+  while (Length(shown) > 0) and ItemIsSep(shown[High(shown)]) do SetLength(shown, Length(shown) - 1);
+  cnt := Length(shown);
   SetLength(FRows, cnt);
   SetLength(FTops, cnt);
   SetLength(FHeights, cnt);
@@ -417,10 +441,9 @@ begin
   y := 6;
   w := 120;
   FShortW := 0;
-  for i := 0 to FParentItem.Count - 1 do
+  for i := 0 to cnt - 1 do
   begin
-    it := FParentItem.Items[i];
-    if not it.Visible then Continue;
+    it := shown[i];
     FRows[n] := it;
     FTops[n] := y;
     if ItemIsSep(it) then FHeights[n] := SEP_H
@@ -1259,7 +1282,9 @@ begin
   for i := 0 to FMenu.Items.Count - 1 do
   begin
     it := FMenu.Items[i];
-    if not it.Visible then Continue;
+    { a disabled title is left out; one whose entries are all disabled stays (its entries may only be enabled
+      when it opens), and shows nothing when clicked }
+    if (not it.Visible) or (not it.Enabled) then Continue;
     n := Length(FItems);
     SetLength(FItems, n + 1);
     SetLength(FRects, n + 1);

@@ -63,6 +63,11 @@ type
     Text: string;         // log line / JSON / error text
   end;
 
+  { one MIDI message the script sent with send_midi (raw status byte + two data bytes) }
+  TPyMidiOut = record
+    Status, Data1, Data2: Byte;
+  end;
+
   TPyPluginHost = class
   private
     FRefs: Integer;
@@ -88,6 +93,7 @@ type
     FAudioActive: Boolean;
     { messages for an attached editor }
     FInbox: TList<TPyMsg>;
+    FMidiOut: TList<TPyMidiOut>;   // script -> world, guarded by FDataLock, newest kept when full
     FAttached: Integer;
     FLogRing: TStringList;
     procedure ReaderLoop;
@@ -132,13 +138,20 @@ type
       X: Integer = 0; Y: Integer = 0; AButton: Integer = 0);
     procedure RequestPaint(const AControl: string; AWidth, AHeight: Integer);
     procedure Tick;
+    { a MIDI message for the script's on_midi (any thread) }
+    procedure SendMidi(AStatus, AData1, AData2: Byte);
     { Current parameter values + the script's own saved data, as JSON; '' if the plug-in is gone. }
     function CaptureState(ATimeoutMs: Integer = 3000): string;
     procedure RestoreState(const AStateJson: string);
     procedure AttachUi;
     procedure DetachUi;
+    { True while an editor window shows this plug-in }
+    function UiAttached: Boolean;
     { Moves the queued messages out. }
     procedure TakeMessages(AInto: TList<TPyMsg>);
+    { Moves the MIDI the script has sent (send_midi) since the last call into AInto, in order. Works
+      with or without a window attached; unread output is capped, oldest dropped. }
+    procedure TakeMidiOut(AInto: TList<TPyMidiOut>);
     function LogText: string;
 
     { Offline rendering (export) runs on its own thread: between Begin and End on that thread the
@@ -180,6 +193,11 @@ type
     procedure Unregister(const AId: string; AHost: TPyPluginHost);
     { a retained reference, or nil; the caller must Release it }
     function Acquire(const AId: string): TPyPluginHost;
+    { MIDI for plug-ins running on mixer strips that have no editor window open (an open window
+      owns its plug-in's MIDI devices): collects what they sent with send_midi / hands them a
+      message for on_midi }
+    procedure DrainMidiOut(AInto: TList<TPyMidiOut>);
+    procedure BroadcastMidi(AStatus, AData1, AData2: Byte);
   end;
 
 var
@@ -187,6 +205,9 @@ var
   PyPluginsFolder: string;
   { work folder for the checker's copy of unsaved text (the cache folder); set by the application }
   PyScratchFolder: string;
+  { where plug-ins save and load their presets (Settings > Working Directories > Presets, or a
+    Presets folder inside the plug-ins folder); set by the application }
+  PyPresetsFolder: string;
 
 function PyLive: TPyLiveRegistry;
 { the newest Python >= 3.14, or '' (AMessage says what was found instead) }
@@ -218,9 +239,10 @@ uses
 
 const
   MSG_INIT = 1; MSG_PROCESS = 2; MSG_PARAM = 3; MSG_SHUTDOWN = 4; MSG_EVENT = 5; MSG_PAINT = 6;
-  MSG_GETSTATE = 7; MSG_SETSTATE = 8; MSG_RESET = 9; MSG_TICK = 10;
+  MSG_GETSTATE = 7; MSG_SETSTATE = 8; MSG_RESET = 9; MSG_TICK = 10; MSG_MIDI = 11;
   RSP_READY = 101; RSP_PROCESSED = 102; RSP_LOG = 103; RSP_UI = 104; RSP_PAINT = 105;
-  RSP_STATE = 106; RSP_ERROR = 107;
+  RSP_STATE = 106; RSP_ERROR = 107; RSP_MIDI = 108;
+  MIDI_OUT_CAP = 4096;
 
   MAX_FRAME_BYTES = 64 * 1024 * 1024;
   LOG_RING_LINES = 300;
@@ -696,38 +718,19 @@ begin
     WriteIf('Guitar_Overdrive_Distortion.py', PluginExampleSource, False);
     WriteIf('Vocoder.py', PluginVocoderSource, False);
     WriteIf('Reverberator_Chorus.py', PluginReverbSource, False);
+    WriteIf('Virtual_Guitar_Rig.py', PluginRigSource, False);
+    WriteIf('Stutter_Edit.py', PluginStutterSource, False);
+    WriteIf('Tuner.py', PluginTunerSource, False);
   except
     { read-only folder: the existing copy is used }
   end;
 end;
 
+{ the editor's "New" plug-in: scripts/plugin_template.py, embedded by scripts/gen-plugin-sdk.py (it carries
+  the tab row, the preset controls and the MIDI tab every plug-in is meant to have) }
 function PyTemplateSource: string;
 begin
-  Result :=
-    '"""My plug-in: describe what it does and why you would use it."""'#13#10 +
-    'import udaw_plugin as up'#13#10#13#10#13#10 +
-    'class Plugin(up.Plugin):'#13#10 +
-    '    name = "My Plug-in"'#13#10 +
-    '    author = "Your Name"'#13#10 +
-    '    description = "A simple gain stage with a pan-safe output meter."'#13#10#13#10 +
-    '    def setup(self):'#13#10 +
-    '        # id, display name, range, default, unit'#13#10 +
-    '        self.add_param("gain", "Gain", min=-24, max=24, default=0, unit="dB", decimals=1)'#13#10#13#10 +
-    '    def ui(self, ui):'#13#10 +
-    '        ui.window(260, 200, "My Plug-in")'#13#10 +
-    '        ui.knob("k_gain", 20, 20, 90, 120, param="gain", label="Gain")'#13#10 +
-    '        ui.meter("m_out", 140, 24, 20, 110, vertical=True)'#13#10#13#10 +
-    '    def process(self, block):'#13#10 +
-    '        g = up.db_to_lin(self.p.gain)'#13#10 +
-    '        peak = 0.0'#13#10 +
-    '        for ch in range(block.channels):'#13#10 +
-    '            src, dst = block.inp[ch], block.out[ch]'#13#10 +
-    '            for i in range(block.frames):'#13#10 +
-    '                v = src[i] * g'#13#10 +
-    '                dst[i] = v'#13#10 +
-    '                if abs(v) > peak:'#13#10 +
-    '                    peak = abs(v)'#13#10 +
-    '        self.ui_set("m_out", value=min(1.0, peak))'#13#10;
+  Result := StringReplace(PluginTemplateSource, #10, #13#10, [rfReplaceAll]);
 end;
 
 function PyValidate(const ASource, ACodeFile: string; out AIssues: TArray<TPyIssue>;
@@ -850,6 +853,7 @@ begin
   FReplyEvt := TEvent.Create(nil, True, False, '');
   FStateEvt := TEvent.Create(nil, True, False, '');
   FInbox := TList<TPyMsg>.Create;
+  FMidiOut := TList<TPyMidiOut>.Create;
   FLogRing := TStringList.Create;
   FHighReply := -1;
   for i := 0 to 3 do FSlotSeq[i] := -1;
@@ -859,6 +863,7 @@ destructor TPyPluginHost.Destroy;
 begin
   Stop;
   FInbox.Free;
+  FMidiOut.Free;
   FLogRing.Free;
   FStateEvt.Free;
   FReplyEvt.Free;
@@ -940,6 +945,16 @@ begin
   end;
 end;
 
+function TPyPluginHost.UiAttached: Boolean;
+begin
+  FDataLock.Enter;
+  try
+    Result := FAttached > 0;
+  finally
+    FDataLock.Leave;
+  end;
+end;
+
 procedure TPyPluginHost.DetachUi;
 begin
   FDataLock.Enter;
@@ -957,6 +972,17 @@ begin
   try
     AInto.AddRange(FInbox);
     FInbox.Clear;
+  finally
+    FDataLock.Leave;
+  end;
+end;
+
+procedure TPyPluginHost.TakeMidiOut(AInto: TList<TPyMidiOut>);
+begin
+  FDataLock.Enter;
+  try
+    AInto.AddRange(FMidiOut);
+    FMidiOut.Clear;
   finally
     FDataLock.Leave;
   end;
@@ -1071,6 +1097,7 @@ begin
   init.AddPair('source', ASource);
   init.AddPair('filename', AFileName);
   init.AddPair('script_dir', AScriptDir);
+  init.AddPair('presets_dir', PyPresetsFolder);
   if AValuesJson <> '' then
   begin
     v := TJSONObject.ParseJSONValue(AValuesJson);
@@ -1209,6 +1236,8 @@ procedure TPyPluginHost.HandleFrame(AType: Cardinal; const APayload: TBytes);
 var
   seq: UInt64;
   frames, chans, slot: Cardinal;
+  i: Integer;
+  m: TPyMidiOut;
   txt: string;
   o: TJSONValue;
 begin
@@ -1251,6 +1280,24 @@ begin
           end;
         finally
           o.Free;
+        end;
+      end;
+    RSP_MIDI:
+      begin
+        FDataLock.Enter;
+        try
+          i := 0;
+          while i + 2 < Length(APayload) do
+          begin
+            m.Status := APayload[i];
+            m.Data1 := APayload[i + 1];
+            m.Data2 := APayload[i + 2];
+            if FMidiOut.Count >= MIDI_OUT_CAP then FMidiOut.Delete(0);
+            FMidiOut.Add(m);
+            Inc(i, 3);
+          end;
+        finally
+          FDataLock.Leave;
         end;
       end;
     RSP_UI:
@@ -1580,6 +1627,17 @@ begin
   WriteFrame(MSG_TICK, nil);
 end;
 
+procedure TPyPluginHost.SendMidi(AStatus, AData1, AData2: Byte);
+var
+  b: TBytes;
+begin
+  SetLength(b, 3);
+  b[0] := AStatus;
+  b[1] := AData1;
+  b[2] := AData2;
+  WriteFrame(MSG_MIDI, b);
+end;
+
 function TPyPluginHost.CaptureState(ATimeoutMs: Integer): string;
 begin
   Result := '';
@@ -1640,6 +1698,32 @@ begin
   FLock.Enter;
   try
     if FMap.TryGetValue(AId, Result) then Result.Retain;
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TPyLiveRegistry.DrainMidiOut(AInto: TList<TPyMidiOut>);
+var
+  h: TPyPluginHost;
+begin
+  FLock.Enter;
+  try
+    for h in FMap.Values do
+      if not h.Dead and not h.UiAttached then h.TakeMidiOut(AInto);
+  finally
+    FLock.Leave;
+  end;
+end;
+
+procedure TPyLiveRegistry.BroadcastMidi(AStatus, AData1, AData2: Byte);
+var
+  h: TPyPluginHost;
+begin
+  FLock.Enter;
+  try
+    for h in FMap.Values do
+      if not h.Dead and not h.UiAttached then h.SendMidi(AStatus, AData1, AData2);
   finally
     FLock.Leave;
   end;
